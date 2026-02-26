@@ -83,6 +83,53 @@ When a PR author (or reviewer) checks this box, Review Hero runs. The box is aut
 
 That's it — no other per-repo configuration needed.
 
+### 3. (Optional) Enable Auto-Fix
+
+Auto-Fix lets Claude automatically fix unresolved review comments and/or CI failures by committing directly to the PR branch. It's opt-in per repo — add a second caller workflow to enable it.
+
+Create `.github/workflows/ai-auto-fix.yml`:
+
+```yaml
+name: Review Hero Auto-Fix
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-fix:
+    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
+    secrets: inherit
+```
+
+Then add the checkboxes to your PR template:
+
+```markdown
+- [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
+- [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
+```
+
+Each checkbox triggers independently — you can fix review comments, CI failures, or both. Like the review checkbox, they're automatically unchecked after completion.
+
+**Note:** Auto-Fix needs broader permissions than review (`contents: write` to push commits, `actions: read` to fetch CI logs). The Review Hero GitHub App also needs write access to push on behalf of the bot.
+
+#### Custom auto-fix rules
+
+If your project has conventions the auto-fix agent should follow (spelling rules, file conventions, etc.), create `.github/review-hero/auto-fix-rules.md`:
+
+```markdown
+## Project Rules
+
+- Use Australian/NZ English spelling
+- Read `docs/CONVENTIONS.md` for project conventions
+```
+
+This file is appended to the auto-fix prompt automatically.
+
 ## Configuration (optional)
 
 For repo-specific customisation, create `.github/review-hero/config.yml`:
@@ -164,6 +211,25 @@ jobs:
 | `runner`       | `ubuntu-latest`              | GitHub Actions runner for agent jobs (heavier compute). |
 | `light-runner` | `ubuntu-latest`              | GitHub Actions runner for triage and orchestrate jobs (lightweight). |
 
+### Auto-Fix inputs
+
+```yaml
+jobs:
+  auto-fix:
+    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
+    with:
+      model: claude-sonnet-4-5-20250929
+      runner: ubuntu-latest
+      light-runner: ubuntu-latest
+    secrets: inherit
+```
+
+| Input          | Default                      | Description |
+|----------------|------------------------------|-------------|
+| `model`        | `claude-sonnet-4-5-20250929` | The Claude model used for auto-fix. |
+| `runner`       | `ubuntu-latest`              | GitHub Actions runner for the auto-fix job. |
+| `light-runner` | `ubuntu-latest`              | GitHub Actions runner for the trigger check job. |
+
 ## Base agents
 
 | Agent        | Focus |
@@ -177,6 +243,8 @@ The triage step uses Haiku to skip agents that aren't relevant to the changed fi
 
 ## Cost
 
+### Review
+
 - **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
 - **Agents**: one Sonnet session per selected agent, with up to 3–10 tool-use turns depending on diff size. This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
@@ -188,3 +256,23 @@ Max turns scale with the filtered diff size and are capped at 10:
 | < 100               | 3         |
 | 100–499             | 5         |
 | 500+                | 10        |
+
+### Auto-Fix
+
+- One Sonnet session with up to 30 tool-use turns.
+- Has `Read`, `Edit`, `Glob`, and `Grep` tools. If fixing CI failures, `Bash` is also enabled so it can run commands to verify fixes.
+- Cost depends on how many review comments / CI failures need fixing, but is typically comparable to a single review agent run.
+
+## PR template snippet
+
+Here's a complete block you can drop into `.github/pull_request_template.md`:
+
+```markdown
+### 🦸 Review Hero
+
+- [ ] **Run Review Hero** <!-- #ai-review -->
+- [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
+- [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
+```
+
+Omit the auto-fix lines if your repo doesn't use the auto-fix workflow.

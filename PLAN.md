@@ -51,12 +51,15 @@ review-hero/
 ├── README.md                        # Setup guide for consumers
 ├── .github/
 │   └── workflows/
-│       └── review.yml               # The reusable workflow
+│       ├── review.yml               # Reusable review workflow
+│       └── auto-fix.yml             # Reusable auto-fix workflow (opt-in)
 ├── scripts/
 │   ├── triage.mjs                   # Haiku-based agent selection
-│   └── orchestrate.mjs              # Dedup + GitHub API review posting
+│   ├── orchestrate.mjs              # Dedup + GitHub API review posting
+│   └── auto-fix.mjs                 # Fix review comments + CI failures
 └── prompts/
     ├── agent-prompt.md              # Base system prompt (generic)
+    ├── auto-fix.md                  # Auto-fix agent prompt
     ├── bugs.md                      # Bugs & correctness agent
     ├── performance.md               # Performance agent
     ├── design.md                    # Design & architecture agent
@@ -65,9 +68,10 @@ review-hero/
 
 ### Consumer repo convention
 
-Repos that want AI review add two things:
+Repos that want AI review add a caller workflow (and optionally an auto-fix
+workflow):
 
-**1. A caller workflow** (`.github/workflows/ai-review.yml`):
+**1. Review workflow** (`.github/workflows/ai-review.yml`):
 
 ```yaml
 name: Review Hero
@@ -80,19 +84,34 @@ permissions:
 jobs:
   review:
     uses: beyondessential/review-hero/.github/workflows/review.yml@main
-    secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      REVIEW_HERO_APP_ID: ${{ secrets.REVIEW_HERO_APP_ID }}
-      REVIEW_HERO_PRIVATE_KEY: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
+    secrets: inherit
 ```
 
-**2. (Optional) Repo-specific config** (`.github/review-hero/`):
+**2. (Optional) Auto-fix workflow** (`.github/workflows/ai-auto-fix.yml`):
+
+```yaml
+name: Review Hero Auto-Fix
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+jobs:
+  auto-fix:
+    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
+    secrets: inherit
+```
+
+**3. (Optional) Repo-specific config** (`.github/review-hero/`):
 
 ```
 .github/review-hero/
 ├── config.yml
+├── auto-fix-rules.md             # Extra rules appended to auto-fix prompt
 └── prompts/
-    └── project-conventions.md    # Or any name — each .md becomes an agent
+    └── project-conventions.md    # Or any name — each .md becomes a review agent
 ```
 
 `config.yml` schema:
