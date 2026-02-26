@@ -10,7 +10,7 @@
  *   PR_NUMBER           — Pull request number
  *   ANTHROPIC_API_KEY   — API key for Claude CLI
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
- *   MODEL               — Model to use (default: claude-sonnet-4-5-20250929)
+ *   MODEL               — Model to use (default: claude-sonnet-4-6)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
  *   FIX_CI              — 'true' to fix CI failures
  *   PROMPT_PATH         — Path to the base auto-fix prompt
@@ -26,8 +26,7 @@ import { execSync } from "node:child_process";
 
 function getEnvOrThrow(name) {
   const value = process.env[name];
-  if (!value)
-    throw new Error(`Missing required environment variable: ${name}`);
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
 
@@ -40,7 +39,7 @@ if (!/^\d+$/.test(prNumber)) {
 }
 
 const appId = process.env.REVIEW_HERO_APP_ID ?? "";
-const model = process.env.MODEL ?? "claude-sonnet-4-5-20250929";
+const model = process.env.MODEL ?? "claude-sonnet-4-6";
 const fixReviews = process.env.FIX_REVIEWS === "true";
 const fixCI = process.env.FIX_CI === "true";
 const promptPath = getEnvOrThrow("PROMPT_PATH");
@@ -60,9 +59,7 @@ async function withRetry(fn, attempts = 3) {
       return await fn();
     } catch (err) {
       if (attempt < attempts - 1) {
-        console.warn(
-          `Attempt ${attempt + 1} failed, retrying: ${err.message}`,
-        );
+        console.warn(`Attempt ${attempt + 1} failed, retrying: ${err.message}`);
         await sleep(1000 * (attempt + 1));
       } else {
         throw err;
@@ -557,13 +554,10 @@ async function main() {
       `${fixedComments.length} review suggestion${fixedComments.length === 1 ? "" : "s"}`,
     );
   if (fixedCICount > 0)
-    msgParts.push(
-      `${fixedCICount} CI failure${fixedCICount === 1 ? "" : "s"}`,
-    );
+    msgParts.push(`${fixedCICount} CI failure${fixedCICount === 1 ? "" : "s"}`);
 
   let commitFallback = "fix: auto-fix changes";
-  if (fixReviews && !fixCI)
-    commitFallback = "fix: auto-fix review suggestions";
+  if (fixReviews && !fixCI) commitFallback = "fix: auto-fix review suggestions";
   if (fixCI && !fixReviews) commitFallback = "fix: auto-fix CI failures";
 
   const commitMessage =

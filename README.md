@@ -198,18 +198,18 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/review.yml@main
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
-      model: claude-sonnet-4-5-20250929  # Claude model for agents
+      model: claude-sonnet-4-6  # Claude model for agents
       runner: ubuntu-latest    # Runner for agent jobs
-      light-runner: ubuntu-latest  # Runner for triage/orchestrate
+      light-runner: ubuntu-slim  # Runner for triage/orchestrate
     secrets: inherit
 ```
 
 | Input          | Default                      | Description |
 |----------------|------------------------------|-------------|
 | `trigger`      | `checkbox`                   | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
-| `model`        | `claude-sonnet-4-5-20250929` | The Claude model used by review agents. |
+| `model`        | `claude-sonnet-4-6`          | The Claude model used by review agents. |
 | `runner`       | `ubuntu-latest`              | GitHub Actions runner for agent jobs (heavier compute). |
-| `light-runner` | `ubuntu-latest`              | GitHub Actions runner for triage and orchestrate jobs (lightweight). |
+| `light-runner` | `ubuntu-slim`                | GitHub Actions runner for triage and orchestrate jobs (lightweight). |
 
 ### Auto-Fix inputs
 
@@ -218,17 +218,17 @@ jobs:
   auto-fix:
     uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
     with:
-      model: claude-sonnet-4-5-20250929
+      model: claude-sonnet-4-6
       runner: ubuntu-latest
-      light-runner: ubuntu-latest
+      light-runner: ubuntu-slim
     secrets: inherit
 ```
 
 | Input          | Default                      | Description |
 |----------------|------------------------------|-------------|
-| `model`        | `claude-sonnet-4-5-20250929` | The Claude model used for auto-fix. |
+| `model`        | `claude-sonnet-4-6`          | The Claude model used for auto-fix. |
 | `runner`       | `ubuntu-latest`              | GitHub Actions runner for the auto-fix job. |
-| `light-runner` | `ubuntu-latest`              | GitHub Actions runner for the trigger check job. |
+| `light-runner` | `ubuntu-slim`                | GitHub Actions runner for the trigger check job. |
 
 ## Base agents
 

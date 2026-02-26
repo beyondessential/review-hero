@@ -182,7 +182,7 @@ on:
       model:
         description: "Claude model for review agents"
         type: string
-        default: claude-sonnet-4-5-20250929
+        default: claude-sonnet-4-6
       runner:
         description: "Runner for agent jobs (needs more compute)"
         type: string

@@ -6,7 +6,7 @@ on:
       model:
         description: "Claude model for auto-fix"
         type: string
-        default: claude-sonnet-4-5-20250929
+        default: claude-sonnet-4-6
       runner:
         description: "Runner for the auto-fix job"
         type: string
@@ -14,7 +14,7 @@ on:
       light-runner:
         description: "Runner for the trigger check job (lightweight)"
         type: string
-        default: ubuntu-latest
+        default: ubuntu-slim
     secrets:
       ANTHROPIC_API_KEY:
         description: "Anthropic API key — set per-repo for billing separation"

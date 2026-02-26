@@ -10,7 +10,7 @@ on:
       model:
         description: "Claude model for review agents"
         type: string
-        default: claude-sonnet-4-5-20250929
+        default: claude-sonnet-4-6
       runner:
         description: "Runner for agent jobs (needs more compute)"
         type: string
@@ -18,7 +18,7 @@ on:
       light-runner:
         description: "Runner for triage/orchestrate (lightweight)"
         type: string
-        default: ubuntu-latest
+        default: ubuntu-slim
     secrets:
       ANTHROPIC_API_KEY:
         description: "Anthropic API key — set per-repo for billing separation"
