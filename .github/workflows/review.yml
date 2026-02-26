@@ -21,11 +21,14 @@ on:
         default: ubuntu-latest
     secrets:
       ANTHROPIC_API_KEY:
-        required: true
+        description: "Anthropic API key — set per-repo for billing separation"
+        required: false
       REVIEW_HERO_APP_ID:
-        required: true
+        description: "Review Hero GitHub App ID — typically provided as an org-level secret"
+        required: false
       REVIEW_HERO_PRIVATE_KEY:
-        required: true
+        description: "Review Hero GitHub App private key — typically provided as an org-level secret"
+        required: false
 
 concurrency:
   group: review-hero-${{ github.event.pull_request.number }}

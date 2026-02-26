@@ -34,17 +34,20 @@ PR checkbox checked
   - **Pull requests**: Read & write
   - **Contents**: Read
   - **Issues**: Read & write
-- An **Anthropic API key** with access to Claude Haiku and Claude Sonnet.
+- **Org-level secrets** (set once by an org admin under Settings → Secrets and variables → Actions):
 
-### 1. Add secrets to the consumer repo
+  | Secret                    | Value                                  |
+  |---------------------------|----------------------------------------|
+  | `REVIEW_HERO_APP_ID`      | The Review Hero GitHub App ID          |
+  | `REVIEW_HERO_PRIVATE_KEY` | The Review Hero GitHub App private key |
 
-| Secret                    | Value                                |
-|---------------------------|--------------------------------------|
-| `ANTHROPIC_API_KEY`       | Your Anthropic API key               |
-| `REVIEW_HERO_APP_ID`      | The Review Hero GitHub App ID        |
-| `REVIEW_HERO_PRIVATE_KEY` | The Review Hero GitHub App private key |
+- A **per-repo secret** for billing separation:
 
-### 2. Add the caller workflow
+  | Secret              | Value                  |
+  |---------------------|------------------------|
+  | `ANTHROPIC_API_KEY` | Your Anthropic API key |
+
+### 1. Add the caller workflow
 
 Create `.github/workflows/ai-review.yml` in your repo:
 
@@ -61,13 +64,12 @@ permissions:
 jobs:
   review:
     uses: beyondessential/review-hero/.github/workflows/review.yml@main
-    secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      REVIEW_HERO_APP_ID: ${{ secrets.REVIEW_HERO_APP_ID }}
-      REVIEW_HERO_PRIVATE_KEY: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
+    secrets: inherit
 ```
 
-### 3. Add the checkbox to your PR template
+`secrets: inherit` passes through both the org-level app credentials and the repo-level Anthropic key automatically.
+
+### 2. Add the checkbox to your PR template
 
 Add this to your `.github/pull_request_template.md`:
 
@@ -79,7 +81,7 @@ The `<!-- #ai-review -->` comment is required — it's how the workflow identifi
 
 When a PR author (or reviewer) checks this box, Review Hero runs. The box is automatically unchecked after the review completes so it can be re-triggered later.
 
-That's it. You're done.
+That's it — no other per-repo configuration needed.
 
 ## Configuration (optional)
 
@@ -152,8 +154,7 @@ jobs:
       model: claude-sonnet-4-5-20250929  # Claude model for agents
       runner: ubuntu-latest    # Runner for agent jobs
       light-runner: ubuntu-latest  # Runner for triage/orchestrate
-    secrets:
-      # ...
+    secrets: inherit
 ```
 
 | Input          | Default                      | Description |
