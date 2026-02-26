@@ -184,13 +184,9 @@ on:
         type: string
         default: claude-sonnet-4-6
       runner:
-        description: "Runner for agent jobs (needs more compute)"
+        description: "GitHub Actions runner for all jobs"
         type: string
-        default: ubuntu-latest
-      light-runner:
-        description: "Runner for triage/orchestrate (lightweight)"
-        type: string
-        default: ubuntu-latest
+        default: ubuntu-slim
     secrets:
       ANTHROPIC_API_KEY:
         required: true

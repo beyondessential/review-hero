@@ -8,13 +8,13 @@ on:
         type: string
         default: claude-sonnet-4-6
       runner:
-        description: "Runner for the auto-fix job"
-        type: string
-        default: ubuntu-latest
-      light-runner:
-        description: "Runner for the trigger check job (lightweight)"
+        description: "GitHub Actions runner for all jobs"
         type: string
         default: ubuntu-slim
+      ci-runner:
+        description: "Runner for auto-fix when fixing CI failures (may need build tools)"
+        type: string
+        default: ubuntu-latest
     secrets:
       ANTHROPIC_API_KEY:
         description: "Anthropic API key — set per-repo for billing separation"
@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   check-trigger:
-    runs-on: ${{ inputs.light-runner }}
+    runs-on: ${{ inputs.runner }}
     outputs:
       fix_reviews: ${{ steps.check.outputs.fix_reviews }}
       fix_ci: ${{ steps.check.outputs.fix_ci }}
@@ -54,7 +54,7 @@ jobs:
   auto-fix:
     needs: check-trigger
     if: needs.check-trigger.outputs.fix_reviews == 'true' || needs.check-trigger.outputs.fix_ci == 'true'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ needs.check-trigger.outputs.fix_ci == 'true' && inputs.ci-runner || inputs.runner }}
     steps:
       # ── Generate app token ───────────────────────────────────────────
       - name: Generate app token

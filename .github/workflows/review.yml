@@ -12,11 +12,7 @@ on:
         type: string
         default: claude-sonnet-4-6
       runner:
-        description: "Runner for agent jobs (needs more compute)"
-        type: string
-        default: ubuntu-latest
-      light-runner:
-        description: "Runner for triage/orchestrate (lightweight)"
+        description: "GitHub Actions runner for all jobs"
         type: string
         default: ubuntu-slim
     secrets:
@@ -35,7 +31,7 @@ concurrency:
 
 jobs:
   triage:
-    runs-on: ${{ inputs.light-runner }}
+    runs-on: ${{ inputs.runner }}
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
       matrix: ${{ steps.triage.outputs.matrix }}
@@ -242,7 +238,7 @@ jobs:
   orchestrate-review:
     needs: [triage, review-agent]
     if: always() && needs.triage.outputs.should_run == 'true'
-    runs-on: ${{ inputs.light-runner }}
+    runs-on: ${{ inputs.runner }}
     steps:
       # ── Generate app token ───────────────────────────────────────────
       - name: Generate app token

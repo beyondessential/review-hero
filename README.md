@@ -199,17 +199,15 @@ jobs:
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
       model: claude-sonnet-4-6  # Claude model for agents
-      runner: ubuntu-latest    # Runner for agent jobs
-      light-runner: ubuntu-slim  # Runner for triage/orchestrate
+      runner: ubuntu-slim      # Runner for all jobs
     secrets: inherit
 ```
 
-| Input          | Default                      | Description |
-|----------------|------------------------------|-------------|
-| `trigger`      | `checkbox`                   | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
-| `model`        | `claude-sonnet-4-6`          | The Claude model used by review agents. |
-| `runner`       | `ubuntu-latest`              | GitHub Actions runner for agent jobs (heavier compute). |
-| `light-runner` | `ubuntu-slim`                | GitHub Actions runner for triage and orchestrate jobs (lightweight). |
+| Input     | Default            | Description |
+|-----------|--------------------|-------------|
+| `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
+| `model`   | `claude-sonnet-4-6`| The Claude model used by review agents. |
+| `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
 
 ### Auto-Fix inputs
 
@@ -219,16 +217,16 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
     with:
       model: claude-sonnet-4-6
-      runner: ubuntu-latest
-      light-runner: ubuntu-slim
+      runner: ubuntu-slim       # Runner for trigger check + review fixes
+      ci-runner: ubuntu-latest  # Runner when fixing CI failures (may need build tools)
     secrets: inherit
 ```
 
-| Input          | Default                      | Description |
-|----------------|------------------------------|-------------|
-| `model`        | `claude-sonnet-4-6`          | The Claude model used for auto-fix. |
-| `runner`       | `ubuntu-latest`              | GitHub Actions runner for the auto-fix job. |
-| `light-runner` | `ubuntu-slim`                | GitHub Actions runner for the trigger check job. |
+| Input       | Default            | Description |
+|-------------|--------------------|-------------|
+| `model`     | `claude-sonnet-4-6`| The Claude model used for auto-fix. |
+| `runner`    | `ubuntu-slim`      | GitHub Actions runner for the trigger check and review-only fixes. |
+| `ci-runner` | `ubuntu-latest`    | GitHub Actions runner used when fixing CI failures (needs build tools, test runners, etc.). Automatically selected when the CI failures checkbox is checked. |
 
 ## Base agents
 
