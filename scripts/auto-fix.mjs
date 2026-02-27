@@ -19,7 +19,13 @@
  *   SELF_WORKFLOW        — Name of this workflow (to exclude from CI failure checks)
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  copyFileSync,
+  chmodSync,
+} from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -272,7 +278,7 @@ async function fetchCIFailures() {
 
 // ── Prompt building ──────────────────────────────────────────────────────────
 
-function buildPrompt(comments, ciFailures) {
+function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
   const sections = [];
 
   // Project context (if provided by the caller's config.yml)
@@ -280,8 +286,16 @@ function buildPrompt(comments, ciFailures) {
     sections.push(`## Project Context\n\n${projectContext}`);
   }
 
-  // Base auto-fix prompt
-  sections.push(readFileSync(promptPath, "utf-8"));
+  // Base auto-fix prompt — replace the placeholder helper path with the
+  // actual (possibly /tmp-copied) path so Claude invokes the right script.
+  let basePrompt = readFileSync(promptPath, "utf-8");
+  if (commitHelperPath) {
+    basePrompt = basePrompt.replaceAll(
+      ".review-hero/scripts/git-commit-fix.sh",
+      commitHelperPath,
+    );
+  }
+  sections.push(basePrompt);
 
   // Custom rules from the consumer repo (if present)
   if (customRulesPath && existsSync(customRulesPath)) {
@@ -331,7 +345,7 @@ function buildPrompt(comments, ciFailures) {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
-function runClaude(prompt) {
+function runClaude(prompt, { commitHelperPath } = {}) {
   if (!/^[a-z0-9.-]+$/.test(model)) {
     throw new Error(`Invalid model name: ${model}`);
   }
@@ -342,7 +356,7 @@ function runClaude(prompt) {
   // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
   // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
   // without having unrestricted shell access.
-  const commitTool = "Bash(.review-hero/scripts/git-commit-fix.sh:*)";
+  const commitTool = commitHelperPath ? `Bash(${commitHelperPath}:*)` : null;
   const tools = fixCI
     ? "Read,Edit,Glob,Grep,Bash"
     : `Read,Edit,Glob,Grep,${commitTool}`;
@@ -545,12 +559,28 @@ async function main() {
     return;
   }
 
-  const prompt = buildPrompt(comments, ciFailures);
+  // Copy the commit helper to /tmp so Claude cannot modify it via the Edit
+  // tool during the session — the Bash restriction only limits which scripts
+  // can be *executed*, but Edit has unrestricted write access to the worktree.
+  const commitHelperSrc = ".review-hero/scripts/git-commit-fix.sh";
+  const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.sh`;
+  copyFileSync(commitHelperSrc, commitHelperTmp);
+  chmodSync(commitHelperTmp, 0o755);
+
+  const prompt = buildPrompt(comments, ciFailures, {
+    commitHelperPath: commitHelperTmp,
+  });
   const headBefore = execSync("git rev-parse HEAD", {
     encoding: "utf-8",
   }).trim();
   console.log("Running Claude to apply fixes...");
-  const raw = runClaude(prompt);
+  const raw = runClaude(prompt, { commitHelperPath: commitHelperTmp });
+
+  // Restore .review-hero/ in case Claude modified it via the Edit tool.
+  // This is a defence-in-depth measure — the commit helper is already copied
+  // to /tmp, but we also don't want any worktree edits to .review-hero/
+  // leaking into the leftover sweep commit.
+  execSync("git checkout -- .review-hero/ 2>/dev/null || true");
 
   const results = parseClaudeResult(raw);
   const resultById = new Map(results.map((r) => [Number(r.id), r]));
