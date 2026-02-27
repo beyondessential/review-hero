@@ -90,8 +90,13 @@ try {
   // Exit 0 means nothing is staged
   console.log("Nothing staged — skipping commit");
   process.exit(0);
-} catch {
-  // Exit non-0 means there are staged changes — proceed with commit
+} catch (err) {
+  // Exit code 1 means there are staged changes — proceed with commit.
+  // Any other non-zero exit (e.g. 128 for git errors) is a real failure.
+  if (err.status !== 1) {
+    console.error("Error: git diff --cached --quiet failed with exit code " + err.status);
+    process.exit(err.status ?? 1);
+  }
 }
 
 // Message is a separate array element — no shell parsing, no injection risk
