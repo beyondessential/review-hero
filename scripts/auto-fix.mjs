@@ -694,6 +694,14 @@ async function main() {
     );
   }
 
+  const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+  const runId = process.env.GITHUB_RUN_ID;
+  if (runId) {
+    summaryParts.push(
+      `\n\n[View logs](${serverUrl}/${repo}/actions/runs/${runId})`,
+    );
+  }
+
   await postComment(summaryParts.join(""));
   await uncheckCheckboxes();
   console.log("Done");
