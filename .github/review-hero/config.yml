@@ -1,0 +1,10 @@
+# Review Hero configuration for the review-hero repo itself.
+
+project: Review Hero
+description: >
+  an AI-powered pull request review system, implemented as reusable GitHub
+  Actions workflows driven by Claude. The codebase consists of GitHub Actions
+  workflow YAML files, Node.js orchestration scripts, and Markdown prompt files.
+
+ignore_patterns:
+  - "*.pem"
