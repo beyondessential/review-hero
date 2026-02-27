@@ -81,10 +81,13 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
+      - name: Detect Node.js version
+        run: "[ -f .node-version ] || echo latest > .node-version"
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: ".node-version"
 
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code

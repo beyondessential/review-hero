@@ -85,11 +85,15 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
+      - name: Ensure Node.js version file
+        if: steps.check.outputs.should_run == 'true'
+        run: "[ -f caller/.node-version ] && cp caller/.node-version .node-version || echo latest > .node-version"
+
       - name: Setup Node.js
         if: steps.check.outputs.should_run == 'true'
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: ".node-version"
 
       # ── Read project context from caller config ──────────────────────
       - name: Read caller config
@@ -175,10 +179,13 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
+      - name: Ensure Node.js version file
+        run: "[ -f .node-version ] || echo latest > .node-version"
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: ".node-version"
 
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
@@ -271,7 +278,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: latest
 
       # ── Download agent artifacts ─────────────────────────────────────
       - name: Download all artifacts
