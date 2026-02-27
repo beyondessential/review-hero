@@ -420,6 +420,7 @@ function configureGitIdentity() {
 }
 
 function createCommit(commitMessage) {
+  configureGitIdentity();
   execSync("git add -A");
   // Remove .review-hero from the index — it's our tooling checkout, not part
   // of the caller's repo. Git sees it as a "subproject commit" because it
