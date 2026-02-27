@@ -546,6 +546,9 @@ async function main() {
   }
 
   const prompt = buildPrompt(comments, ciFailures);
+  const headBefore = execSync("git rev-parse HEAD", {
+    encoding: "utf-8",
+  }).trim();
   console.log("Running Claude to apply fixes...");
   const raw = runClaude(prompt);
 
@@ -616,14 +619,12 @@ async function main() {
   }
 
   // Check if there are any commits to push (Claude's per-fix commits and/or
-  // the leftover commit above). Compare HEAD against the remote tracking branch.
-  const localHead = execSync("git rev-parse HEAD", {
+  // the leftover commit above). Compare HEAD now against HEAD before Claude ran;
+  // avoids relying on @{u} which requires an upstream tracking ref to exist.
+  const headAfter = execSync("git rev-parse HEAD", {
     encoding: "utf-8",
   }).trim();
-  const remoteHead = execSync(`git rev-parse @{u}`, {
-    encoding: "utf-8",
-  }).trim();
-  const hasCommitsToPush = localHead !== remoteHead;
+  const hasCommitsToPush = headBefore !== headAfter;
 
   let pushed = false;
   if (hasCommitsToPush) {
