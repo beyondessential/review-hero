@@ -10,10 +10,10 @@
  * or file paths.
  */
 
-const { execFileSync } = require("node:child_process");
-const { existsSync } = require("node:fs");
-const path = require("node:path");
-const { parseArgs } = require("node:util");
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { parseArgs } from "node:util";
 
 // ── Parse arguments ───────────────────────────────────────────────────────────
 
