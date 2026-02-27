@@ -21,6 +21,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
+import * as core from "@actions/core";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -382,19 +383,19 @@ function logClaudeSession(raw) {
         stats.push(`Output tokens: ${u.output_tokens.toLocaleString()}`);
     }
     if (stats.length > 0) {
-      console.log(`Claude session: ${stats.join(" | ")}`);
+      core.info(`Claude session: ${stats.join(" | ")}`);
     }
 
     // Log the full response in a collapsible group
     const transcript = typeof parsed.result === "string" ? parsed.result : raw;
-    console.log("::group::Claude auto-fix transcript");
-    console.log(transcript);
-    console.log("::endgroup::");
+    core.startGroup("Claude auto-fix transcript");
+    core.info(transcript);
+    core.endGroup();
   } catch {
     // JSON parse failed — log the raw output directly
-    console.log("::group::Claude auto-fix output (raw)");
-    console.log(raw);
-    console.log("::endgroup::");
+    core.startGroup("Claude auto-fix output (raw)");
+    core.info(raw);
+    core.endGroup();
   }
 }
 
