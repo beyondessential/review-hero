@@ -605,13 +605,18 @@ async function main() {
   const hasLeftovers = hasChanges();
   if (hasLeftovers) {
     const leftoverFiles = execSync(
-      "git status --porcelain --ignore-submodules",
+      "git status --porcelain=v2 --no-renames --ignore-submodules",
       { encoding: "utf-8" },
     )
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((l) => l.slice(3));
+      .map((l) => {
+        // porcelain v2: untracked/ignored lines are "? path" or "! path"
+        if (l.startsWith("? ") || l.startsWith("! ")) return l.slice(2);
+        // ordinary changed entry: "1 XY sub mH mI mW hH hI path"
+        return l.split(" ")[8];
+      });
     console.log(
       `Committing leftover uncommitted changes: ${leftoverFiles.join(", ")}`,
     );
