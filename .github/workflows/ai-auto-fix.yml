@@ -7,6 +7,7 @@ permissions:
   actions: read
   contents: write
   pull-requests: write
+  workflows: write # special permission just in this repo so we can be meta about it
 
 jobs:
   auto-fix:
