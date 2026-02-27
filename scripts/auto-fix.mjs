@@ -341,7 +341,7 @@ function runClaude(prompt) {
 
   const tools = fixCI ? "Read,Edit,Glob,Grep,Bash" : "Read,Edit,Glob,Grep";
 
-  return execSync(
+  const raw = execSync(
     `cat "${tmpPath}" | claude -p ` +
       `--output-format json ` +
       `--model "${model}" ` +
@@ -354,6 +354,48 @@ function runClaude(prompt) {
       env: { ...process.env },
     },
   );
+
+  logClaudeSession(raw);
+  return raw;
+}
+
+function logClaudeSession(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+
+    // Log cost and usage stats
+    const stats = [];
+    if (parsed.model) stats.push(`Model: ${parsed.model}`);
+    if (parsed.num_turns != null) stats.push(`Turns: ${parsed.num_turns}`);
+    if (parsed.duration_ms != null) {
+      const secs = (parsed.duration_ms / 1000).toFixed(1);
+      stats.push(`Duration: ${secs}s`);
+    }
+    if (parsed.cost_usd != null) {
+      stats.push(`Cost: $${parsed.cost_usd.toFixed(4)}`);
+    }
+    if (parsed.usage) {
+      const u = parsed.usage;
+      if (u.input_tokens != null)
+        stats.push(`Input tokens: ${u.input_tokens.toLocaleString()}`);
+      if (u.output_tokens != null)
+        stats.push(`Output tokens: ${u.output_tokens.toLocaleString()}`);
+    }
+    if (stats.length > 0) {
+      console.log(`Claude session: ${stats.join(" | ")}`);
+    }
+
+    // Log the full response in a collapsible group
+    const transcript = typeof parsed.result === "string" ? parsed.result : raw;
+    console.log("::group::Claude auto-fix transcript");
+    console.log(transcript);
+    console.log("::endgroup::");
+  } catch {
+    // JSON parse failed — log the raw output directly
+    console.log("::group::Claude auto-fix output (raw)");
+    console.log(raw);
+    console.log("::endgroup::");
+  }
 }
 
 function parseClaudeResult(raw) {
@@ -549,6 +591,16 @@ async function main() {
 
   const results = parseClaudeResult(raw);
   const resultById = new Map(results.map((r) => [Number(r.id), r]));
+
+  // Log parsed results table
+  if (results.length > 0) {
+    console.log("Auto-fix results:");
+    for (const r of results) {
+      const icon = r.status === "fixed" ? "✅" : "⏭️";
+      const detail = r.status === "fixed" ? r.summary : r.reason;
+      console.log(`  ${icon} #${r.id} [${r.status}] ${detail ?? ""}`);
+    }
+  }
 
   // Determine which comments were fixed vs skipped
   const fixedComments = [];
