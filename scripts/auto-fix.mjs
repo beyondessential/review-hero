@@ -373,7 +373,7 @@ function logClaudeSession(raw) {
       stats.push(`Duration: ${secs}s`);
     }
     if (parsed.cost_usd != null) {
-      stats.push(`Cost: $${parsed.cost_usd.toFixed(4)}`);
+      stats.push('Cost: $' + Number(parsed.cost_usd).toFixed(4));
     }
     if (parsed.usage) {
       const u = parsed.usage;
@@ -389,13 +389,19 @@ function logClaudeSession(raw) {
     // Log the full response in a collapsible group
     const transcript = typeof parsed.result === "string" ? parsed.result : raw;
     core.startGroup("Claude auto-fix transcript");
-    core.info(transcript);
-    core.endGroup();
+    try {
+      core.info(transcript);
+    } finally {
+      core.endGroup();
+    }
   } catch {
     // JSON parse failed — log the raw output directly
     core.startGroup("Claude auto-fix output (raw)");
-    core.info(raw);
-    core.endGroup();
+    try {
+      core.info(raw);
+    } finally {
+      core.endGroup();
+    }
   }
 }
 
