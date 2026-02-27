@@ -117,6 +117,10 @@ jobs:
             echo "custom_rules_path=" >> "$GITHUB_OUTPUT"
           fi
 
+      # ── Detect AI rules ─────────────────────────────────────────────
+      - name: Detect AI rules
+        run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md
+
       # ── Run auto-fix ─────────────────────────────────────────────────
       - name: Run auto-fix
         env:
@@ -131,5 +135,6 @@ jobs:
           PROMPT_PATH: .review-hero/prompts/auto-fix.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
+          AI_RULES_PATH: /tmp/ai-rules.md
           SELF_WORKFLOW: ${{ github.workflow }}
         run: node .review-hero/scripts/auto-fix.mjs

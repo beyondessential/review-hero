@@ -190,6 +190,10 @@ jobs:
           name: filtered-diff
           path: /tmp
 
+      # ── Detect AI rules ─────────────────────────────────────────────
+      - name: Detect AI rules
+        run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md
+
       # ── Run agent ────────────────────────────────────────────────────
       - name: Run ${{ matrix.agent.key }} agent
         env:
@@ -201,7 +205,8 @@ jobs:
           # 1. Project context (if any)
           # 2. Base agent prompt
           # 3. Specialisation prompt
-          # 4. PR title + diff
+          # 4. Repository AI rules (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
+          # 5. PR title + diff
 
           {
             if [ -n "$PROJECT_CONTEXT" ]; then
@@ -215,6 +220,11 @@ jobs:
               cat ".review-hero/prompts/${{ matrix.agent.key }}.md"
             else
               cat ".github/review-hero/prompts/${{ matrix.agent.key }}.md"
+            fi
+
+            if [ -s /tmp/ai-rules.md ]; then
+              printf '\n\n## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when reviewing.\n\n'
+              cat /tmp/ai-rules.md
             fi
 
             printf '\n\n## PR Title\n\n%s\n\n## PR Diff\n\n```diff\n' "$PR_TITLE"

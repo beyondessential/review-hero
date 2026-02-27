@@ -45,6 +45,7 @@ const fixCI = process.env.FIX_CI === "true";
 const promptPath = getEnvOrThrow("PROMPT_PATH");
 const projectContext = process.env.PROJECT_CONTEXT ?? "";
 const customRulesPath = process.env.CUSTOM_RULES_PATH ?? "";
+const aiRulesPath = process.env.AI_RULES_PATH ?? "";
 const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
 
 // ── GitHub API ───────────────────────────────────────────────────────────────
@@ -285,6 +286,16 @@ function buildPrompt(comments, ciFailures) {
   // Custom rules from the consumer repo (if present)
   if (customRulesPath && existsSync(customRulesPath)) {
     sections.push(readFileSync(customRulesPath, "utf-8"));
+  }
+
+  // AI rules from other tools (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
+  if (aiRulesPath && existsSync(aiRulesPath)) {
+    const aiRules = readFileSync(aiRulesPath, "utf-8").trim();
+    if (aiRules) {
+      sections.push(
+        `## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when applying fixes.\n\n${aiRules}`,
+      );
+    }
   }
 
   if (comments.length > 0) {

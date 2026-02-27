@@ -117,6 +117,31 @@ Each agent in the matrix carries a `key` and `source` (`base` or `custom`).
 The workflow constructs the correct prompt path at runtime since the filesystem
 layout differs between the triage and agent jobs.
 
+## AI rules detection
+
+Many repos define AI coding rules for various tools. `CLAUDE.md` is read
+natively by the Claude CLI, so it works out of the box. For other tools, the
+`scripts/detect-ai-rules.sh` script scans the repo root for known rules files,
+concatenates their contents, and writes them to a temp file that gets injected
+into agent prompts under a "Repository AI Rules" section.
+
+Detected formats:
+
+| File / Directory                   | Tool            |
+|------------------------------------|-----------------|
+| `CLAUDE.md`                        | Claude Code (native — no action needed) |
+| `.cursorrules`                     | Cursor          |
+| `.cursor/rules/*.md`, `*.mdc`      | Cursor          |
+| `.github/copilot-instructions.md`  | GitHub Copilot  |
+| `.windsurfrules`                   | Windsurf        |
+| `.clinerules`                      | Cline           |
+| `.rules/*.md`                      | Zed             |
+
+Both the review-agent and auto-fix jobs run detection after checking out the
+caller repo. The detected rules are appended to each agent's prompt so they
+follow the same conventions the team has already established, regardless of
+which AI tool originally defined them.
+
 ## Diff filtering and cost guardrails
 
 The triage script strips ignored file hunks from the diff before counting
