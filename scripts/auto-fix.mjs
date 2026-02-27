@@ -645,7 +645,8 @@ async function main() {
         // porcelain v2: untracked/ignored lines are "? path" or "! path"
         if (l.startsWith("? ") || l.startsWith("! ")) return l.slice(2);
         // ordinary changed entry: "1 XY sub mH mI mW hH hI path"
-        return l.split(" ")[8];
+        // path may contain spaces — join everything after the 8th field
+        return l.split(" ").slice(8).join(" ");
       });
     console.log(
       `Committing leftover uncommitted changes: ${leftoverFiles.join(", ")}`,
