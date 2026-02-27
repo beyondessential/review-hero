@@ -26,26 +26,53 @@ PR checkbox checked
 2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. Agents have read-only access to the repo so they can explore surrounding code for context.
 3. **Orchestrator** — collects all agent outputs, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
-## Setup
+## Prerequisites (one-time org admin setup)
 
-### Prerequisites
+### 1. Configure the Review Hero GitHub App
 
-- The **Review Hero** GitHub App installed on your organisation (or at least on the consumer repo _and_ this repo). The app needs these permissions:
-  - **Pull requests**: Read & write
-  - **Contents**: Read
-  - **Issues**: Read & write
-- **Org-level secrets** (set once by an org admin under Settings → Secrets and variables → Actions):
+The app needs these permissions:
 
-  | Secret                    | Value                                  |
-  |---------------------------|----------------------------------------|
-  | `REVIEW_HERO_APP_ID`      | The Review Hero GitHub App ID          |
-  | `REVIEW_HERO_PRIVATE_KEY` | The Review Hero GitHub App private key |
+- **Pull requests**: Read & write
+- **Contents**: Read & write (for auto-fix commits)
+- **Issues**: Read & write
+- **Actions**: Read (for fetching CI failure logs)
 
-- A **per-repo secret** for billing separation:
+### 2. Generate a private key
 
-  | Secret              | Value                  |
-  |---------------------|------------------------|
-  | `ANTHROPIC_API_KEY` | Your Anthropic API key |
+In the GitHub App's settings page, scroll to the **Private keys** section at the bottom and click **Generate a private key**. This downloads a `.pem` file — the contents of this file are the private key.
+
+> **Note:** This is _not_ the same as the "Client secret" in the app's OAuth settings. The private key is a PEM file used to mint short-lived installation tokens.
+
+### 3. Install the app on repos
+
+Go to the app's **Install App** page and install it on your organisation. Select specific repositories — it must be installed on both the **review-hero** repo (so workflows can check it out) and any consumer repo you want to enable.
+
+### 4. Set org-level secrets
+
+Under the org's **Settings → Secrets and variables → Actions**, add:
+
+| Secret                    | Value                                                    |
+|---------------------------|----------------------------------------------------------|
+| `REVIEW_HERO_APP_ID`      | The App ID (found on the app's settings page)            |
+| `REVIEW_HERO_PRIVATE_KEY` | The full contents of the `.pem` private key file         |
+
+These are automatically inherited by all repos in the org.
+
+Configure the private key to only be available to the set of consumer repos for Review Hero, and the app ID to be available for every repo within the org.
+
+## Setup (per repo)
+
+### 0. Secrets
+
+Each consumer repo needs its own API key:
+
+| Secret              | Value                  |
+|---------------------|------------------------|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key |
+
+An admin also needs to add the repo to:
+- the [Review Hero Install App](https://github.com/organizations/beyondessential/settings/apps/review-hero/installations) page
+- the [private key org secret](https://github.com/organizations/beyondessential/settings/secrets/actions/REVIEW_HERO_PRIVATE_KEY) repository access list
 
 ### 1. Add the caller workflow
 
