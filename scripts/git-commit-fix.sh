@@ -50,8 +50,15 @@ const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
 const reviewHeroAbs = path.resolve(repoRoot, ".review-hero");
 
 for (const file of positionals) {
-  // Normalize to absolute path before checking — resists all path bypass forms
-  const absFile = path.resolve(file);
+  // Resolve relative to the repo root, not process.cwd(), so that paths are
+  // always anchored correctly even if the script is invoked from a subdirectory.
+  const absFile = path.resolve(repoRoot, file);
+
+  // Reject paths that resolve outside the repository root
+  if (absFile !== repoRoot && !absFile.startsWith(repoRoot + path.sep)) {
+    console.error("Error: refusing to stage file outside repository: " + file);
+    process.exit(1);
+  }
 
   if (absFile === reviewHeroAbs || absFile.startsWith(reviewHeroAbs + path.sep)) {
     console.error("Error: refusing to stage file inside .review-hero/: " + file);
