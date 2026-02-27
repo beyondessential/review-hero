@@ -711,8 +711,13 @@ async function main() {
 main().catch(async (err) => {
   console.error(err);
   try {
+    const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+    const runId = process.env.GITHUB_RUN_ID;
+    const logsUrl = runId
+      ? `${serverUrl}/${repo}/actions/runs/${runId}`
+      : `${serverUrl}/${repo}/actions`;
     await postComment(
-      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](https://github.com/${repo}/actions) for details.`,
+      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${logsUrl}) for details.`,
     );
     await uncheckCheckboxes();
   } catch {
