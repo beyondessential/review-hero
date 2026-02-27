@@ -21,6 +21,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
+import * as core from "@actions/core";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
