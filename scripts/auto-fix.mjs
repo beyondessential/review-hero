@@ -601,7 +601,17 @@ async function main() {
   // changes as a final sweep (e.g. files Claude forgot to stage).
   const hasLeftovers = hasChanges();
   if (hasLeftovers) {
-    console.log("Committing leftover uncommitted changes...");
+    const leftoverFiles = execSync(
+      "git status --porcelain --ignore-submodules",
+      { encoding: "utf-8" },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => l.slice(3));
+    console.log(
+      `Committing leftover uncommitted changes: ${leftoverFiles.join(", ")}`,
+    );
     createCommit(commitMessage);
   }
 
