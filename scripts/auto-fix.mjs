@@ -357,7 +357,9 @@ function runClaude(prompt, { commitHelperPath } = {}) {
   // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
   // without having unrestricted shell access.
   if (!fixCI && !commitHelperPath) {
-    throw new Error("commitHelperPath is required when not running in CI fix mode");
+    throw new Error(
+      "commitHelperPath is required when not running in CI fix mode",
+    );
   }
   const commitTool = commitHelperPath ? `Bash(${commitHelperPath}:*)` : null;
   const tools = fixCI
@@ -577,7 +579,39 @@ async function main() {
     encoding: "utf-8",
   }).trim();
   console.log("Running Claude to apply fixes...");
-  const raw = runClaude(prompt, { commitHelperPath: commitHelperTmp });
+  let raw;
+  try {
+    raw = runClaude(prompt, { commitHelperPath: commitHelperTmp });
+  } catch (err) {
+    console.error(`Claude failed: ${err.message}`);
+
+    // Restore .review-hero/ before any recovery work
+    execSync("git checkout -- .review-hero/ 2>/dev/null || true");
+
+    // Even though Claude failed/timed out, it may have already committed some
+    // fixes via the git-commit-fix helper. Push those partial results rather
+    // than discarding them — partial fixing is better than nothing.
+    const headAfterFailure = execSync("git rev-parse HEAD", {
+      encoding: "utf-8",
+    }).trim();
+    if (headBefore !== headAfterFailure) {
+      console.log(
+        "Claude failed but made commits before failing — pushing partial fixes",
+      );
+      pushChanges();
+      await postComment(
+        `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
+          `Some fixes were pushed, but the session did not finish.\n\n` +
+          `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
+      );
+    } else {
+      await postComment(
+        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
+      );
+    }
+    await uncheckCheckboxes();
+    process.exit(1);
+  }
 
   // Restore .review-hero/ in case Claude modified it via the Edit tool.
   // This is a defence-in-depth measure — the commit helper is already copied
