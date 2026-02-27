@@ -339,7 +339,8 @@ function runClaude(prompt) {
   const tmpPath = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
   writeFileSync(tmpPath, prompt);
 
-  const tools = fixCI ? "Read,Edit,Glob,Grep,Bash" : "Read,Edit,Glob,Grep";
+  // Bash is always enabled so Claude can commit after each fix
+  const tools = "Read,Edit,Glob,Grep,Bash";
 
   return execSync(
     `cat "${tmpPath}" | claude -p ` +
@@ -399,7 +400,7 @@ function hasChanges() {
   );
 }
 
-function createCommit(commitMessage) {
+function configureGitIdentity() {
   if (appId && !/^\d+$/.test(appId)) {
     throw new Error("Invalid app ID");
   }
@@ -411,6 +412,9 @@ function createCommit(commitMessage) {
 
   execSync(`git config user.name "${botName}"`);
   execSync(`git config user.email "${botEmail}"`);
+}
+
+function createCommit(commitMessage) {
   execSync("git add -A");
   // Remove .review-hero from the index — it's our tooling checkout, not part
   // of the caller's repo. Git sees it as a "subproject commit" because it
@@ -421,18 +425,7 @@ function createCommit(commitMessage) {
 
 function pushChanges() {
   execSync("git push");
-  console.log("Pushed auto-fix commit");
-}
-
-function commitAndPush(commitMessage) {
-  if (!hasChanges()) {
-    console.log("No file changes after auto-fix");
-    return false;
-  }
-
-  createCommit(commitMessage);
-  pushChanges();
-  return true;
+  console.log("Pushed auto-fix commits");
 }
 
 // ── GitHub interactions ──────────────────────────────────────────────────────
@@ -519,6 +512,9 @@ async function main() {
     execSync(`mkdir -p .git/info && echo ".review-hero" >> "${excludePath}"`);
   }
 
+  // Configure git identity before Claude runs so its commits use the bot identity
+  configureGitIdentity();
+
   console.log(
     `Auto-fixing PR #${prNumber} (reviews: ${fixReviews}, ci: ${fixCI})`,
   );
@@ -595,7 +591,31 @@ async function main() {
       ? `fix: auto-fix ${msgParts.join(" and ")}`
       : commitFallback;
 
-  const pushed = commitAndPush(commitMessage);
+  // Claude should have committed per-fix, but catch any remaining uncommitted
+  // changes as a final sweep (e.g. files Claude forgot to stage).
+  const hasLeftovers = hasChanges();
+  if (hasLeftovers) {
+    console.log("Committing leftover uncommitted changes...");
+    createCommit(commitMessage);
+  }
+
+  // Check if there are any commits to push (Claude's per-fix commits and/or
+  // the leftover commit above). Compare HEAD against the remote tracking branch.
+  const localHead = execSync("git rev-parse HEAD", {
+    encoding: "utf-8",
+  }).trim();
+  const remoteHead = execSync(`git rev-parse @{u}`, {
+    encoding: "utf-8",
+  }).trim();
+  const hasCommitsToPush = localHead !== remoteHead;
+
+  let pushed = false;
+  if (hasCommitsToPush) {
+    pushChanges();
+    pushed = true;
+  } else {
+    console.log("No commits to push");
+  }
 
   // Resolve fixed threads and reply on skipped threads
   if (pushed) {
