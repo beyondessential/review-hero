@@ -41,7 +41,7 @@ jobs:
     steps:
       # ── Trigger check ────────────────────────────────────────────────
       - id: check
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const trigger = '${{ inputs.trigger }}';
@@ -62,7 +62,7 @@ jobs:
       - name: Generate app token
         if: steps.check.outputs.should_run == 'true'
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.REVIEW_HERO_APP_ID }}
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
@@ -71,14 +71,14 @@ jobs:
       # ── Checkout caller repo (for config + diff) ─────────────────────
       - name: Checkout caller repo
         if: steps.check.outputs.should_run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: caller
 
       # ── Checkout review-hero (for scripts + base prompts) ────────────
       - name: Checkout review-hero
         if: steps.check.outputs.should_run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository_owner }}/review-hero
           path: review-hero
@@ -87,7 +87,7 @@ jobs:
       # ── Setup ────────────────────────────────────────────────────────
       - name: Setup Node.js
         if: steps.check.outputs.should_run == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -136,7 +136,7 @@ jobs:
       # ── Upload filtered diff for agent jobs ──────────────────────────
       - name: Upload filtered diff
         if: steps.check.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: filtered-diff
           path: /tmp/pr-filtered.diff
@@ -154,7 +154,7 @@ jobs:
       # ── Generate app token ───────────────────────────────────────────
       - name: Generate app token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.REVIEW_HERO_APP_ID }}
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
@@ -162,13 +162,13 @@ jobs:
 
       # ── Checkout caller repo at PR HEAD ──────────────────────────────
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
       # ── Checkout review-hero (for prompts) ───────────────────────────
       - name: Checkout review-hero
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository_owner }}/review-hero
           path: .review-hero
@@ -176,7 +176,7 @@ jobs:
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -185,7 +185,7 @@ jobs:
 
       # ── Download filtered diff ───────────────────────────────────────
       - name: Download filtered diff
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: filtered-diff
           path: /tmp
@@ -239,7 +239,7 @@ jobs:
 
       - name: Upload result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: review-${{ matrix.agent.key }}
           path: /tmp/result.json
@@ -253,7 +253,7 @@ jobs:
       # ── Generate app token ───────────────────────────────────────────
       - name: Generate app token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.REVIEW_HERO_APP_ID }}
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
@@ -261,7 +261,7 @@ jobs:
 
       # ── Checkout review-hero (for orchestrate script) ────────────────
       - name: Checkout review-hero
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository_owner }}/review-hero
           path: review-hero
@@ -269,14 +269,14 @@ jobs:
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
       # ── Download agent artifacts ─────────────────────────────────────
       - name: Download all artifacts
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: /tmp/artifacts
           pattern: review-*
