@@ -135,6 +135,7 @@ Detected formats:
 | `.github/copilot-instructions.md`  | GitHub Copilot  |
 | `.windsurfrules`                   | Windsurf        |
 | `.clinerules`                      | Cline           |
+| `.rules`                           | Zed             |
 | `.rules/*.md`                      | Zed             |
 
 Both the review-agent and auto-fix jobs run detection after checking out the

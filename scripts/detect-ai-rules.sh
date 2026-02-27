@@ -17,7 +17,8 @@
 #   .github/copilot-instructions.md — GitHub Copilot
 #   .windsurfrules                  — Windsurf / Codeium
 #   .clinerules                     — Cline
-#   .rules/*.md                     — Zed AI
+#   .rules                          — Zed AI (single file)
+#   .rules/*.md                     — Zed AI (rules directory)
 
 set -eu
 
@@ -44,6 +45,7 @@ append_file ".cursorrules"                     ".cursorrules (Cursor)"
 append_file ".windsurfrules"                   ".windsurfrules (Windsurf)"
 append_file ".clinerules"                      ".clinerules (Cline)"
 append_file ".github/copilot-instructions.md"  ".github/copilot-instructions.md (GitHub Copilot)"
+append_file ".rules"                           ".rules (Zed)"
 
 # ── Directory-based rules ────────────────────────────────────────────────────
 
