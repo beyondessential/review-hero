@@ -291,7 +291,7 @@ function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
   let basePrompt = readFileSync(promptPath, "utf-8");
   if (commitHelperPath) {
     basePrompt = basePrompt.replaceAll(
-      ".review-hero/scripts/git-commit-fix.sh",
+      ".review-hero/scripts/git-commit-fix.mjs",
       commitHelperPath,
     );
   }
@@ -562,8 +562,8 @@ async function main() {
   // Copy the commit helper to /tmp so Claude cannot modify it via the Edit
   // tool during the session — the Bash restriction only limits which scripts
   // can be *executed*, but Edit has unrestricted write access to the worktree.
-  const commitHelperSrc = ".review-hero/scripts/git-commit-fix.sh";
-  const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.sh`;
+  const commitHelperSrc = ".review-hero/scripts/git-commit-fix.mjs";
+  const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.mjs`;
   copyFileSync(commitHelperSrc, commitHelperTmp);
   chmodSync(commitHelperTmp, 0o755);
 

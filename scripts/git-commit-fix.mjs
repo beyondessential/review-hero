@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * git-commit-fix.sh — Stage specific files and commit with a message.
+ * git-commit-fix.mjs — Stage specific files and commit with a message.
  *
- * Usage: git-commit-fix.sh -m "commit message" <file1> [file2 ...]
+ * Usage: git-commit-fix.mjs -m "commit message" <file1> [file2 ...]
  *
  * This script is the only entry point exposed to Claude during review-only
  * auto-fix, keeping shell access scoped to just git commits. All git calls
@@ -29,13 +29,13 @@ const message = values.m;
 
 if (!message) {
   console.error("Error: commit message is required (-m)");
-  console.error("Usage: git-commit-fix.sh -m <message> <file1> [file2 ...]");
+  console.error("Usage: git-commit-fix.mjs -m <message> <file1> [file2 ...]");
   process.exit(1);
 }
 
 if (positionals.length === 0) {
   console.error("Error: at least one file path is required");
-  console.error("Usage: git-commit-fix.sh -m <message> <file1> [file2 ...]");
+  console.error("Usage: git-commit-fix.mjs -m <message> <file1> [file2 ...]");
   process.exit(1);
 }
 
@@ -60,8 +60,13 @@ for (const file of positionals) {
     process.exit(1);
   }
 
-  if (absFile === reviewHeroAbs || absFile.startsWith(reviewHeroAbs + path.sep)) {
-    console.error("Error: refusing to stage file inside .review-hero/: " + file);
+  if (
+    absFile === reviewHeroAbs ||
+    absFile.startsWith(reviewHeroAbs + path.sep)
+  ) {
+    console.error(
+      "Error: refusing to stage file inside .review-hero/: " + file,
+    );
     process.exit(1);
   }
 
@@ -94,7 +99,9 @@ try {
   // Exit code 1 means there are staged changes — proceed with commit.
   // Any other non-zero exit (e.g. 128 for git errors) is a real failure.
   if (err.status !== 1) {
-    console.error("Error: git diff --cached --quiet failed with exit code " + err.status);
+    console.error(
+      "Error: git diff --cached --quiet failed with exit code " + err.status,
+    );
     process.exit(err.status ?? 1);
   }
 }

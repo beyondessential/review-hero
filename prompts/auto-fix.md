@@ -34,16 +34,16 @@ You **must** include an entry for every review comment ID and every CI failure I
 
 ## Committing
 
-Commit after each fix so the PR history is easy to review. Use the provided `git-commit-fix.sh` helper via Bash:
+Commit after each fix so the PR history is easy to review. Use the provided `git-commit-fix.mjs` helper via Bash:
 
 ```
-.review-hero/scripts/git-commit-fix.sh -m "fix: <brief description>" <file1> [file2 ...]
+.review-hero/scripts/git-commit-fix.mjs -m "fix: <brief description>" <file1> [file2 ...]
 ```
 
 This stages only the listed files and commits them. Example:
 
 ```
-.review-hero/scripts/git-commit-fix.sh -m "fix: use nullish coalescing instead of || for default port" src/config.ts
+.review-hero/scripts/git-commit-fix.mjs -m "fix: use nullish coalescing instead of || for default port" src/config.ts
 ```
 
 1. Run the helper after fixing each review comment or CI failure.
