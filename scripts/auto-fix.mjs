@@ -289,12 +289,16 @@ function buildPrompt(comments, ciFailures) {
   }
 
   // AI rules from other tools (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
-  if (aiRulesPath && existsSync(aiRulesPath)) {
-    const aiRules = readFileSync(aiRulesPath, "utf-8").trim();
-    if (aiRules) {
-      sections.push(
-        `## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when applying fixes.\n\n${aiRules}`,
-      );
+  if (aiRulesPath) {
+    try {
+      const aiRules = readFileSync(aiRulesPath, "utf-8").trim();
+      if (aiRules) {
+        sections.push(
+          `## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when applying fixes.\n\n${aiRules}`,
+        );
+      }
+    } catch {
+      // No AI rules file or unreadable — skip
     }
   }
 

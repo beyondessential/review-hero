@@ -8,8 +8,8 @@
 # Usage:
 #   scripts/detect-ai-rules.sh <output-path>
 #
-# Writes concatenated rules to <output-path>. Exits 0 regardless; the output
-# file may be empty if no rules are found.
+# Writes concatenated rules to <output-path>; the output file may be empty if
+# no rules are found.
 #
 # Detected formats:
 #   .cursorrules                    — Cursor (single file)
@@ -50,14 +50,14 @@ append_file ".github/copilot-instructions.md"  ".github/copilot-instructions.md 
 # Cursor rules directory
 if [ -d ".cursor/rules" ]; then
   for f in .cursor/rules/*.md .cursor/rules/*.mdc; do
-    [ -f "$f" ] && append_file "$f" "$f (Cursor)"
+    if [ -f "$f" ]; then append_file "$f" "$f (Cursor)"; fi
   done
 fi
 
 # Zed rules directory
 if [ -d ".rules" ]; then
   for f in .rules/*.md; do
-    [ -f "$f" ] && append_file "$f" "$f (Zed)"
+    if [ -f "$f" ]; then append_file "$f" "$f (Zed)"; fi
   done
 fi
 
