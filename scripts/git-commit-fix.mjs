@@ -49,6 +49,8 @@ const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
 // absolute-path bypasses (e.g. `./.review-hero/...` or `/abs/path/.review-hero/...`).
 const reviewHeroAbs = path.resolve(repoRoot, ".review-hero");
 
+const validatedFiles = [];
+
 for (const file of positionals) {
   // Resolve relative to the repo root, not process.cwd(), so that paths are
   // always anchored correctly even if the script is invoked from a subdirectory.
@@ -70,7 +72,7 @@ for (const file of positionals) {
     process.exit(1);
   }
 
-  const existsOnDisk = existsSync(file);
+  const existsOnDisk = existsSync(absFile);
   if (!existsOnDisk) {
     // Check whether git tracks this path — if so it's a deletion, allow staging
     try {
@@ -85,7 +87,11 @@ for (const file of positionals) {
     }
   }
 
-  execFileSync("git", ["add", "--", file]);
+  validatedFiles.push(file);
+}
+
+if (validatedFiles.length > 0) {
+  execFileSync("git", ["add", "--", ...validatedFiles]);
 }
 
 // ── Commit (only if something was staged) ─────────────────────────────────────

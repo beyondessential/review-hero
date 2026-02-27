@@ -356,6 +356,9 @@ function runClaude(prompt, { commitHelperPath } = {}) {
   // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
   // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
   // without having unrestricted shell access.
+  if (!fixCI && !commitHelperPath) {
+    throw new Error("commitHelperPath is required when not running in CI fix mode");
+  }
   const commitTool = commitHelperPath ? `Bash(${commitHelperPath}:*)` : null;
   const tools = fixCI
     ? "Read,Edit,Glob,Grep,Bash"
