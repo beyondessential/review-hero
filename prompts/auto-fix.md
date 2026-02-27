@@ -34,17 +34,23 @@ You **must** include an entry for every review comment ID and every CI failure I
 
 ## Committing
 
-Commit after each fix so the PR history is easy to review. Use Bash to run git commands.
+Commit after each fix so the PR history is easy to review. Use the provided `git-commit-fix.sh` helper via Bash:
 
-1. After fixing each review comment or CI failure, stage **only the files you changed** and commit:
-   ```
-   git add <file1> <file2> ...
-   git commit -m "fix: <brief description of the fix>"
-   ```
-2. Use clear, specific commit messages — e.g. `fix: use nullish coalescing instead of || for default port` rather than `fix: address review comment`.
+```
+.review-hero/scripts/git-commit-fix.sh -m "fix: <brief description>" <file1> [file2 ...]
+```
+
+This stages only the listed files and commits them. Example:
+
+```
+.review-hero/scripts/git-commit-fix.sh -m "fix: use nullish coalescing instead of || for default port" src/config.ts
+```
+
+1. Run the helper after fixing each review comment or CI failure.
+2. Use clear, specific commit messages — not generic ones like `fix: address review comment`.
 3. If multiple review comments touch the **same file in the same area**, you may fix them together in a single commit. Otherwise prefer one commit per fix.
 4. Do **not** run `git push` — the calling script handles that.
-5. Do **not** use `git add -A` or `git add .` — only stage the specific files you edited.
+5. Do **not** use raw `git add`, `git commit`, `git add -A`, or `git add .` — always use the helper script.
 
 ## Rules
 

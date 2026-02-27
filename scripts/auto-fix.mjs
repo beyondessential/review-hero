@@ -339,8 +339,13 @@ function runClaude(prompt) {
   const tmpPath = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
   writeFileSync(tmpPath, prompt);
 
-  // Bash is always enabled so Claude can commit after each fix
-  const tools = "Read,Edit,Glob,Grep,Bash";
+  // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
+  // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
+  // without having unrestricted shell access.
+  const commitTool = "Bash(.review-hero/scripts/git-commit-fix.sh:*)";
+  const tools = fixCI
+    ? "Read,Edit,Glob,Grep,Bash"
+    : `Read,Edit,Glob,Grep,${commitTool}`;
 
   return execSync(
     `cat "${tmpPath}" | claude -p ` +
