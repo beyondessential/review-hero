@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -45,6 +45,7 @@ const fixCI = process.env.FIX_CI === "true";
 const promptPath = getEnvOrThrow("PROMPT_PATH");
 const projectContext = process.env.PROJECT_CONTEXT ?? "";
 const customRulesPath = process.env.CUSTOM_RULES_PATH ?? "";
+const aiRulesPath = process.env.AI_RULES_PATH ?? "";
 const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
 
 // ── GitHub API ───────────────────────────────────────────────────────────────
@@ -287,6 +288,20 @@ function buildPrompt(comments, ciFailures) {
     sections.push(readFileSync(customRulesPath, "utf-8"));
   }
 
+  // AI rules from other tools (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
+  if (aiRulesPath) {
+    try {
+      const aiRules = readFileSync(aiRulesPath, "utf-8").trim();
+      if (aiRules) {
+        sections.push(
+          `## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when applying fixes.\n\n${aiRules}`,
+        );
+      }
+    } catch {
+      // No AI rules file or unreadable — skip
+    }
+  }
+
   if (comments.length > 0) {
     const commentsList = comments
       .map(
@@ -378,7 +393,9 @@ function parseClaudeResult(raw) {
 
 function hasChanges() {
   return Boolean(
-    execSync("git status --porcelain", { encoding: "utf-8" }).trim(),
+    execSync("git status --porcelain --ignore-submodules", {
+      encoding: "utf-8",
+    }).trim(),
   );
 }
 
@@ -395,9 +412,11 @@ function createCommit(commitMessage) {
   execSync(`git config user.name "${botName}"`);
   execSync(`git config user.email "${botEmail}"`);
   execSync("git add -A");
-  execSync(
-    `git commit -m "$(cat <<'REVIEW_HERO_EOF'\n${commitMessage}\nREVIEW_HERO_EOF\n)"`,
-  );
+  // Remove .review-hero from the index — it's our tooling checkout, not part
+  // of the caller's repo. Git sees it as a "subproject commit" because it
+  // contains its own .git directory and we never want that committed.
+  execSync("git rm -rf --cached --ignore-unmatch .review-hero");
+  execFileSync("git", ["commit", "-m", commitMessage]);
 }
 
 function pushChanges() {
@@ -489,6 +508,17 @@ async function uncheckCheckboxes() {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // Exclude .review-hero from git tracking. It's a nested checkout of the
+  // review-hero repo (with its own .git dir) used only for scripts/prompts.
+  // Without this, `git add -A` records it as a subproject commit in the PR.
+  const excludePath = ".git/info/exclude";
+  const excludeContent = execSync(`cat "${excludePath}" 2>/dev/null || true`, {
+    encoding: "utf-8",
+  });
+  if (!excludeContent.includes(".review-hero")) {
+    execSync(`mkdir -p .git/info && echo ".review-hero" >> "${excludePath}"`);
+  }
+
   console.log(
     `Auto-fixing PR #${prNumber} (reviews: ${fixReviews}, ci: ${fixCI})`,
   );
