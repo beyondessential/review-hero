@@ -255,19 +255,35 @@ const customAgents = discoverCustomAgents(callerDir, config);
 const allAgents = [...baseAgents, ...customAgents];
 
 // Ask Haiku which agents are relevant
+const agentKeys = allAgents.map((a) => a.key);
 const agentList = allAgents
   .map((a) => `- ${a.key}: ${a.description}`)
   .join("\n");
 
-const triagePrompt = `You are triaging a PR for code review. Given the changed files below, decide which review agents are relevant. Only include agents that are likely to find issues for these specific changes.
+const triagePrompt = `You are triaging a PR for code review. Given the changed files below, decide which review agents are relevant. Only include agents that are likely to find issues for these specific changes. Always include "bugs".
 
 ## Available agents
 ${agentList}
 
 ## Changed files (${changedFiles.length} files, ~${diffLines} changed lines)
-${changedFiles.join("\n")}
+${changedFiles.join("\n")}`;
 
-Output ONLY a JSON array of agent keys, e.g. ["bugs", "security"]. Always include "bugs". No explanation.`;
+const selectAgentsTool = {
+  name: "select_agents",
+  description:
+    "Select which review agents should run for this PR. Always include bugs.",
+  input_schema: {
+    type: "object",
+    properties: {
+      agents: {
+        type: "array",
+        items: { type: "string", enum: agentKeys },
+        description: "Agent keys to run",
+      },
+    },
+    required: ["agents"],
+  },
+};
 
 let selectedKeys;
 try {
@@ -282,6 +298,8 @@ try {
       model: "claude-haiku-4-5-20251001",
       max_tokens: 200,
       messages: [{ role: "user", content: triagePrompt }],
+      tools: [selectAgentsTool],
+      tool_choice: { type: "tool", name: "select_agents" },
     }),
   });
 
@@ -290,12 +308,15 @@ try {
   }
 
   const result = await response.json();
-  const text = result.content[0].text.trim();
-  selectedKeys = JSON.parse(text);
+  const toolUse = result.content.find((block) => block.type === "tool_use");
 
-  if (!Array.isArray(selectedKeys) || selectedKeys.length === 0) {
-    throw new Error(`Unexpected triage output: ${text}`);
+  if (!toolUse || !Array.isArray(toolUse.input?.agents)) {
+    throw new Error(
+      `Unexpected triage output: ${JSON.stringify(result.content)}`,
+    );
   }
+
+  selectedKeys = toolUse.input.agents;
 } catch (err) {
   console.warn(`Triage failed, running all agents: ${err.message}`);
   selectedKeys = allAgents.map((a) => a.key);
