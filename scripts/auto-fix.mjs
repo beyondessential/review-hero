@@ -595,11 +595,11 @@ async function main() {
 
   // Log parsed results table
   if (results.length > 0) {
-    console.log("Auto-fix results:");
+    core.info("Auto-fix results:");
     for (const r of results) {
       const icon = r.status === "fixed" ? "✅" : "⏭️";
       const detail = r.status === "fixed" ? r.summary : r.reason;
-      console.log(`  ${icon} #${r.id} [${r.status}] ${detail ?? ""}`);
+      core.info(`  ${icon} #${r.id} [${r.status}] ${detail ?? ""}`);
     }
   }
 
