@@ -268,6 +268,10 @@ The triage step uses Haiku to skip agents that aren't relevant to the changed fi
 
 ## Cost
 
+### GitHub Actions minutes
+
+Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows), which means all jobs run against the **calling repo's** Actions minute quota and billing — not this repo's. If your org uses GitHub-hosted runners on private repos, each review run (triage + agents + orchestrator) and each auto-fix run count towards the consumer repo's monthly included minutes or usage charges.
+
 ### Review
 
 - **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
