@@ -152,6 +152,7 @@ const claudeSettings = {
   model: MODEL,
   permissions: {
     allow: TOOLS,
+    deny: ["Read(/run/secrets/api-key)"],
   },
   sandbox: {
     enabled: true,
