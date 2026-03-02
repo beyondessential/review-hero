@@ -163,11 +163,33 @@ jobs:
             echo "Native sandbox enabled (bubblewrap on Linux)"
           fi
 
+          # ── Auto-fix CI config ──────────────────────────────────────
+          CI_FIX_ENABLED="true"
+
+          if [ -n "$CONFIG_CONTENT" ]; then
+            CI_FIX_ENABLED=$(echo "$CONFIG_CONTENT" | yq -r '.auto_fix.ci // true')
+          fi
+
+          # Normalise to strict "true"/"false"
+          if [ "$CI_FIX_ENABLED" = "false" ]; then
+            CI_FIX_ENABLED="false"
+          else
+            CI_FIX_ENABLED="true"
+          fi
+
+          echo "ci_fix_enabled=$CI_FIX_ENABLED" >> "$GITHUB_OUTPUT"
+
       # ── Sandbox warning ──────────────────────────────────────────────
       - name: "⚠️ Sandbox disabled"
         if: steps.config.outputs.sandbox_disabled == 'true'
         run: |
           echo "::warning::Running Claude without native sandboxing. This is enabled by dangerousDisableSandbox in the repo's .github/review-hero/config.yml."
+
+      # ── CI fix disabled warning ──────────────────────────────────────
+      - name: "ℹ️ CI fix disabled by config"
+        if: needs.check-trigger.outputs.fix_ci == 'true' && steps.config.outputs.ci_fix_enabled == 'false'
+        run: |
+          echo "::warning::CI fix was requested via checkbox but is disabled by auto_fix.ci: false in .github/review-hero/config.yml. Skipping CI fixes."
 
       # ── Install Claude CLI + sandbox dependencies ────────────────────
       # Claude's native sandbox uses bubblewrap (bwrap) and socat on Linux
@@ -225,7 +247,7 @@ jobs:
           REVIEW_HERO_APP_ID: ${{ secrets.REVIEW_HERO_APP_ID }}
           MODEL: ${{ inputs.model }}
           FIX_REVIEWS: ${{ needs.check-trigger.outputs.fix_reviews }}
-          FIX_CI: ${{ needs.check-trigger.outputs.fix_ci }}
+          FIX_CI: ${{ needs.check-trigger.outputs.fix_ci == 'true' && steps.config.outputs.ci_fix_enabled != 'false' }}
           PROMPT_PATH: .review-hero/prompts/auto-fix.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
