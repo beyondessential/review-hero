@@ -118,7 +118,11 @@ jobs:
           else
             CONTEXT=""
           fi
-          echo "project_context=${CONTEXT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "project_context<<REVIEW_HERO_EOF"
+            echo "$CONTEXT"
+            echo "REVIEW_HERO_EOF"
+          } >> "$GITHUB_OUTPUT"
 
           # Check for custom auto-fix rules
           RULES=".github/review-hero/auto-fix-rules.md"

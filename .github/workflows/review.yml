@@ -114,7 +114,11 @@ jobs:
           else
             CONTEXT=""
           fi
-          echo "project_context=${CONTEXT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "project_context<<REVIEW_HERO_EOF"
+            echo "$CONTEXT"
+            echo "REVIEW_HERO_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       # ── Get PR diff ──────────────────────────────────────────────────
       - name: Get PR diff
