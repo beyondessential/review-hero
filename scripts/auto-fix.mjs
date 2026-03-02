@@ -4,15 +4,16 @@
  * Fetches unresolved review comments and/or CI failures from a PR,
  * pipes them to Claude CLI to apply fixes, then commits and pushes the result.
  *
- * Claude runs inside a Docker sandbox container with no sudo, no secrets in
- * the environment (except the Anthropic API key via a mounted file), and
- * --cap-drop=ALL. See run-in-sandbox.mjs for details.
+ * Claude runs via run-claude.mjs which configures native sandboxing (bubblewrap
+ * on Linux) for filesystem and network isolation, and manages the API key via
+ * apiKeyHelper so it is never exposed as an environment variable to sandboxed
+ * commands. See run-claude.mjs for details.
  *
  * Environment variables:
  *   GITHUB_TOKEN        — GitHub token (with contents:write, pull-requests:write, actions:read)
  *   GITHUB_REPOSITORY   — owner/repo
  *   PR_NUMBER           — Pull request number
- *   ANTHROPIC_API_KEY   — API key for Claude CLI (passed to sandbox via file mount)
+ *   ANTHROPIC_API_KEY   — API key for Claude CLI (passed to run-claude.mjs via env, then secured via apiKeyHelper)
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
  *   MODEL               — Model to use (default: claude-sonnet-4-6)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
@@ -21,8 +22,8 @@
  *   PROJECT_CONTEXT     — Optional project context string (e.g. "You are reviewing a PR for **Tamanu**, a healthcare management system.")
  *   CUSTOM_RULES_PATH   — Optional path to repo-specific rules to append to the prompt
  *   SELF_WORKFLOW        — Name of this workflow (to exclude from CI failure checks)
- *   SANDBOX_SCRIPT      — Path to run-in-sandbox.mjs (default: .review-hero/scripts/run-in-sandbox.mjs)
- *   SANDBOX_IMAGE       — Docker image name for the sandbox (default: claude-sandbox:latest)
+ *   CLAUDE_SCRIPT       — Path to run-claude.mjs (default: .review-hero/scripts/run-claude.mjs)
+ *   SANDBOX_DISABLED    — 'true' to disable native sandboxing (sets sandbox.enabled=false in Claude settings)
  */
 
 import {
@@ -60,9 +61,8 @@ const projectContext = process.env.PROJECT_CONTEXT ?? "";
 const customRulesPath = process.env.CUSTOM_RULES_PATH ?? "";
 const aiRulesPath = process.env.AI_RULES_PATH ?? "";
 const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
-const sandboxScript =
-  process.env.SANDBOX_SCRIPT ?? ".review-hero/scripts/run-in-sandbox.mjs";
-const sandboxImage = process.env.SANDBOX_IMAGE ?? "claude-sandbox:latest";
+const claudeScript =
+  process.env.CLAUDE_SCRIPT ?? ".review-hero/scripts/run-claude.mjs";
 const sandboxDisabled = process.env.SANDBOX_DISABLED === "true";
 
 // ── GitHub API ───────────────────────────────────────────────────────────────
@@ -356,10 +356,7 @@ function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
-// Container path where the commit helper is mounted by run-in-sandbox.mjs
-const CONTAINER_COMMIT_HELPER = "/tools/git-commit-fix.mjs";
-
-function runClaude(prompt, { commitHelperHostPath } = {}) {
+function runClaude(prompt, { commitHelperPath } = {}) {
   if (!/^[a-z0-9.-]+$/.test(model)) {
     throw new Error(`Invalid model name: ${model}`);
   }
@@ -367,58 +364,18 @@ function runClaude(prompt, { commitHelperHostPath } = {}) {
   const promptFile = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
   writeFileSync(promptFile, prompt);
 
-  if (!fixCI && !commitHelperHostPath) {
+  if (!fixCI && !commitHelperPath) {
     throw new Error(
-      "commitHelperHostPath is required when not running in CI fix mode",
+      "commitHelperPath is required when not running in CI fix mode",
     );
   }
 
-  // ── Unsandboxed execution ──────────────────────────────────────────────
-  // When dangerousDisableSandbox is set, run Claude CLI directly on the
-  // runner. The user has accepted the risk that Claude has access to the
-  // full runner environment, including workflow secrets.
-  if (sandboxDisabled) {
-    // Without a container, the commit helper path is the host path directly.
-    const tools = fixCI
-      ? "Read,Edit,Glob,Grep,Bash"
-      : `Read,Edit,Glob,Grep,Bash(${commitHelperHostPath}:*)`;
+  // Build the run-claude.mjs config. run-claude.mjs handles both sandboxed
+  // and unsandboxed execution — when sandboxDisabled is true it sets
+  // sandbox.enabled=false in Claude's settings. The API key is secured via
+  // apiKeyHelper inside run-claude.mjs regardless of sandbox mode.
 
-    const raw = execFileSync(
-      "claude",
-      [
-        "-p",
-        "--output-format",
-        "json",
-        "--model",
-        model,
-        "--max-turns",
-        "30",
-        "--allowedTools",
-        tools,
-      ],
-      {
-        input: readFileSync(promptFile, "utf-8"),
-        encoding: "utf-8",
-        timeout: 10 * 60 * 1000,
-        maxBuffer: 10 * 1024 * 1024,
-        // In unsandboxed mode, inherit the full environment. The user has
-        // opted out of isolation via dangerousDisableSandbox.
-        env: {
-          ...process.env,
-        },
-      },
-    );
-
-    logClaudeSession(raw);
-    return raw;
-  }
-
-  // ── Sandboxed execution ────────────────────────────────────────────────
-  // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
-  // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
-  // without having unrestricted shell access.
-
-  const sandboxConfig = {
+  const runConfig = {
     mode: fixCI ? "ci-fix" : "review-fix",
     prompt: promptFile,
     model,
@@ -428,23 +385,25 @@ function runClaude(prompt, { commitHelperHostPath } = {}) {
       "Edit",
       "Glob",
       "Grep",
-      fixCI ? "Bash" : `Bash(${CONTAINER_COMMIT_HELPER}:*)`,
+      fixCI ? "Bash" : `Bash(${commitHelperPath}:*)`,
     ],
-    image: sandboxImage,
+    sandboxDisabled,
   };
 
-  if (commitHelperHostPath) {
-    sandboxConfig.commitHelper = commitHelperHostPath;
+  if (commitHelperPath) {
+    runConfig.commitHelper = commitHelperPath;
   }
 
-  const configFile = `/tmp/sandbox-config-${prNumber}-${Date.now()}.json`;
-  writeFileSync(configFile, JSON.stringify(sandboxConfig));
+  const configFile = `/tmp/run-config-${prNumber}-${Date.now()}.json`;
+  writeFileSync(configFile, JSON.stringify(runConfig));
 
-  const raw = execFileSync("node", [sandboxScript, configFile], {
+  const raw = execFileSync("node", [claudeScript, configFile], {
     encoding: "utf-8",
     timeout: 10 * 60 * 1000,
     maxBuffer: 10 * 1024 * 1024,
-    // Only pass the minimum env the sandbox script needs.
+    // Only pass the minimum env run-claude.mjs needs. It handles the API
+    // key securely via apiKeyHelper (writing to a temp file, never passing
+    // the env var through to Claude's subprocess).
     env: {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
@@ -586,10 +545,10 @@ function pushChanges() {
  * Returns { leaked: true, detail: string } if a secret pattern is found,
  * or { leaked: false } if clean.
  *
- * This is a defence-in-depth measure — the Docker sandbox should prevent
- * Claude from accessing most secrets, but if prompt injection somehow
- * succeeds in extracting the API key (e.g. from /run/secrets/api-key inside
- * the container) and writing it to a file, this scan catches it before push.
+ * This is a defence-in-depth measure — the native sandbox and apiKeyHelper
+ * should prevent Claude from accessing most secrets, but if prompt injection
+ * somehow succeeds in extracting the API key (e.g. from the temp file used
+ * by apiKeyHelper) and writing it to a file, this scan catches it before push.
  */
 function scanCommitsForSecrets(headBefore) {
   const diff = execFileSync("git", ["diff", `${headBefore}..HEAD`], {
@@ -762,33 +721,30 @@ async function main() {
     return;
   }
 
-  // Copy the commit helper to /tmp. When sandboxed, it is mounted read-only
-  // into the Docker container at /tools/git-commit-fix.mjs. When unsandboxed,
-  // Claude invokes it directly at this host path.
+  // Copy the commit helper to /tmp so Claude can invoke it. run-claude.mjs
+  // validates that this path exists and configures sandbox permissions so
+  // that Claude's Bash tool is scoped to this helper (in review-fix mode).
   const commitHelperSrc = ".review-hero/scripts/git-commit-fix.mjs";
   const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.mjs`;
   copyFileSync(commitHelperSrc, commitHelperTmp);
   chmodSync(commitHelperTmp, 0o755);
 
-  // When sandboxed, the prompt references the container path (/tools/...)
-  // since Claude sees the helper mounted there. When unsandboxed, use the
-  // host path directly since there is no container path remapping.
+  // The prompt references the host path directly since run-claude.mjs
+  // invokes Claude on the host with native sandboxing (no path remapping).
   const prompt = buildPrompt(comments, ciFailures, {
-    commitHelperPath: sandboxDisabled
-      ? commitHelperTmp
-      : CONTAINER_COMMIT_HELPER,
+    commitHelperPath: commitHelperTmp,
   });
   const headBefore = execSync("git rev-parse HEAD", {
     encoding: "utf-8",
   }).trim();
   console.log(
     sandboxDisabled
-      ? "Running Claude directly on runner to apply fixes (sandbox disabled)..."
-      : "Running Claude in sandbox to apply fixes...",
+      ? "Running Claude to apply fixes (native sandbox disabled)..."
+      : "Running Claude to apply fixes (native sandbox enabled)...",
   );
   let raw;
   try {
-    raw = runClaude(prompt, { commitHelperHostPath: commitHelperTmp });
+    raw = runClaude(prompt, { commitHelperPath: commitHelperTmp });
   } catch (err) {
     console.error(`Claude failed: ${err.message}`);
 
@@ -932,10 +888,10 @@ async function main() {
   let pushed = false;
   if (hasCommitsToPush) {
     // Defence-in-depth: scan all committed diffs and messages for leaked
-    // secrets before pushing. The Docker sandbox should prevent Claude from
-    // accessing most secrets, but prompt injection could potentially extract
-    // the API key from /run/secrets/api-key inside the container and embed
-    // it in a file or commit message.
+    // secrets before pushing. The native sandbox and apiKeyHelper should
+    // prevent Claude from accessing most secrets, but prompt injection
+    // could potentially extract the API key from the temp file used by
+    // apiKeyHelper and embed it in a file or commit message.
     const scanResult = scanCommitsForSecrets(headBefore);
     if (scanResult.leaked) {
       core.error(

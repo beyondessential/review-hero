@@ -209,59 +209,25 @@ The triage step will automatically discover it and include it in Haiku's agent s
 
 ### Sandbox configuration
 
-By default, every Claude invocation runs inside a Docker sandbox container (see [Security](#security)). Repos that need additional tools available during review — or that need to opt out of Docker entirely — can configure the sandbox in `config.yml`:
+By default, every Claude invocation uses [Claude's native sandboxing](https://code.claude.com/docs/en/sandboxing) for filesystem and network isolation (see [Security](#security)). On Linux (GitHub Actions runners), this uses [bubblewrap](https://github.com/containers/bubblewrap) and socat, which are installed automatically by the workflow. Repos that need to opt out of sandboxing can configure it in `config.yml`:
 
 ```yaml
 sandbox:
-  # Custom Dockerfile for the sandbox image (path relative to .github/review-hero/)
-  dockerfile: Dockerfile
-
-  # OR: disable the sandbox entirely (Claude runs directly on the runner)
+  # Disable native sandboxing (Claude runs without filesystem/network isolation)
   # dangerousDisableSandbox: true
 ```
-
-#### Custom Dockerfile
-
-If your linters, type-checkers, or build tools need to be available inside the sandbox, provide a custom Dockerfile at `.github/review-hero/Dockerfile` (or any path you specify in `sandbox.dockerfile`). The build context is the `.github/review-hero/` directory, so `COPY`/`ADD` instructions can reference sibling files.
-
-Your image must include at minimum:
-
-- **Node.js** (for Claude CLI and helper scripts)
-- **git** (used by scoped Bash tools and the commit helper)
-- **Claude Code CLI** (`npm install -g @anthropic-ai/claude-code`)
-- A **non-root user** with UID 65532 (the sandbox runs as this user)
-
-The easiest approach is to mirror the default image and add your dependencies:
-
-```dockerfile
-FROM node:22-slim
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       git ca-certificates \
-       python3 pylint \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g @anthropic-ai/claude-code
-
-RUN useradd -m -u 65532 -s /bin/sh claude
-USER claude
-WORKDIR /workspace
-```
-
-> **Security note:** The custom Dockerfile is always read from the **base branch**, not the PR branch. A pull request cannot swap the Dockerfile — changes take effect only after they are merged.
 
 #### Disabling the sandbox
 
 > [!CAUTION]
-> Disabling the sandbox means Claude has direct access to **all environment variables** on the runner, including `GITHUB_TOKEN` and any other secrets passed via `secrets: inherit`. Only enable this if you understand the security implications and accept the risk that a prompt injection attack could exfiltrate secrets.
+> Disabling the sandbox means Claude's Bash commands have unrestricted filesystem and network access on the runner. The API key is still secured via `apiKeyHelper` (never passed as an env var), but a prompt injection attack could potentially access other files or network resources. Only enable this if you understand the security implications and accept the risk.
 
 ```yaml
 sandbox:
   dangerousDisableSandbox: true
 ```
 
-When the sandbox is disabled, Claude CLI is installed directly on the runner via `npm install -g @anthropic-ai/claude-code` and invoked as a host process. The `dockerfile` setting is ignored.
+When the sandbox is disabled, `run-claude.mjs` sets `sandbox.enabled: false` in Claude's settings. Claude CLI is still invoked the same way, and the API key is still secured via `apiKeyHelper` — only the OS-level filesystem and network isolation is removed.
 
 ### Built-in ignore patterns
 
@@ -360,26 +326,23 @@ Max turns scale with the filtered diff size and are capped at 10:
 
 ## Security
 
-Review Hero runs Claude inside a **Docker sandbox container** to limit the blast radius of prompt injection attacks. Since Claude processes untrusted input (PR diffs, review comments, CI logs), these measures prevent a manipulated model from extracting secrets or escalating privileges.
+Review Hero uses [Claude's native sandboxing](https://code.claude.com/docs/en/sandboxing) (bubblewrap on Linux) to limit the blast radius of prompt injection attacks. Since Claude processes untrusted input (PR diffs, review comments, CI logs), the sandbox provides OS-level filesystem and network isolation to prevent a manipulated model from extracting secrets or escalating privileges.
 
-Repos can [customise the sandbox image](#custom-dockerfile) (e.g. to add linters or language runtimes) or [disable the sandbox entirely](#disabling-the-sandbox) if Docker is unavailable. See [Sandbox configuration](#sandbox-configuration) for details.
+Repos can [disable the sandbox](#disabling-the-sandbox) if needed. See [Sandbox configuration](#sandbox-configuration) for details.
 
 ### Sandbox properties
 
 | Property | Review agents | Auto-fix (review) | Auto-fix (CI) |
 |----------|--------------|-------------------|---------------|
-| Container user | `claude` (UID 65532) | `claude` (UID 65532) | `claude` (UID 65532) |
-| sudo | ❌ Not installed | ❌ Not installed | ❌ Not installed |
-| Capabilities | `--cap-drop=ALL` | `--cap-drop=ALL` | `--cap-drop=ALL` |
-| Repo mount | Read-only | Read-write | Read-write |
+| Filesystem writes | CWD only (default) | CWD + `/tmp` | CWD + `/tmp` |
+| Network | Sandbox-restricted | Sandbox-restricted | Sandbox-restricted |
 | Bash access | Scoped to `git log`, `git show`, `git diff` | Scoped to commit helper | Unrestricted (needs build tools) |
-| GITHUB_TOKEN | ❌ Not available | ❌ Not available | ❌ Not available |
-| REVIEW_HERO_PRIVATE_KEY | ❌ Not available | ❌ Not available | ❌ Not available |
-| ANTHROPIC_API_KEY | Via mounted file | Via mounted file | Via mounted file |
+| Unsandboxed escape hatch | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` |
+| ANTHROPIC_API_KEY | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) |
 
 ### API key handling
 
-The Anthropic API key is written to a temporary file on the host and mounted into the container at `/run/secrets/api-key` (read-only). It is never passed as a CLI argument (which would be visible in `/proc/*/cmdline`) or as a Docker environment variable (which would be visible in `docker inspect`). The temp file is deleted on the host as soon as the container starts.
+The Anthropic API key is written to a temporary file (mode `0o600`) and exposed to Claude CLI via the `apiKeyHelper` setting (`cat /path/to/key`). The `ANTHROPIC_API_KEY` environment variable is **not** forwarded to the Claude process, so sandboxed Bash commands cannot access it via the environment. The temp file is additionally protected by `permissions.deny` (blocking Claude's Read tool) and `sandbox.filesystem.denyRead` (blocking sandboxed Bash). The temp file is deleted in a `finally` block after Claude exits.
 
 ### Pre-push secret scanning
 
@@ -392,7 +355,7 @@ If a match is found, all commits are hard-reset and the push is aborted.
 
 ### Base-branch isolation
 
-Custom agent prompts, `config.yml`, `auto-fix-rules.md`, AI rules files (`.cursorrules`, etc.), and sandbox Dockerfiles are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content, disabling the sandbox, or swapping the Dockerfile. See the [Custom agents](#custom-agents) and [Sandbox configuration](#sandbox-configuration) sections for details.
+Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content or disabling the sandbox. See the [Custom agents](#custom-agents) and [Sandbox configuration](#sandbox-configuration) sections for details.
 
 ## PR template snippet
 

@@ -78,9 +78,9 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       # ── Fetch base branch ────────────────────────────────────────────
-      # Config, auto-fix rules, AI rules, and sandbox Dockerfiles are read
-      # from the base branch so a malicious PR cannot inject prompt content
-      # or tamper with the sandbox configuration.
+      # Config, auto-fix rules, and AI rules are read from the base branch
+      # so a malicious PR cannot inject prompt content or tamper with the
+      # sandbox configuration.
       - name: Fetch base branch
         run: git fetch origin ${{ github.event.pull_request.base.sha }} --depth=1
 
@@ -143,11 +143,9 @@ jobs:
 
           # ── Sandbox config ──────────────────────────────────────────
           SANDBOX_DISABLED="false"
-          SANDBOX_DOCKERFILE=""
 
           if [ -n "$CONFIG_CONTENT" ]; then
             SANDBOX_DISABLED=$(echo "$CONFIG_CONTENT" | yq -r '.sandbox.dangerousDisableSandbox // false')
-            SANDBOX_DOCKERFILE=$(echo "$CONFIG_CONTENT" | yq -r '.sandbox.dockerfile // ""')
           fi
 
           # Normalise disabled to strict "true"/"false"
@@ -157,70 +155,29 @@ jobs:
             SANDBOX_DISABLED="false"
           fi
 
-          # Validate dockerfile path: reject path traversal and absolute paths
-          if [ -n "$SANDBOX_DOCKERFILE" ]; then
-            case "$SANDBOX_DOCKERFILE" in
-              ../*|*/../*|/*)
-                echo "::error::Invalid sandbox.dockerfile path '${SANDBOX_DOCKERFILE}' — must be relative to .github/review-hero/ with no path traversal"
-                exit 1
-                ;;
-            esac
-            # Verify the file exists in the base branch
-            if ! git show "$BASE_SHA:.github/review-hero/${SANDBOX_DOCKERFILE}" > /dev/null 2>&1; then
-              echo "::error::sandbox.dockerfile '${SANDBOX_DOCKERFILE}' not found in base branch at .github/review-hero/${SANDBOX_DOCKERFILE}"
-              exit 1
-            fi
-          fi
-
-          # If sandbox is disabled, dockerfile is irrelevant
-          if [ "$SANDBOX_DISABLED" = "true" ]; then
-            SANDBOX_DOCKERFILE=""
-          fi
-
           echo "sandbox_disabled=$SANDBOX_DISABLED" >> "$GITHUB_OUTPUT"
-          echo "sandbox_dockerfile=$SANDBOX_DOCKERFILE" >> "$GITHUB_OUTPUT"
 
           if [ "$SANDBOX_DISABLED" = "true" ]; then
-            echo "::warning::Sandbox is disabled via dangerousDisableSandbox. Claude will run directly on the runner with access to all environment variables and secrets."
-          elif [ -n "$SANDBOX_DOCKERFILE" ]; then
-            echo "Using custom sandbox Dockerfile: .github/review-hero/${SANDBOX_DOCKERFILE}"
+            echo "::warning::Sandbox is disabled via dangerousDisableSandbox. Claude will run without native sandboxing."
           else
-            echo "Using default sandbox Dockerfile"
+            echo "Native sandbox enabled (bubblewrap on Linux)"
           fi
 
       # ── Sandbox warning ──────────────────────────────────────────────
       - name: "⚠️ Sandbox disabled"
         if: steps.config.outputs.sandbox_disabled == 'true'
         run: |
-          echo "::warning::Running Claude without Docker sandbox. Claude has direct access to the runner environment, including all environment variables. This is enabled by dangerousDisableSandbox in the repo's .github/review-hero/config.yml."
+          echo "::warning::Running Claude without native sandboxing. This is enabled by dangerousDisableSandbox in the repo's .github/review-hero/config.yml."
 
-      # ── Build sandbox image (default) ────────────────────────────────
-      - name: Build Claude sandbox image
-        if: steps.config.outputs.sandbox_disabled != 'true' && steps.config.outputs.sandbox_dockerfile == ''
-        run: docker build -t claude-sandbox:latest -f .review-hero/docker/Dockerfile .review-hero/docker
+      # ── Install Claude CLI + sandbox dependencies ────────────────────
+      # Claude's native sandbox uses bubblewrap (bwrap) and socat on Linux
+      # for filesystem and network isolation. When the sandbox is disabled
+      # we skip bubblewrap/socat since they are not needed.
+      - name: Install sandbox dependencies
+        if: steps.config.outputs.sandbox_disabled != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
 
-      # ── Build sandbox image (custom Dockerfile) ──────────────────────
-      # The custom Dockerfile is extracted from the base branch into a temp
-      # directory. The entire .github/review-hero/ tree is extracted so that
-      # COPY/ADD instructions can reference sibling files.
-      - name: Build Claude sandbox image (custom Dockerfile)
-        if: steps.config.outputs.sandbox_disabled != 'true' && steps.config.outputs.sandbox_dockerfile != ''
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          SANDBOX_DOCKERFILE: ${{ steps.config.outputs.sandbox_dockerfile }}
-        run: |
-          CONTEXT_DIR="/tmp/base-sandbox-context"
-          mkdir -p "$CONTEXT_DIR"
-          git archive "$BASE_SHA" -- .github/review-hero/ | tar -C "$CONTEXT_DIR" -x --strip-components=2
-          docker build -t claude-sandbox:latest \
-            -f "$CONTEXT_DIR/$SANDBOX_DOCKERFILE" \
-            "$CONTEXT_DIR"
-
-      # ── Install Claude CLI (unsandboxed mode) ───────────────────────
-      # When the sandbox is disabled, Claude CLI runs directly on the
-      # runner instead of inside the Docker container.
       - name: Install Claude CLI
-        if: steps.config.outputs.sandbox_disabled == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
       # ── Detect AI rules (from base branch) ──────────────────────────
@@ -274,7 +231,6 @@ jobs:
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
           AI_RULES_PATH: /tmp/ai-rules.md
           SELF_WORKFLOW: ${{ github.workflow }}
-          SANDBOX_SCRIPT: .review-hero/scripts/run-in-sandbox.mjs
-          SANDBOX_IMAGE: claude-sandbox:latest
+          CLAUDE_SCRIPT: .review-hero/scripts/run-claude.mjs
           SANDBOX_DISABLED: ${{ steps.config.outputs.sandbox_disabled }}
         run: node .review-hero/scripts/auto-fix.mjs

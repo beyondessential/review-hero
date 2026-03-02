@@ -39,7 +39,6 @@ jobs:
       agent_names: ${{ steps.triage.outputs.agent_names }}
       project_context: ${{ steps.config.outputs.project_context }}
       sandbox_disabled: ${{ steps.sandbox.outputs.disabled }}
-      sandbox_dockerfile: ${{ steps.sandbox.outputs.dockerfile }}
     steps:
       # ── Trigger check ────────────────────────────────────────────────
       - id: check
@@ -128,18 +127,16 @@ jobs:
 
       # ── Read sandbox config from caller config ───────────────────────
       # Sandbox settings are read from the base branch so a malicious PR
-      # cannot disable the sandbox or swap the Dockerfile.
+      # cannot disable the sandbox.
       - name: Read sandbox config
         if: steps.check.outputs.should_run == 'true'
         id: sandbox
         run: |
           CONFIG="caller/.github/review-hero/config.yml"
           DISABLED="false"
-          DOCKERFILE=""
 
           if [ -f "$CONFIG" ]; then
             DISABLED=$(yq -r '.sandbox.dangerousDisableSandbox // false' "$CONFIG")
-            DOCKERFILE=$(yq -r '.sandbox.dockerfile // ""' "$CONFIG")
           fi
 
           # Normalise disabled to strict "true"/"false"
@@ -149,36 +146,12 @@ jobs:
             DISABLED="false"
           fi
 
-          # Validate dockerfile path: reject path traversal and absolute paths
-          if [ -n "$DOCKERFILE" ]; then
-            case "$DOCKERFILE" in
-              ../*|*/../*|/*)
-                echo "::error::Invalid sandbox.dockerfile path '${DOCKERFILE}' — must be relative to .github/review-hero/ with no path traversal"
-                exit 1
-                ;;
-            esac
-            # Verify the file actually exists in the base branch checkout
-            FULL_PATH="caller/.github/review-hero/${DOCKERFILE}"
-            if [ ! -f "$FULL_PATH" ]; then
-              echo "::error::sandbox.dockerfile '${DOCKERFILE}' not found at ${FULL_PATH}"
-              exit 1
-            fi
-          fi
-
-          # If sandbox is disabled, dockerfile is irrelevant
-          if [ "$DISABLED" = "true" ]; then
-            DOCKERFILE=""
-          fi
-
           echo "disabled=$DISABLED" >> "$GITHUB_OUTPUT"
-          echo "dockerfile=$DOCKERFILE" >> "$GITHUB_OUTPUT"
 
           if [ "$DISABLED" = "true" ]; then
-            echo "::warning::Sandbox is disabled via dangerousDisableSandbox. Claude will run directly on the runner with access to all environment variables and secrets."
-          elif [ -n "$DOCKERFILE" ]; then
-            echo "Using custom sandbox Dockerfile: .github/review-hero/${DOCKERFILE}"
+            echo "::warning::Sandbox is disabled via dangerousDisableSandbox. Claude will run without native sandboxing."
           else
-            echo "Using default sandbox Dockerfile"
+            echo "Native sandbox enabled (bubblewrap on Linux)"
           fi
 
       # ── Get PR diff ──────────────────────────────────────────────────
@@ -236,9 +209,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
 
       # ── Checkout caller config from base branch ──────────────────────
-      # Custom agent prompts, AI rules files, and sandbox Dockerfiles are
-      # read from the base branch so that a PR cannot inject malicious
-      # prompt content or tamper with the sandbox configuration.
+      # Custom agent prompts and AI rules files are read from the base
+      # branch so that a PR cannot inject malicious prompt content or
+      # tamper with the sandbox configuration.
       - name: Checkout caller config (base branch)
         uses: actions/checkout@v6
         with:
@@ -275,31 +248,17 @@ jobs:
       - name: "⚠️ Sandbox disabled"
         if: needs.triage.outputs.sandbox_disabled == 'true'
         run: |
-          echo "::warning::Running Claude without Docker sandbox. Claude has direct access to the runner environment, including all environment variables. This is enabled by dangerousDisableSandbox in the repo's .github/review-hero/config.yml."
+          echo "::warning::Running Claude without native sandboxing. This is enabled by dangerousDisableSandbox in the repo's .github/review-hero/config.yml."
 
-      # ── Build sandbox image (default) ────────────────────────────────
-      - name: Build Claude sandbox image
-        if: needs.triage.outputs.sandbox_disabled != 'true' && needs.triage.outputs.sandbox_dockerfile == ''
-        run: docker build -t claude-sandbox:latest -f .review-hero/docker/Dockerfile .review-hero/docker
+      # ── Install Claude CLI + sandbox dependencies ────────────────────
+      # Claude's native sandbox uses bubblewrap (bwrap) and socat on Linux
+      # for filesystem and network isolation. When the sandbox is disabled
+      # we skip bubblewrap/socat since they are not needed.
+      - name: Install sandbox dependencies
+        if: needs.triage.outputs.sandbox_disabled != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
 
-      # ── Build sandbox image (custom Dockerfile) ──────────────────────
-      # The custom Dockerfile is read from the base branch checkout. The
-      # build context is the .github/review-hero/ directory from the base
-      # branch, so COPY/ADD instructions can reference sibling files.
-      - name: Build Claude sandbox image (custom Dockerfile)
-        if: needs.triage.outputs.sandbox_disabled != 'true' && needs.triage.outputs.sandbox_dockerfile != ''
-        env:
-          SANDBOX_DOCKERFILE: ${{ needs.triage.outputs.sandbox_dockerfile }}
-        run: |
-          docker build -t claude-sandbox:latest \
-            -f ".caller-base/.github/review-hero/$SANDBOX_DOCKERFILE" \
-            .caller-base/.github/review-hero
-
-      # ── Install Claude CLI (unsandboxed mode) ───────────────────────
-      # When the sandbox is disabled, Claude CLI runs directly on the
-      # runner instead of inside the Docker container.
       - name: Install Claude CLI
-        if: needs.triage.outputs.sandbox_disabled == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
       # ── Download filtered diff ───────────────────────────────────────
@@ -352,8 +311,12 @@ jobs:
             echo '```'
           } > /tmp/agent-prompt.md
 
-      - name: Run ${{ matrix.agent.key }} agent (sandboxed)
-        if: needs.triage.outputs.sandbox_disabled != 'true'
+      # ── Run agent ────────────────────────────────────────────────────
+      # run-claude.mjs configures Claude's native sandbox (bubblewrap on
+      # Linux) and manages the API key via apiKeyHelper. When
+      # sandboxDisabled is true it sets sandbox.enabled=false in Claude's
+      # settings instead.
+      - name: Run ${{ matrix.agent.key }} agent
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
@@ -363,22 +326,10 @@ jobs:
             --arg model "${{ inputs.model }}" \
             --argjson maxTurns '${{ needs.triage.outputs.max_turns }}' \
             --argjson tools '["Read","Glob","Grep","Bash(git log:*)","Bash(git show:*)","Bash(git diff:*)"]' \
-            --arg image "claude-sandbox:latest" \
-            '{mode: $mode, prompt: $prompt, model: $model, maxTurns: $maxTurns, tools: $tools, image: $image}' \
-            > /tmp/sandbox-config.json
-          node .review-hero/scripts/run-in-sandbox.mjs /tmp/sandbox-config.json \
-            > /tmp/result.json
-
-      - name: Run ${{ matrix.agent.key }} agent (unsandboxed)
-        if: needs.triage.outputs.sandbox_disabled == 'true'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          cat /tmp/agent-prompt.md | claude -p \
-            --output-format json \
-            --model "${{ inputs.model }}" \
-            --max-turns "${{ needs.triage.outputs.max_turns }}" \
-            --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+            --argjson sandboxDisabled '${{ needs.triage.outputs.sandbox_disabled }}' \
+            '{mode: $mode, prompt: $prompt, model: $model, maxTurns: $maxTurns, tools: $tools, sandboxDisabled: $sandboxDisabled}' \
+            > /tmp/run-config.json
+          node .review-hero/scripts/run-claude.mjs /tmp/run-config.json \
             > /tmp/result.json
 
       - name: Upload result
