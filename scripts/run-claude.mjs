@@ -108,9 +108,7 @@ let REPO_ROOT = config.repoRoot ?? "";
 // ── Validate required fields ─────────────────────────────────────────────────
 
 if (!MODE || !PROMPT_PATH || !MODEL || !MAX_TURNS) {
-  throw new Error(
-    "config must include mode, prompt, model, and maxTurns",
-  );
+  throw new Error("config must include mode, prompt, model, and maxTurns");
 }
 
 if (!VALID_MODES.includes(MODE)) {
@@ -174,11 +172,15 @@ try {
 
   // ── Build sandbox filesystem restrictions ──────────────────────────────
   // By default the sandbox allows reads everywhere and writes only to CWD
-  // (the repo root). We add mode-specific write paths and deny reads to the
-  // temp directory that contains the API key.
+  // (the repo root). We add mode-specific write paths, deny reads to the
+  // temp directory that contains the API key, and deny writes to
+  // .review-hero/ so sandboxed Bash cannot tamper with the tooling.
+
+  const reviewHeroDir = join(REPO_ROOT, ".review-hero");
 
   const allowWrite = [];
   const denyRead = [`//${tmpDir}`];
+  const denyWrite = [`//${reviewHeroDir}`];
 
   switch (MODE) {
     case "review-agent":
@@ -208,7 +210,11 @@ try {
     model: MODEL,
     permissions: {
       allow: TOOLS,
-      deny: [`Read(${apiKeyFile})`],
+      // Deny Claude's own tools (Read, Edit) access to the API key file and
+      // the .review-hero/ directory. The sandbox filesystem restrictions
+      // below are the OS-level equivalent for Bash subprocesses; together
+      // they form two independent layers of protection.
+      deny: [`Read(${apiKeyFile})`, `Edit(${reviewHeroDir})`],
     },
     sandbox: {
       enabled: !SANDBOX_DISABLED,
@@ -224,6 +230,7 @@ try {
             filesystem: {
               ...(allowWrite.length > 0 ? { allowWrite } : {}),
               denyRead,
+              denyWrite,
             },
           }
         : {}),

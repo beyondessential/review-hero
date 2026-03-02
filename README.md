@@ -340,9 +340,6 @@ Repos can [disable the sandbox](#disabling-the-sandbox) if needed. See [Sandbox 
 | Unsandboxed escape hatch | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` |
 | ANTHROPIC_API_KEY | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) |
 
-### API key handling
-
-The Anthropic API key is written to a temporary file (mode `0o600`) and exposed to Claude CLI via the `apiKeyHelper` setting (`cat /path/to/key`). The `ANTHROPIC_API_KEY` environment variable is **not** forwarded to the Claude process, so sandboxed Bash commands cannot access it via the environment. The temp file is additionally protected by `permissions.deny` (blocking Claude's Read tool) and `sandbox.filesystem.denyRead` (blocking sandboxed Bash). The temp file is deleted in a `finally` block after Claude exits.
 
 ### Pre-push secret scanning
 
