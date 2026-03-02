@@ -302,6 +302,40 @@ Max turns scale with the filtered diff size and are capped at 10:
 - Has `Read`, `Edit`, `Glob`, and `Grep` tools. If fixing CI failures, `Bash` is also enabled so it can run commands to verify fixes.
 - Cost depends on how many review comments / CI failures need fixing, but is typically comparable to a single review agent run.
 
+## Security
+
+Review Hero runs Claude inside a **Docker sandbox container** to limit the blast radius of prompt injection attacks. Since Claude processes untrusted input (PR diffs, review comments, CI logs), these measures prevent a manipulated model from extracting secrets or escalating privileges.
+
+### Sandbox properties
+
+| Property | Review agents | Auto-fix (review) | Auto-fix (CI) |
+|----------|--------------|-------------------|---------------|
+| Container user | `claude` (UID 65532) | `claude` (UID 65532) | `claude` (UID 65532) |
+| sudo | ❌ Not installed | ❌ Not installed | ❌ Not installed |
+| Capabilities | `--cap-drop=ALL` | `--cap-drop=ALL` | `--cap-drop=ALL` |
+| Repo mount | Read-only | Read-write | Read-write |
+| Bash access | Scoped to `git log`, `git show`, `git diff` | Scoped to commit helper | Unrestricted (needs build tools) |
+| GITHUB_TOKEN | ❌ Not available | ❌ Not available | ❌ Not available |
+| REVIEW_HERO_PRIVATE_KEY | ❌ Not available | ❌ Not available | ❌ Not available |
+| ANTHROPIC_API_KEY | Via mounted file | Via mounted file | Via mounted file |
+
+### API key handling
+
+The Anthropic API key is written to a temporary file on the host and mounted into the container at `/run/secrets/api-key` (read-only). It is never passed as a CLI argument (which would be visible in `/proc/*/cmdline`) or as a Docker environment variable (which would be visible in `docker inspect`). The temp file is deleted on the host as soon as the container starts.
+
+### Pre-push secret scanning
+
+After Claude finishes but before any commits are pushed, all new diffs and commit messages are scanned for:
+
+- Known secret format patterns (`sk-ant-*`, `ghp_*`, `ghs_*`, PEM private keys, etc.)
+- Exact value matches against secrets available to the workflow
+
+If a match is found, all commits are hard-reset and the push is aborted.
+
+### Base-branch isolation
+
+Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. See the [Custom agents](#custom-agents) section for details.
+
 ## PR template snippet
 
 Here's a complete block you can drop into `.github/pull_request_template.md`:
