@@ -4,11 +4,15 @@
  * Fetches unresolved review comments and/or CI failures from a PR,
  * pipes them to Claude CLI to apply fixes, then commits and pushes the result.
  *
+ * Claude runs inside a Docker sandbox container with no sudo, no secrets in
+ * the environment (except the Anthropic API key via a mounted file), and
+ * --cap-drop=ALL. See scripts/run-in-sandbox.sh for details.
+ *
  * Environment variables:
  *   GITHUB_TOKEN        — GitHub token (with contents:write, pull-requests:write, actions:read)
  *   GITHUB_REPOSITORY   — owner/repo
  *   PR_NUMBER           — Pull request number
- *   ANTHROPIC_API_KEY   — API key for Claude CLI
+ *   ANTHROPIC_API_KEY   — API key for Claude CLI (passed to sandbox via file mount, not env)
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
  *   MODEL               — Model to use (default: claude-sonnet-4-6)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
@@ -17,6 +21,8 @@
  *   PROJECT_CONTEXT     — Optional project context string (e.g. "You are reviewing a PR for **Tamanu**, a healthcare management system.")
  *   CUSTOM_RULES_PATH   — Optional path to repo-specific rules to append to the prompt
  *   SELF_WORKFLOW        — Name of this workflow (to exclude from CI failure checks)
+ *   SANDBOX_SCRIPT      — Path to run-in-sandbox.sh (default: .review-hero/scripts/run-in-sandbox.sh)
+ *   SANDBOX_IMAGE       — Docker image name for the sandbox (default: claude-sandbox:latest)
  */
 
 import {
@@ -54,6 +60,9 @@ const projectContext = process.env.PROJECT_CONTEXT ?? "";
 const customRulesPath = process.env.CUSTOM_RULES_PATH ?? "";
 const aiRulesPath = process.env.AI_RULES_PATH ?? "";
 const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
+const sandboxScript =
+  process.env.SANDBOX_SCRIPT ?? ".review-hero/scripts/run-in-sandbox.sh";
+const sandboxImage = process.env.SANDBOX_IMAGE ?? "claude-sandbox:latest";
 
 // ── GitHub API ───────────────────────────────────────────────────────────────
 
@@ -346,40 +355,72 @@ function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
-function runClaude(prompt, { commitHelperPath } = {}) {
+// Container path where the commit helper is mounted by run-in-sandbox.sh
+const CONTAINER_COMMIT_HELPER = "/tools/git-commit-fix.mjs";
+
+function runClaude(prompt, { commitHelperHostPath } = {}) {
   if (!/^[a-z0-9.-]+$/.test(model)) {
     throw new Error(`Invalid model name: ${model}`);
   }
 
-  const tmpPath = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
-  writeFileSync(tmpPath, prompt);
+  const promptFile = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
+  writeFileSync(promptFile, prompt);
 
   // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
   // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
   // without having unrestricted shell access.
-  if (!fixCI && !commitHelperPath) {
-    throw new Error(
-      "commitHelperPath is required when not running in CI fix mode",
-    );
-  }
-  const commitTool = commitHelperPath ? `Bash(${commitHelperPath}:*)` : null;
+  const mode = fixCI ? "ci-fix" : "review-fix";
   const tools = fixCI
     ? "Read,Edit,Glob,Grep,Bash"
-    : `Read,Edit,Glob,Grep,${commitTool}`;
+    : `Read,Edit,Glob,Grep,Bash(${CONTAINER_COMMIT_HELPER}:*)`;
 
-  const raw = execSync(
-    `cat "${tmpPath}" | claude -p ` +
-      `--output-format json ` +
-      `--model "${model}" ` +
-      `--max-turns 30 ` +
-      `--allowedTools "${tools}"`,
-    {
-      encoding: "utf-8",
-      timeout: 10 * 60 * 1000,
-      maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env },
+  if (!fixCI && !commitHelperHostPath) {
+    throw new Error(
+      "commitHelperHostPath is required when not running in CI fix mode",
+    );
+  }
+
+  // Run Claude inside the Docker sandbox. The sandbox script handles:
+  // - Mounting the repo worktree (rw)
+  // - Passing the API key via a file mount (not env var or CLI flag)
+  // - Dropping all capabilities, enforcing non-root, no sudo
+  // - Mounting the commit helper read-only at /tools/git-commit-fix.mjs
+  // - For CI-fix: mounting host tool directories read-only
+  const args = [
+    sandboxScript,
+    "--mode",
+    mode,
+    "--prompt",
+    promptFile,
+    "--model",
+    model,
+    "--max-turns",
+    "30",
+    "--tools",
+    tools,
+    "--image",
+    sandboxImage,
+  ];
+
+  if (commitHelperHostPath) {
+    args.push("--commit-helper", commitHelperHostPath);
+  }
+
+  const raw = execFileSync("sh", args, {
+    encoding: "utf-8",
+    timeout: 10 * 60 * 1000,
+    maxBuffer: 10 * 1024 * 1024,
+    // Only pass the minimum env the sandbox script needs. Notably absent:
+    // GITHUB_TOKEN, REVIEW_HERO_APP_ID, REVIEW_HERO_PRIVATE_KEY.
+    // The sandbox script reads ANTHROPIC_API_KEY and writes it to a temp
+    // file that is mounted into the container — it never reaches the
+    // container's environment or CLI arguments.
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     },
-  );
+  });
 
   logClaudeSession(raw);
   return raw;
@@ -508,6 +549,66 @@ function pushChanges() {
   console.log("Pushed auto-fix commits");
 }
 
+// ── Secret scanning ──────────────────────────────────────────────────────────
+
+/**
+ * Scan all commits between headBefore and HEAD for leaked secrets.
+ * Returns { leaked: true, detail: string } if a secret pattern is found,
+ * or { leaked: false } if clean.
+ *
+ * This is a defence-in-depth measure — the Docker sandbox should prevent
+ * Claude from accessing most secrets, but if prompt injection somehow
+ * succeeds in extracting the API key (e.g. from /run/secrets/api-key inside
+ * the container) and writing it to a file, this scan catches it before push.
+ */
+function scanCommitsForSecrets(headBefore) {
+  const diff = execFileSync("git", ["diff", `${headBefore}..HEAD`], {
+    encoding: "utf-8",
+  });
+  const messages = execFileSync(
+    "git",
+    ["log", `${headBefore}..HEAD`, "--format=%s%n%b"],
+    { encoding: "utf-8" },
+  );
+  const combined = diff + "\n" + messages;
+
+  // Known secret format patterns
+  const patterns = [
+    { regex: /sk-ant-[a-zA-Z0-9_-]{20,}/, name: "Anthropic API key" },
+    { regex: /ghp_[a-zA-Z0-9]{36,}/, name: "GitHub personal access token" },
+    { regex: /ghs_[a-zA-Z0-9]{36,}/, name: "GitHub server-to-server token" },
+    { regex: /ghu_[a-zA-Z0-9]{36,}/, name: "GitHub user-to-server token" },
+    { regex: /github_pat_[a-zA-Z0-9_]{22,}/, name: "GitHub fine-grained PAT" },
+    {
+      regex: /-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----/,
+      name: "PEM private key",
+    },
+  ];
+
+  for (const { regex, name } of patterns) {
+    if (regex.test(combined)) {
+      return { leaked: true, detail: `pattern match: ${name}` };
+    }
+  }
+
+  // Check for exact values of the secrets we know about. We compare the raw
+  // values rather than logging them so we don't accidentally leak them in the
+  // workflow output.
+  const knownSecrets = [
+    process.env.ANTHROPIC_API_KEY,
+    process.env.GITHUB_TOKEN,
+    process.env.REVIEW_HERO_PRIVATE_KEY,
+  ].filter((s) => s && s.length >= 8);
+
+  for (const secret of knownSecrets) {
+    if (combined.includes(secret)) {
+      return { leaked: true, detail: "exact secret value match" };
+    }
+  }
+
+  return { leaked: false };
+}
+
 // ── GitHub interactions ──────────────────────────────────────────────────────
 
 async function resolveThread(threadId) {
@@ -619,24 +720,25 @@ async function main() {
     return;
   }
 
-  // Copy the commit helper to /tmp so Claude cannot modify it via the Edit
-  // tool during the session — the Bash restriction only limits which scripts
-  // can be *executed*, but Edit has unrestricted write access to the worktree.
+  // Copy the commit helper to /tmp so it can be mounted read-only into the
+  // Docker sandbox. Inside the container it appears at /tools/git-commit-fix.mjs.
   const commitHelperSrc = ".review-hero/scripts/git-commit-fix.mjs";
   const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.mjs`;
   copyFileSync(commitHelperSrc, commitHelperTmp);
   chmodSync(commitHelperTmp, 0o755);
 
+  // The prompt references the *container* path for the commit helper, since
+  // Claude runs inside the sandbox and sees it mounted at /tools/.
   const prompt = buildPrompt(comments, ciFailures, {
-    commitHelperPath: commitHelperTmp,
+    commitHelperPath: CONTAINER_COMMIT_HELPER,
   });
   const headBefore = execSync("git rev-parse HEAD", {
     encoding: "utf-8",
   }).trim();
-  console.log("Running Claude to apply fixes...");
+  console.log("Running Claude in sandbox to apply fixes...");
   let raw;
   try {
-    raw = runClaude(prompt, { commitHelperPath: commitHelperTmp });
+    raw = runClaude(prompt, { commitHelperHostPath: commitHelperTmp });
   } catch (err) {
     console.error(`Claude failed: ${err.message}`);
 
@@ -651,8 +753,21 @@ async function main() {
     }).trim();
     if (headBefore !== headAfterFailure) {
       console.log(
-        "Claude failed but made commits before failing — pushing partial fixes",
+        "Claude failed but made commits before failing — scanning and pushing partial fixes",
       );
+      const partialScan = scanCommitsForSecrets(headBefore);
+      if (partialScan.leaked) {
+        core.error(
+          `Secret detected in partial commits (${partialScan.detail}) — resetting`,
+        );
+        execSync(`git reset --hard ${headBefore}`);
+        await postComment(
+          `🦸 **Review Hero Auto-Fix** aborted — detected potential secret leakage in committed content. ` +
+            `No changes were pushed. Check the workflow logs.`,
+        );
+        await uncheckCheckboxes();
+        process.exit(1);
+      }
       pushChanges();
       await postComment(
         `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
@@ -766,6 +881,25 @@ async function main() {
 
   let pushed = false;
   if (hasCommitsToPush) {
+    // Defence-in-depth: scan all committed diffs and messages for leaked
+    // secrets before pushing. The Docker sandbox should prevent Claude from
+    // accessing most secrets, but prompt injection could potentially extract
+    // the API key from /run/secrets/api-key inside the container and embed
+    // it in a file or commit message.
+    const scanResult = scanCommitsForSecrets(headBefore);
+    if (scanResult.leaked) {
+      core.error(
+        `Secret detected in commits (${scanResult.detail}) — resetting to ${headBefore}`,
+      );
+      execSync(`git reset --hard ${headBefore}`);
+      await postComment(
+        `🦸 **Review Hero Auto-Fix** aborted — detected potential secret leakage in committed content. ` +
+          `No changes were pushed. Check the workflow logs.`,
+      );
+      await uncheckCheckboxes();
+      process.exit(1);
+    }
+
     pushChanges();
     pushed = true;
   } else {
