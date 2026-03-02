@@ -340,6 +340,33 @@ Repos can [disable the sandbox](#disabling-the-sandbox) if needed. See [Sandbox 
 | Unsandboxed escape hatch | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` |
 | ANTHROPIC_API_KEY | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) |
 
+### Protected paths
+
+The following directories are denied at **both** the sandbox filesystem level (blocks Bash subprocesses) and the tool permissions level (blocks Claude's Edit tool), providing two independent layers of protection:
+
+| Path | Reason |
+|------|--------|
+| `.review-hero/` | Review Hero tooling (scripts, prompts). The [commit helper](#committing) provides a third layer by refusing to stage files here. |
+| `.github/workflows/` | Workflow files are arbitrary code execution on push — modifying them is a privilege escalation vector. |
+| `.git/hooks/` | Git hooks execute automatically during git operations (e.g. the commit helper runs `git commit`, which triggers `post-commit`). |
+
+### Git credential stripping
+
+`actions/checkout` stores the GitHub token in `.git/config` as an HTTP extraheader. In the auto-fix workflow this is the **GitHub App token** with push access — a high-value target for prompt injection. Before running Claude, `run-claude.mjs` strips all `http.*.extraheader` entries from the local git config and restores them in a `finally` block so the calling script can still push afterwards. This is complementary to the sandbox network isolation, which independently blocks `github.com` from sandboxed Bash commands.
+
+### Network isolation
+
+The sandbox proxy blocks all outbound network traffic from sandboxed Bash commands unless the domain is pre-approved. In headless mode (`-p`), there is no user to approve new domains, so outbound requests from Bash are effectively denied by default. This blocks:
+
+- **GitHub API** (`api.github.com`) — prevents token use even if credentials were somehow discovered
+- **Runner token endpoints** (`*.actions.githubusercontent.com`) — blocks OIDC token and runtime service access
+- **Arbitrary exfiltration** — no data can be sent to attacker-controlled servers
+
+Claude CLI itself runs outside the sandbox and can still reach the Anthropic API (`api.anthropic.com`) for model requests.
+
+### API key handling
+
+The Anthropic API key is written to a temporary file (mode `0o600`) and exposed to Claude CLI via the `apiKeyHelper` setting (`cat /path/to/key`). The `ANTHROPIC_API_KEY` environment variable is **not** forwarded to the Claude process, so sandboxed Bash commands cannot access it via the environment. The temp file is additionally protected by `permissions.deny` (blocking Claude's Read tool) and `sandbox.filesystem.denyRead` (blocking sandboxed Bash). The temp file is deleted in a `finally` block after Claude exits.
 
 ### Pre-push secret scanning
 

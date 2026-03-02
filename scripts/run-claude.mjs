@@ -10,6 +10,8 @@
  *   - Managing the API key via apiKeyHelper — the key is written to a temp
  *     file and never forwarded as an env var to the Claude process
  *   - Setting tool permissions and filesystem restrictions per mode
+ *   - Stripping git credentials from .git/config so sandboxed commands
+ *     cannot extract the GitHub token embedded by actions/checkout
  *   - Disabling the sandbox when the caller opts out via sandboxDisabled
  *
  * Usage:
@@ -54,6 +56,15 @@
  *     - permissions.deny blocks the Read tool from accessing it
  *     - sandbox.filesystem.denyRead blocks sandboxed Bash from reading it
  *   The temp file is deleted in a try/finally block after Claude exits.
+ *
+ * Git credential handling:
+ *   actions/checkout stores the GitHub token in .git/config as an HTTP
+ *   extraheader. In the auto-fix workflow this is the GitHub App token with
+ *   push access — a high-value target for prompt injection. Before running
+ *   Claude, this script strips all extraheader credentials from .git/config
+ *   and restores them in the finally block so that the calling script (e.g.
+ *   auto-fix.mjs) can still push afterwards. This is complementary to the
+ *   sandbox network isolation which blocks github.com from sandboxed Bash.
  *
  * Exit code: passes through the Claude CLI exit code.
  */
@@ -156,6 +167,84 @@ if (!ANTHROPIC_API_KEY) {
   throw new Error("ANTHROPIC_API_KEY is not set");
 }
 
+// ── Git credential helpers ───────────────────────────────────────────────────
+// actions/checkout stores the GitHub token in .git/config as:
+//   [http "https://github.com/"]
+//       extraheader = AUTHORIZATION: basic <base64(x-access-token:TOKEN)>
+//
+// In the auto-fix workflow this is the GitHub App token with push access.
+// We strip it before running Claude and restore it in the finally block so
+// that (a) Claude cannot extract it from .git/config and (b) the calling
+// script can still push afterwards.
+
+/**
+ * Read and remove all http.*.extraheader entries from the repo's local git
+ * config. Returns an array of {key, value} pairs for later restoration.
+ */
+function stripGitCredentials() {
+  // Enumerate every http.<url>.extraheader entry in local config. Each line
+  // from --get-regexp is formatted as "http.<url>.extraheader <value>".
+  let raw;
+  try {
+    raw = execFileSync(
+      "git",
+      ["config", "--local", "--get-regexp", "^http\\..*\\.extraheader$"],
+      { encoding: "utf-8", cwd: REPO_ROOT, stdio: ["pipe", "pipe", "pipe"] },
+    );
+  } catch {
+    // Exit code 1 means no matches — nothing to strip.
+    return [];
+  }
+
+  const entries = [];
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    // Format: "key value" — split on the first space.
+    const spaceIdx = line.indexOf(" ");
+    if (spaceIdx === -1) continue;
+    entries.push({
+      key: line.slice(0, spaceIdx),
+      value: line.slice(spaceIdx + 1),
+    });
+  }
+
+  // Remove all matched entries.
+  for (const { key } of entries) {
+    try {
+      execFileSync("git", ["config", "--local", "--unset-all", key], {
+        cwd: REPO_ROOT,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // Best-effort — may already be gone if two entries share a key.
+    }
+  }
+
+  if (entries.length > 0) {
+    console.error(
+      `Stripped ${entries.length} git credential(s) from .git/config`,
+    );
+  }
+
+  return entries;
+}
+
+/**
+ * Restore previously stripped git credentials.
+ */
+function restoreGitCredentials(entries) {
+  for (const { key, value } of entries) {
+    try {
+      execFileSync("git", ["config", "--local", "--add", key, value], {
+        cwd: REPO_ROOT,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // Best-effort — don't fail the run if restoration fails.
+    }
+  }
+}
+
 // ── Write API key to a temp file ─────────────────────────────────────────────
 // Exposed to Claude CLI via apiKeyHelper ("cat <path>"). The env var is NOT
 // forwarded to the Claude process, so sandboxed Bash commands cannot access
@@ -167,20 +256,38 @@ const tmpDir = mkdtempSync(join(tmpdir(), "claude-run-"));
 const apiKeyFile = join(tmpDir, "api-key");
 const settingsFile = join(tmpDir, "settings.json");
 
+// Strip git credentials before entering the try block so they are always
+// restored in the finally block, even if writing the API key file fails.
+const strippedGitCreds = stripGitCredentials();
+
 try {
   writeFileSync(apiKeyFile, ANTHROPIC_API_KEY, { mode: 0o600 });
 
   // ── Build sandbox filesystem restrictions ──────────────────────────────
   // By default the sandbox allows reads everywhere and writes only to CWD
   // (the repo root). We add mode-specific write paths, deny reads to the
-  // temp directory that contains the API key, and deny writes to
-  // .review-hero/ so sandboxed Bash cannot tamper with the tooling.
+  // temp directory that contains the API key, and deny writes to sensitive
+  // directories so sandboxed Bash cannot tamper with them.
+  //
+  // Protected directories:
+  //   .review-hero/        — Review Hero tooling (scripts, prompts)
+  //   .github/workflows/   — Workflow files are arbitrary code execution on
+  //                          push; modifying them is a privilege escalation
+  //   .git/hooks/          — Git hooks execute automatically during git
+  //                          operations (e.g. the commit helper calls
+  //                          git commit, which would trigger post-commit)
 
   const reviewHeroDir = join(REPO_ROOT, ".review-hero");
+  const workflowsDir = join(REPO_ROOT, ".github", "workflows");
+  const gitHooksDir = join(REPO_ROOT, ".git", "hooks");
 
   const allowWrite = [];
   const denyRead = [`//${tmpDir}`];
-  const denyWrite = [`//${reviewHeroDir}`];
+  const denyWrite = [
+    `//${reviewHeroDir}`,
+    `//${workflowsDir}`,
+    `//${gitHooksDir}`,
+  ];
 
   switch (MODE) {
     case "review-agent":
@@ -211,10 +318,16 @@ try {
     permissions: {
       allow: TOOLS,
       // Deny Claude's own tools (Read, Edit) access to the API key file and
-      // the .review-hero/ directory. The sandbox filesystem restrictions
-      // below are the OS-level equivalent for Bash subprocesses; together
-      // they form two independent layers of protection.
-      deny: [`Read(${apiKeyFile})`, `Edit(${reviewHeroDir})`],
+      // to directories that should never be modified during a review or fix.
+      // The sandbox filesystem restrictions below are the OS-level equivalent
+      // for Bash subprocesses; together they form two independent layers of
+      // protection.
+      deny: [
+        `Read(${apiKeyFile})`,
+        `Edit(${reviewHeroDir})`,
+        `Edit(${workflowsDir})`,
+        `Edit(${gitHooksDir})`,
+      ],
     },
     sandbox: {
       enabled: !SANDBOX_DISABLED,
@@ -276,6 +389,11 @@ try {
 
   process.stdout.write(result);
 } finally {
+  // ── Restore git credentials ──────────────────────────────────────────
+  // Must happen before cleanup so the calling script (auto-fix.mjs) can
+  // still push using the token that actions/checkout configured.
+  restoreGitCredentials(strippedGitCreds);
+
   // Clean up the API key and settings files — always runs because we're in
   // a finally block. Best-effort: don't fail the run if removal fails.
   try {
