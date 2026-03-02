@@ -77,6 +77,12 @@ jobs:
           ref: ${{ github.head_ref }}
           token: ${{ steps.app-token.outputs.token }}
 
+      # ── Fetch base branch ────────────────────────────────────────────
+      # Config, auto-fix rules, and AI rules are read from the base branch
+      # so a malicious PR cannot inject prompt content via these files.
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.sha }} --depth=1
+
       # ── Checkout review-hero (for scripts + prompts) ─────────────────
       - name: Checkout review-hero
         uses: actions/checkout@v6
@@ -100,14 +106,18 @@ jobs:
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # ── Read project context from caller config ──────────────────────
+      # ── Read project context from caller config (base branch) ────────
       - name: Read caller config
         id: config
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          CONFIG=".github/review-hero/config.yml"
-          if [ -f "$CONFIG" ]; then
-            PROJECT=$(yq -r '.project // ""' "$CONFIG")
-            DESCRIPTION=$(yq -r '.description // ""' "$CONFIG")
+          # Read config from the base branch, not the PR branch, to prevent
+          # a malicious PR from injecting prompt content via config values.
+          CONFIG_CONTENT=$(git show "$BASE_SHA:.github/review-hero/config.yml" 2>/dev/null || echo "")
+          if [ -n "$CONFIG_CONTENT" ]; then
+            PROJECT=$(echo "$CONFIG_CONTENT" | yq -r '.project // ""')
+            DESCRIPTION=$(echo "$CONFIG_CONTENT" | yq -r '.description // ""')
             if [ -n "$PROJECT" ] && [ -n "$DESCRIPTION" ]; then
               CONTEXT="You are fixing review comments and/or CI failures on a PR for **${PROJECT}**, ${DESCRIPTION}."
             elif [ -n "$PROJECT" ]; then
@@ -118,19 +128,51 @@ jobs:
           else
             CONTEXT=""
           fi
-          echo "project_context=${CONTEXT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "project_context<<REVIEW_HERO_EOF"
+            echo "$CONTEXT"
+            echo "REVIEW_HERO_EOF"
+          } >> "$GITHUB_OUTPUT"
 
-          # Check for custom auto-fix rules
-          RULES=".github/review-hero/auto-fix-rules.md"
-          if [ -f "$RULES" ]; then
-            echo "custom_rules_path=${RULES}" >> "$GITHUB_OUTPUT"
+          # Extract auto-fix rules from the base branch to a temp file
+          RULES_TMP="/tmp/base-auto-fix-rules.md"
+          git show "$BASE_SHA:.github/review-hero/auto-fix-rules.md" > "$RULES_TMP" 2>/dev/null || true
+          if [ -s "$RULES_TMP" ]; then
+            echo "custom_rules_path=${RULES_TMP}" >> "$GITHUB_OUTPUT"
           else
             echo "custom_rules_path=" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── Detect AI rules ─────────────────────────────────────────────
+      # ── Detect AI rules (from base branch) ──────────────────────────
       - name: Detect AI rules
-        run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Extract known AI rules files from the base branch into a temp
+          # directory, then run detection against it. This prevents a PR
+          # from injecting prompt content via AI rules files.
+          RULES_DIR="/tmp/base-ai-rules-root"
+          mkdir -p "$RULES_DIR/.github" "$RULES_DIR/.cursor/rules" "$RULES_DIR/.rules"
+
+          for f in .cursorrules .windsurfrules .clinerules .rules; do
+            git show "$BASE_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f"
+          done
+          git show "$BASE_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
+            || rm -f "$RULES_DIR/.github/copilot-instructions.md"
+
+          # Cursor rules directory
+          for f in $(git ls-tree --name-only "$BASE_SHA" .cursor/rules/ 2>/dev/null || true); do
+            fname=$(basename "$f")
+            case "$fname" in *.md|*.mdc) git show "$BASE_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
+          done
+
+          # Zed rules directory
+          for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
+            fname=$(basename "$f")
+            case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
+          done
+
+          sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md "$RULES_DIR"
 
       # ── Run auto-fix ─────────────────────────────────────────────────
       - name: Run auto-fix
