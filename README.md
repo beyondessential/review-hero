@@ -207,6 +207,17 @@ The triage step will automatically discover it and include it in Haiku's agent s
 
 > **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged.
 
+### Disabling CI fix
+
+By default, the **Auto-fix CI failures** checkbox is available to PR authors when the auto-fix workflow is set up. If your repo wants to refuse CI fixes altogether — regardless of whether the checkbox is present or checked — set `auto_fix.ci` to `false` in `config.yml`:
+
+```yaml
+auto_fix:
+  ci: false
+```
+
+When disabled, checking the CI fix checkbox has no effect (though you should also remove it from the PR template). This can be used for a stricter security posture, or for policy reasons.
+
 ### Sandbox configuration
 
 By default, every Claude invocation uses [Claude's native sandboxing](https://code.claude.com/docs/en/sandboxing) for filesystem and network isolation (see [Security](#security)). On Linux (GitHub Actions runners), this uses [bubblewrap](https://github.com/containers/bubblewrap) and socat, which are installed automatically by the workflow. Repos that need to opt out of sandboxing can configure it in `config.yml`:
