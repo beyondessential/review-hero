@@ -103,8 +103,8 @@ jobs:
       - name: Install review-hero dependencies
         run: npm ci --prefix .review-hero
 
-      - name: Install Claude CLI
-        run: npm install -g @anthropic-ai/claude-code
+      - name: Build Claude sandbox image
+        run: docker build -t claude-sandbox:latest -f .review-hero/docker/Dockerfile .review-hero/docker
 
       # ── Read project context from caller config (base branch) ────────
       - name: Read caller config
@@ -190,4 +190,6 @@ jobs:
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
           AI_RULES_PATH: /tmp/ai-rules.md
           SELF_WORKFLOW: ${{ github.workflow }}
+          SANDBOX_SCRIPT: .review-hero/scripts/run-in-sandbox.sh
+          SANDBOX_IMAGE: claude-sandbox:latest
         run: node .review-hero/scripts/auto-fix.mjs
