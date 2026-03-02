@@ -28,6 +28,10 @@ PR checkbox checked
 
 ## Prerequisites (one-time org admin setup)
 
+> [!WARNING]
+> At the moment this app is not configured to be possible to use outside of the beyondessential org.
+> You'll need to fork it and create your own app for your own organisation.
+
 ### 1. Configure the Review Hero GitHub App
 
 The app needs these permissions:
