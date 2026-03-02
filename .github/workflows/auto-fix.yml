@@ -40,7 +40,12 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            if (context.payload.action !== 'edited') {
+            const action = context.payload.action;
+            // Only check the body on events where the user could have ticked
+            // a checkbox: opened (pre-ticked template), reopened, or edited.
+            // Ignore synchronize — auto-fix pushes commits itself, so
+            // re-triggering on new pushes would cause an infinite loop.
+            if (action !== 'edited' && action !== 'opened' && action !== 'reopened') {
               core.setOutput('fix_reviews', 'false');
               core.setOutput('fix_ci', 'false');
               return;

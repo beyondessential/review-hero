@@ -86,7 +86,7 @@ Create `.github/workflows/ai-review.yml` in your repo:
 name: Review Hero
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, reopened, edited]
 
 permissions:
   contents: read
@@ -99,6 +99,8 @@ jobs:
 ```
 
 `secrets: inherit` passes through both the org-level app credentials and the repo-level Anthropic key automatically.
+
+> **Tip:** If you use `trigger: always` and want reviews to re-run on every push, add `synchronize` to the `types` list. This is not included by default to avoid unnecessary workflow invocations — in `checkbox` mode (the default) `synchronize` events are ignored anyway.
 
 ### 2. Add the checkbox to your PR template
 
@@ -124,7 +126,7 @@ Create `.github/workflows/ai-auto-fix.yml`:
 name: Review Hero Auto-Fix
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, reopened, edited]
 
 permissions:
   actions: read
@@ -136,6 +138,8 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
     secrets: inherit
 ```
+
+> **Note:** Do _not_ add `synchronize` here — auto-fix pushes commits to the PR branch, so triggering on new pushes would cause an infinite loop.
 
 Then add the checkboxes to your PR template:
 
