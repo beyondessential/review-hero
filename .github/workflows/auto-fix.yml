@@ -79,7 +79,8 @@ jobs:
 
       # ── Fetch base branch ────────────────────────────────────────────
       # Config, auto-fix rules, and AI rules are read from the base branch
-      # so a malicious PR cannot inject prompt content via these files.
+      # so a malicious PR cannot inject prompt content or tamper with the
+      # sandbox configuration.
       - name: Fetch base branch
         run: git fetch origin ${{ github.event.pull_request.base.sha }} --depth=1
 
@@ -103,10 +104,7 @@ jobs:
       - name: Install review-hero dependencies
         run: npm ci --prefix .review-hero
 
-      - name: Install Claude CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      # ── Read project context from caller config (base branch) ────────
+      # ── Read project context + sandbox config from caller config ─────
       - name: Read caller config
         id: config
         env:
@@ -143,6 +141,45 @@ jobs:
             echo "custom_rules_path=" >> "$GITHUB_OUTPUT"
           fi
 
+          # ── Sandbox config ──────────────────────────────────────────
+          SANDBOX_DISABLED="false"
+
+          if [ -n "$CONFIG_CONTENT" ]; then
+            SANDBOX_DISABLED=$(echo "$CONFIG_CONTENT" | yq -r '.sandbox.dangerousDisableSandbox // false')
+          fi
+
+          # Normalise disabled to strict "true"/"false"
+          if [ "$SANDBOX_DISABLED" = "true" ]; then
+            SANDBOX_DISABLED="true"
+          else
+            SANDBOX_DISABLED="false"
+          fi
+
+          echo "sandbox_disabled=$SANDBOX_DISABLED" >> "$GITHUB_OUTPUT"
+
+          if [ "$SANDBOX_DISABLED" = "true" ]; then
+            echo "::warning::Sandbox is disabled via dangerousDisableSandbox. Claude will run without native sandboxing."
+          else
+            echo "Native sandbox enabled (bubblewrap on Linux)"
+          fi
+
+      # ── Sandbox warning ──────────────────────────────────────────────
+      - name: "⚠️ Sandbox disabled"
+        if: steps.config.outputs.sandbox_disabled == 'true'
+        run: |
+          echo "::warning::Running Claude without native sandboxing. This is enabled by dangerousDisableSandbox in the repo's .github/review-hero/config.yml."
+
+      # ── Install Claude CLI + sandbox dependencies ────────────────────
+      # Claude's native sandbox uses bubblewrap (bwrap) and socat on Linux
+      # for filesystem and network isolation. When the sandbox is disabled
+      # we skip bubblewrap/socat since they are not needed.
+      - name: Install sandbox dependencies
+        if: steps.config.outputs.sandbox_disabled != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
       # ── Detect AI rules (from base branch) ──────────────────────────
       - name: Detect AI rules
         env:
@@ -152,9 +189,9 @@ jobs:
           # directory, then run detection against it. This prevents a PR
           # from injecting prompt content via AI rules files.
           RULES_DIR="/tmp/base-ai-rules-root"
-          mkdir -p "$RULES_DIR/.github" "$RULES_DIR/.cursor/rules" "$RULES_DIR/.rules"
+          mkdir -p "$RULES_DIR/.github" "$RULES_DIR/.cursor/rules"
 
-          for f in .cursorrules .windsurfrules .clinerules .rules; do
+          for f in .cursorrules .windsurfrules .clinerules; do
             git show "$BASE_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f"
           done
           git show "$BASE_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
@@ -166,11 +203,15 @@ jobs:
             case "$fname" in *.md|*.mdc) git show "$BASE_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
           done
 
-          # Zed rules directory
-          for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
-            fname=$(basename "$f")
-            case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
-          done
+          # .rules can be either a file or a directory
+          if ! git show "$BASE_SHA:.rules" > "$RULES_DIR/.rules" 2>/dev/null; then
+            rm -f "$RULES_DIR/.rules"
+            mkdir -p "$RULES_DIR/.rules"
+            for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
+              fname=$(basename "$f")
+              case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
+            done
+          fi
 
           sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md "$RULES_DIR"
 
@@ -190,4 +231,6 @@ jobs:
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
           AI_RULES_PATH: /tmp/ai-rules.md
           SELF_WORKFLOW: ${{ github.workflow }}
+          CLAUDE_SCRIPT: .review-hero/scripts/run-claude.mjs
+          SANDBOX_DISABLED: ${{ steps.config.outputs.sandbox_disabled }}
         run: node .review-hero/scripts/auto-fix.mjs

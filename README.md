@@ -207,6 +207,28 @@ The triage step will automatically discover it and include it in Haiku's agent s
 
 > **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged.
 
+### Sandbox configuration
+
+By default, every Claude invocation uses [Claude's native sandboxing](https://code.claude.com/docs/en/sandboxing) for filesystem and network isolation (see [Security](#security)). On Linux (GitHub Actions runners), this uses [bubblewrap](https://github.com/containers/bubblewrap) and socat, which are installed automatically by the workflow. Repos that need to opt out of sandboxing can configure it in `config.yml`:
+
+```yaml
+sandbox:
+  # Disable native sandboxing (Claude runs without filesystem/network isolation)
+  # dangerousDisableSandbox: true
+```
+
+#### Disabling the sandbox
+
+> [!CAUTION]
+> Disabling the sandbox means Claude's Bash commands have unrestricted filesystem and network access on the runner. The API key is still secured via `apiKeyHelper` (never passed as an env var), but a prompt injection attack could potentially access other files or network resources. Only enable this if you understand the security implications and accept the risk.
+
+```yaml
+sandbox:
+  dangerousDisableSandbox: true
+```
+
+When the sandbox is disabled, `run-claude.mjs` sets `sandbox.enabled: false` in Claude's settings. Claude CLI is still invoked the same way, and the API key is still secured via `apiKeyHelper` — only the OS-level filesystem and network isolation is removed.
+
 ### Built-in ignore patterns
 
 These files are always stripped from the diff before triage and agent input:
@@ -301,6 +323,61 @@ Max turns scale with the filtered diff size and are capped at 10:
 - One Sonnet session with up to 30 tool-use turns.
 - Has `Read`, `Edit`, `Glob`, and `Grep` tools. If fixing CI failures, `Bash` is also enabled so it can run commands to verify fixes.
 - Cost depends on how many review comments / CI failures need fixing, but is typically comparable to a single review agent run.
+
+## Security
+
+Review Hero uses [Claude's native sandboxing](https://code.claude.com/docs/en/sandboxing) (bubblewrap on Linux) to limit the blast radius of prompt injection attacks. Since Claude processes untrusted input (PR diffs, review comments, CI logs), the sandbox provides OS-level filesystem and network isolation to prevent a manipulated model from extracting secrets or escalating privileges.
+
+Repos can [disable the sandbox](#disabling-the-sandbox) if needed. See [Sandbox configuration](#sandbox-configuration) for details.
+
+### Sandbox properties
+
+| Property | Review agents | Auto-fix (review) | Auto-fix (CI) |
+|----------|--------------|-------------------|---------------|
+| Filesystem writes | CWD only (default) | CWD + `/tmp` | CWD + `/tmp` |
+| Network | Blocked (default) | Blocked (default) | Allowed |
+| Bash access | Scoped to `git log`, `git show`, `git diff` | Scoped to commit helper | Unrestricted (needs build tools) |
+| Unsandboxed escape hatch | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` |
+| ANTHROPIC_API_KEY | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) |
+
+### Protected paths
+
+The following directories are denied at **both** the sandbox filesystem level (blocks Bash subprocesses) and the tool permissions level (blocks Claude's Edit tool), providing two independent layers of protection:
+
+| Path | Reason |
+|------|--------|
+| `.review-hero/` | Review Hero tooling (scripts, prompts). The [commit helper](#committing) provides a third layer by refusing to stage files here. |
+| `.github/workflows/` | Workflow files are arbitrary code execution on push — modifying them is a privilege escalation vector. |
+| `.git/hooks/` | Git hooks execute automatically during git operations (e.g. the commit helper runs `git commit`, which triggers `post-commit`). |
+
+### Git credential stripping
+
+`actions/checkout` stores the GitHub token in `.git/config` as an HTTP extraheader. In the auto-fix workflow this is the **GitHub App token** with push access — a high-value target for prompt injection. Before running Claude, `run-claude.mjs` strips all `http.*.extraheader` entries from the local git config and restores them in a `finally` block so the calling script can still push afterwards. This is complementary to the sandbox network isolation, which independently blocks `github.com` from sandboxed Bash commands.
+
+### Network isolation
+
+For **review-agent** and **review-fix**, the sandbox blocks all outbound network from Bash commands by default. In headless mode (`-p`) there is no user to approve new domains, so every outbound request is denied. These modes don't need network access.
+
+For **ci-fix**, build tools need to download dependencies, run linters, and talk to package registries, so we allow everything.
+
+Claude CLI itself runs outside the sandbox and can still reach the Anthropic API (`api.anthropic.com`) for model requests.
+
+### API key handling
+
+The Anthropic API key is written to a temporary file (mode `0o600`) and exposed to Claude CLI via the `apiKeyHelper` setting (`cat /path/to/key`). The `ANTHROPIC_API_KEY` environment variable is **not** forwarded to the Claude process, so sandboxed Bash commands cannot access it via the environment. The temp file is additionally protected by `permissions.deny` (blocking Claude's Read tool) and `sandbox.filesystem.denyRead` (blocking sandboxed Bash). The temp file is deleted in a `finally` block after Claude exits.
+
+### Pre-push secret scanning
+
+After Claude finishes but before any commits are pushed, all new diffs and commit messages are scanned for:
+
+- Known secret format patterns (`sk-ant-*`, `ghp_*`, `ghs_*`, PEM private keys, etc.)
+- Exact value matches against secrets available to the workflow
+
+If a match is found, all commits are hard-reset and the push is aborted.
+
+### Base-branch isolation
+
+Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content or disabling the sandbox. See the [Custom agents](#custom-agents) and [Sandbox configuration](#sandbox-configuration) sections for details.
 
 ## PR template snippet
 

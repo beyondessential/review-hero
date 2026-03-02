@@ -38,6 +38,7 @@ jobs:
       max_turns: ${{ steps.triage.outputs.max_turns }}
       agent_names: ${{ steps.triage.outputs.agent_names }}
       project_context: ${{ steps.config.outputs.project_context }}
+      sandbox_disabled: ${{ steps.sandbox.outputs.disabled }}
     steps:
       # ── Trigger check ────────────────────────────────────────────────
       - id: check
@@ -124,6 +125,35 @@ jobs:
             echo "REVIEW_HERO_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # ── Read sandbox config from caller config ───────────────────────
+      # Sandbox settings are read from the base branch so a malicious PR
+      # cannot disable the sandbox.
+      - name: Read sandbox config
+        if: steps.check.outputs.should_run == 'true'
+        id: sandbox
+        run: |
+          CONFIG="caller/.github/review-hero/config.yml"
+          DISABLED="false"
+
+          if [ -f "$CONFIG" ]; then
+            DISABLED=$(yq -r '.sandbox.dangerousDisableSandbox // false' "$CONFIG")
+          fi
+
+          # Normalise disabled to strict "true"/"false"
+          if [ "$DISABLED" = "true" ]; then
+            DISABLED="true"
+          else
+            DISABLED="false"
+          fi
+
+          echo "disabled=$DISABLED" >> "$GITHUB_OUTPUT"
+
+          if [ "$DISABLED" = "true" ]; then
+            echo "::warning::Sandbox is disabled via dangerousDisableSandbox. Claude will run without native sandboxing."
+          else
+            echo "Native sandbox enabled (bubblewrap on Linux)"
+          fi
+
       # ── Get PR diff ──────────────────────────────────────────────────
       - name: Get PR diff
         if: steps.check.outputs.should_run == 'true'
@@ -180,7 +210,8 @@ jobs:
 
       # ── Checkout caller config from base branch ──────────────────────
       # Custom agent prompts and AI rules files are read from the base
-      # branch so that a PR cannot inject malicious prompt content.
+      # branch so that a PR cannot inject malicious prompt content or
+      # tamper with the sandbox configuration.
       - name: Checkout caller config (base branch)
         uses: actions/checkout@v6
         with:
@@ -213,6 +244,20 @@ jobs:
         with:
           node-version-file: ".node-version"
 
+      # ── Sandbox warning ──────────────────────────────────────────────
+      - name: "⚠️ Sandbox disabled"
+        if: needs.triage.outputs.sandbox_disabled == 'true'
+        run: |
+          echo "::warning::Running Claude without native sandboxing. This is enabled by dangerousDisableSandbox in the repo's .github/review-hero/config.yml."
+
+      # ── Install Claude CLI + sandbox dependencies ────────────────────
+      # Claude's native sandbox uses bubblewrap (bwrap) and socat on Linux
+      # for filesystem and network isolation. When the sandbox is disabled
+      # we skip bubblewrap/socat since they are not needed.
+      - name: Install sandbox dependencies
+        if: needs.triage.outputs.sandbox_disabled != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
@@ -228,9 +273,8 @@ jobs:
         run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
 
       # ── Run agent ────────────────────────────────────────────────────
-      - name: Run ${{ matrix.agent.key }} agent
+      - name: Build agent prompt
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
         run: |
@@ -265,11 +309,27 @@ jobs:
             printf '\n\n## PR Title\n\n%s\n\n## PR Diff\n\n```diff\n' "$PR_TITLE"
             cat /tmp/pr-filtered.diff
             echo '```'
-          } | claude -p \
-              --output-format json \
-              --model "${{ inputs.model }}" \
-              --max-turns ${{ needs.triage.outputs.max_turns }} \
-              --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+          } > /tmp/agent-prompt.md
+
+      # ── Run agent ────────────────────────────────────────────────────
+      # run-claude.mjs configures Claude's native sandbox (bubblewrap on
+      # Linux) and manages the API key via apiKeyHelper. When
+      # sandboxDisabled is true it sets sandbox.enabled=false in Claude's
+      # settings instead.
+      - name: Run ${{ matrix.agent.key }} agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          jq -n \
+            --arg mode "review-agent" \
+            --arg prompt "/tmp/agent-prompt.md" \
+            --arg model "${{ inputs.model }}" \
+            --argjson maxTurns '${{ needs.triage.outputs.max_turns }}' \
+            --argjson tools '["Read","Glob","Grep","Bash(git log:*)","Bash(git show:*)","Bash(git diff:*)"]' \
+            --argjson sandboxDisabled '${{ needs.triage.outputs.sandbox_disabled }}' \
+            '{mode: $mode, prompt: $prompt, model: $model, maxTurns: $maxTurns, tools: $tools, sandboxDisabled: $sandboxDisabled}' \
+            > /tmp/run-config.json
+          node .review-hero/scripts/run-claude.mjs /tmp/run-config.json \
             > /tmp/result.json
 
       - name: Upload result
