@@ -187,6 +187,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           sparse-checkout: |
             .github/review-hero
+            .github/copilot-instructions.md
             .cursorrules
             .windsurfrules
             .clinerules

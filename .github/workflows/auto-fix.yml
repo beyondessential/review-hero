@@ -162,12 +162,14 @@ jobs:
 
           # Cursor rules directory
           for f in $(git ls-tree --name-only "$BASE_SHA" .cursor/rules/ 2>/dev/null || true); do
-            case "$f" in *.md|*.mdc) git show "$BASE_SHA:.cursor/rules/$f" > "$RULES_DIR/.cursor/rules/$f" 2>/dev/null || true ;; esac
+            fname=$(basename "$f")
+            case "$fname" in *.md|*.mdc) git show "$BASE_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
           done
 
           # Zed rules directory
           for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
-            case "$f" in *.md) git show "$BASE_SHA:.rules/$f" > "$RULES_DIR/.rules/$f" 2>/dev/null || true ;; esac
+            fname=$(basename "$f")
+            case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
           done
 
           sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md "$RULES_DIR"
