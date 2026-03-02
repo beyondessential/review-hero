@@ -367,7 +367,7 @@ function runClaude(prompt, { commitHelperPath } = {}) {
     ? "Read,Edit,Glob,Grep,Bash"
     : `Read,Edit,Glob,Grep,${commitTool}`;
 
-  return execSync(
+  const raw = execSync(
     `cat "${tmpPath}" | claude -p ` +
       `--output-format json ` +
       `--model "${model}" ` +
@@ -380,6 +380,60 @@ function runClaude(prompt, { commitHelperPath } = {}) {
       env: { ...process.env },
     },
   );
+
+  logClaudeSession(raw);
+  return raw;
+}
+
+function logClaudeSession(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+
+    // Log cost and usage stats
+    const stats = [];
+    if (parsed.model) stats.push(`Model: ${parsed.model}`);
+    if (parsed.num_turns != null) {
+      if (parsed.max_turns != null) {
+        stats.push(`Turns: ${parsed.num_turns} (of ${parsed.max_turns} max)`);
+      } else {
+        stats.push(`Turns: ${parsed.num_turns} (of 30 max)`);
+      }
+    }
+    if (parsed.duration_ms != null) {
+      const secs = (parsed.duration_ms / 1000).toFixed(1);
+      stats.push(`Duration: ${secs}s`);
+    }
+    if (parsed.cost_usd != null) {
+      stats.push("Cost: $" + Number(parsed.cost_usd).toFixed(4));
+    }
+    if (parsed.usage) {
+      const u = parsed.usage;
+      if (u.input_tokens != null)
+        stats.push(`Input tokens: ${u.input_tokens.toLocaleString()}`);
+      if (u.output_tokens != null)
+        stats.push(`Output tokens: ${u.output_tokens.toLocaleString()}`);
+    }
+    if (stats.length > 0) {
+      core.info(`Claude session: ${stats.join(" | ")}`);
+    }
+
+    // Log the full response in a collapsible group
+    const transcript = typeof parsed.result === "string" ? parsed.result : raw;
+    core.startGroup("Claude auto-fix transcript");
+    try {
+      core.info(transcript);
+    } finally {
+      core.endGroup();
+    }
+  } catch {
+    // JSON parse failed — log the raw output directly
+    core.startGroup("Claude auto-fix output (raw)");
+    try {
+      core.info(raw);
+    } finally {
+      core.endGroup();
+    }
+  }
 }
 
 function parseClaudeResult(raw) {
@@ -623,6 +677,16 @@ async function main() {
   const results = parseClaudeResult(raw);
   const resultById = new Map(results.map((r) => [Number(r.id), r]));
 
+  // Log parsed results table
+  if (results.length > 0) {
+    core.info("Auto-fix results:");
+    for (const r of results) {
+      const icon = r.status === "fixed" ? "✅" : "⏭️";
+      const detail = r.status === "fixed" ? r.summary : r.reason;
+      core.info(`  ${icon} #${r.id} [${r.status}] ${detail ?? ""}`);
+    }
+  }
+
   // Determine which comments were fixed vs skipped
   const fixedComments = [];
   const skippedComments = [];
@@ -753,6 +817,14 @@ async function main() {
     );
   }
 
+  const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+  const runId = process.env.GITHUB_RUN_ID;
+  if (runId) {
+    summaryParts.push(
+      `\n\n[View logs](${serverUrl}/${repo}/actions/runs/${runId})`,
+    );
+  }
+
   await postComment(summaryParts.join(""));
   await uncheckCheckboxes();
   console.log("Done");
@@ -761,8 +833,13 @@ async function main() {
 main().catch(async (err) => {
   console.error(err);
   try {
+    const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+    const runId = process.env.GITHUB_RUN_ID;
+    const logsUrl = runId
+      ? `${serverUrl}/${repo}/actions/runs/${runId}`
+      : `${serverUrl}/${repo}/actions`;
     await postComment(
-      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](https://github.com/${repo}/actions) for details.`,
+      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${logsUrl}) for details.`,
     );
     await uncheckCheckboxes();
   } catch {
