@@ -74,21 +74,24 @@ const MODE = config.mode ?? "";
 const PROMPT_PATH = config.prompt ?? "";
 const MODEL = config.model ?? "";
 const MAX_TURNS = String(config.maxTurns ?? "");
-const TOOLS = config.tools ?? [
-  "Read",
-  "Glob",
-  "Grep",
-  "Bash(git log:*)",
-  "Bash(git show:*)",
-  "Bash(git diff:*)",
-];
+const TOOLS =
+  config.tools?.length > 0
+    ? config.tools
+    : [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash(git log:*)",
+        "Bash(git show:*)",
+        "Bash(git diff:*)",
+      ];
 const COMMIT_HELPER = config.commitHelper ?? "";
 const IMAGE = config.image ?? "claude-sandbox:latest";
 let REPO_ROOT = config.repoRoot ?? "";
 
 // ── Validate required fields ─────────────────────────────────────────────────
 
-if (!MODE || !PROMPT_PATH || !MODEL || !MAX_TURNS || !TOOLS) {
+if (!MODE || !PROMPT_PATH || !MODEL || !MAX_TURNS) {
   throw new Error(
     "config must include mode, prompt, model, maxTurns, and tools",
   );
@@ -149,7 +152,12 @@ const claudeSettings = {
   model: MODEL,
   permissions: {
     allow: TOOLS,
-    deny: ["Read(/run/secrets/api-key)"],
+  },
+  sandbox: {
+    enabled: true,
+    filesystem: {
+      denyRead: ["//run/secrets"],
+    },
   },
 };
 const INNER_SCRIPT = [
