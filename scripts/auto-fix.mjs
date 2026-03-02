@@ -19,7 +19,13 @@
  *   SELF_WORKFLOW        — Name of this workflow (to exclude from CI failure checks)
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  copyFileSync,
+  chmodSync,
+} from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import * as core from "@actions/core";
 
@@ -273,7 +279,7 @@ async function fetchCIFailures() {
 
 // ── Prompt building ──────────────────────────────────────────────────────────
 
-function buildPrompt(comments, ciFailures) {
+function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
   const sections = [];
 
   // Project context (if provided by the caller's config.yml)
@@ -281,8 +287,16 @@ function buildPrompt(comments, ciFailures) {
     sections.push(`## Project Context\n\n${projectContext}`);
   }
 
-  // Base auto-fix prompt
-  sections.push(readFileSync(promptPath, "utf-8"));
+  // Base auto-fix prompt — replace the placeholder helper path with the
+  // actual (possibly /tmp-copied) path so Claude invokes the right script.
+  let basePrompt = readFileSync(promptPath, "utf-8");
+  if (commitHelperPath) {
+    basePrompt = basePrompt.replaceAll(
+      ".review-hero/scripts/git-commit-fix.mjs",
+      commitHelperPath,
+    );
+  }
+  sections.push(basePrompt);
 
   // Custom rules from the consumer repo (if present)
   if (customRulesPath && existsSync(customRulesPath)) {
@@ -332,7 +346,7 @@ function buildPrompt(comments, ciFailures) {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
-function runClaude(prompt) {
+function runClaude(prompt, { commitHelperPath } = {}) {
   if (!/^[a-z0-9.-]+$/.test(model)) {
     throw new Error(`Invalid model name: ${model}`);
   }
@@ -340,7 +354,18 @@ function runClaude(prompt) {
   const tmpPath = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
   writeFileSync(tmpPath, prompt);
 
-  const tools = fixCI ? "Read,Edit,Glob,Grep,Bash" : "Read,Edit,Glob,Grep";
+  // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
+  // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
+  // without having unrestricted shell access.
+  if (!fixCI && !commitHelperPath) {
+    throw new Error(
+      "commitHelperPath is required when not running in CI fix mode",
+    );
+  }
+  const commitTool = commitHelperPath ? `Bash(${commitHelperPath}:*)` : null;
+  const tools = fixCI
+    ? "Read,Edit,Glob,Grep,Bash"
+    : `Read,Edit,Glob,Grep,${commitTool}`;
 
   return execSync(
     `cat "${tmpPath}" | claude -p ` +
@@ -400,7 +425,7 @@ function hasChanges() {
   );
 }
 
-function createCommit(commitMessage) {
+function configureGitIdentity() {
   if (appId && !/^\d+$/.test(appId)) {
     throw new Error("Invalid app ID");
   }
@@ -412,6 +437,10 @@ function createCommit(commitMessage) {
 
   execSync(`git config user.name "${botName}"`);
   execSync(`git config user.email "${botEmail}"`);
+}
+
+function createCommit(commitMessage) {
+  configureGitIdentity();
   execSync("git add -A");
   // Remove .review-hero from the index — it's our tooling checkout, not part
   // of the caller's repo. Git sees it as a "subproject commit" because it
@@ -422,18 +451,7 @@ function createCommit(commitMessage) {
 
 function pushChanges() {
   execSync("git push");
-  console.log("Pushed auto-fix commit");
-}
-
-function commitAndPush(commitMessage) {
-  if (!hasChanges()) {
-    console.log("No file changes after auto-fix");
-    return false;
-  }
-
-  createCommit(commitMessage);
-  pushChanges();
-  return true;
+  console.log("Pushed auto-fix commits");
 }
 
 // ── GitHub interactions ──────────────────────────────────────────────────────
@@ -520,6 +538,9 @@ async function main() {
     execSync(`mkdir -p .git/info && echo ".review-hero" >> "${excludePath}"`);
   }
 
+  // Configure git identity before Claude runs so its commits use the bot identity
+  configureGitIdentity();
+
   console.log(
     `Auto-fixing PR #${prNumber} (reviews: ${fixReviews}, ci: ${fixCI})`,
   );
@@ -544,9 +565,60 @@ async function main() {
     return;
   }
 
-  const prompt = buildPrompt(comments, ciFailures);
+  // Copy the commit helper to /tmp so Claude cannot modify it via the Edit
+  // tool during the session — the Bash restriction only limits which scripts
+  // can be *executed*, but Edit has unrestricted write access to the worktree.
+  const commitHelperSrc = ".review-hero/scripts/git-commit-fix.mjs";
+  const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.mjs`;
+  copyFileSync(commitHelperSrc, commitHelperTmp);
+  chmodSync(commitHelperTmp, 0o755);
+
+  const prompt = buildPrompt(comments, ciFailures, {
+    commitHelperPath: commitHelperTmp,
+  });
+  const headBefore = execSync("git rev-parse HEAD", {
+    encoding: "utf-8",
+  }).trim();
   console.log("Running Claude to apply fixes...");
-  const raw = runClaude(prompt);
+  let raw;
+  try {
+    raw = runClaude(prompt, { commitHelperPath: commitHelperTmp });
+  } catch (err) {
+    console.error(`Claude failed: ${err.message}`);
+
+    // Restore .review-hero/ before any recovery work
+    execSync("git checkout -- .review-hero/ 2>/dev/null || true");
+
+    // Even though Claude failed/timed out, it may have already committed some
+    // fixes via the git-commit-fix helper. Push those partial results rather
+    // than discarding them — partial fixing is better than nothing.
+    const headAfterFailure = execSync("git rev-parse HEAD", {
+      encoding: "utf-8",
+    }).trim();
+    if (headBefore !== headAfterFailure) {
+      console.log(
+        "Claude failed but made commits before failing — pushing partial fixes",
+      );
+      pushChanges();
+      await postComment(
+        `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
+          `Some fixes were pushed, but the session did not finish.\n\n` +
+          `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
+      );
+    } else {
+      await postComment(
+        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
+      );
+    }
+    await uncheckCheckboxes();
+    process.exit(1);
+  }
+
+  // Restore .review-hero/ in case Claude modified it via the Edit tool.
+  // This is a defence-in-depth measure — the commit helper is already copied
+  // to /tmp, but we also don't want any worktree edits to .review-hero/
+  // leaking into the leftover sweep commit.
+  execSync("git checkout -- .review-hero/ 2>/dev/null || true");
 
   const results = parseClaudeResult(raw);
   const resultById = new Map(results.map((r) => [Number(r.id), r]));
@@ -596,7 +668,45 @@ async function main() {
       ? `fix: auto-fix ${msgParts.join(" and ")}`
       : commitFallback;
 
-  const pushed = commitAndPush(commitMessage);
+  // Claude should have committed per-fix, but catch any remaining uncommitted
+  // changes as a final sweep (e.g. files Claude forgot to stage).
+  const hasLeftovers = hasChanges();
+  if (hasLeftovers) {
+    const leftoverFiles = execSync(
+      "git status --porcelain=v2 --no-renames --ignore-submodules",
+      { encoding: "utf-8" },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => {
+        // porcelain v2: untracked/ignored lines are "? path" or "! path"
+        if (l.startsWith("? ") || l.startsWith("! ")) return l.slice(2);
+        // ordinary changed entry: "1 XY sub mH mI mW hH hI path"
+        // path may contain spaces — join everything after the 8th field
+        return l.split(" ").slice(8).join(" ");
+      });
+    console.log(
+      `Committing leftover uncommitted changes: ${leftoverFiles.join(", ")}`,
+    );
+    createCommit(commitMessage);
+  }
+
+  // Check if there are any commits to push (Claude's per-fix commits and/or
+  // the leftover commit above). Compare HEAD now against HEAD before Claude ran;
+  // avoids relying on @{u} which requires an upstream tracking ref to exist.
+  const headAfter = execSync("git rev-parse HEAD", {
+    encoding: "utf-8",
+  }).trim();
+  const hasCommitsToPush = headBefore !== headAfter;
+
+  let pushed = false;
+  if (hasCommitsToPush) {
+    pushChanges();
+    pushed = true;
+  } else {
+    console.log("No commits to push");
+  }
 
   // Resolve fixed threads and reply on skipped threads
   if (pushed) {

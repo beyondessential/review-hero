@@ -32,6 +32,26 @@ After applying all fixes, output a JSON array. **Use the same ID numbers from th
 
 You **must** include an entry for every review comment ID and every CI failure ID. Use status `"fixed"` or `"skipped"`.
 
+## Committing
+
+Commit after each fix so the PR history is easy to review. Use the provided `git-commit-fix.mjs` helper via Bash:
+
+```
+.review-hero/scripts/git-commit-fix.mjs -m "fix: <brief description>" <file1> [file2 ...]
+```
+
+This stages only the listed files and commits them. Example:
+
+```
+.review-hero/scripts/git-commit-fix.mjs -m "fix: use nullish coalescing instead of || for default port" src/config.ts
+```
+
+1. Run the helper after fixing each review comment or CI failure.
+2. Use clear, specific commit messages — not generic ones like `fix: address review comment`.
+3. If multiple review comments touch the **same file in the same area**, you may fix them together in a single commit. Otherwise prefer one commit per fix.
+4. Do **not** run `git push` — the calling script handles that.
+5. Do **not** use raw `git add`, `git commit`, `git add -A`, or `git add .` — always use the helper script.
+
 ## Rules
 
 - Make minimal, targeted changes — only fix what's needed
