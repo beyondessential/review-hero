@@ -367,13 +367,19 @@ function logClaudeSession(raw) {
     // Log cost and usage stats
     const stats = [];
     if (parsed.model) stats.push(`Model: ${parsed.model}`);
-    if (parsed.num_turns != null) stats.push(`Turns: ${parsed.num_turns}`);
+    if (parsed.num_turns != null) {
+      if (parsed.max_turns != null) {
+        stats.push(`Turns: ${parsed.num_turns} (of ${parsed.max_turns} max)`);
+      } else {
+        stats.push(`Turns: ${parsed.num_turns}`);
+      }
+    }
     if (parsed.duration_ms != null) {
       const secs = (parsed.duration_ms / 1000).toFixed(1);
       stats.push(`Duration: ${secs}s`);
     }
     if (parsed.cost_usd != null) {
-      stats.push('Cost: $' + Number(parsed.cost_usd).toFixed(4));
+      stats.push("Cost: $" + Number(parsed.cost_usd).toFixed(4));
     }
     if (parsed.usage) {
       const u = parsed.usage;
