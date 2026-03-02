@@ -207,6 +207,62 @@ The triage step will automatically discover it and include it in Haiku's agent s
 
 > **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged.
 
+### Sandbox configuration
+
+By default, every Claude invocation runs inside a Docker sandbox container (see [Security](#security)). Repos that need additional tools available during review — or that need to opt out of Docker entirely — can configure the sandbox in `config.yml`:
+
+```yaml
+sandbox:
+  # Custom Dockerfile for the sandbox image (path relative to .github/review-hero/)
+  dockerfile: Dockerfile
+
+  # OR: disable the sandbox entirely (Claude runs directly on the runner)
+  # dangerousDisableSandbox: true
+```
+
+#### Custom Dockerfile
+
+If your linters, type-checkers, or build tools need to be available inside the sandbox, provide a custom Dockerfile at `.github/review-hero/Dockerfile` (or any path you specify in `sandbox.dockerfile`). The build context is the `.github/review-hero/` directory, so `COPY`/`ADD` instructions can reference sibling files.
+
+Your image must include at minimum:
+
+- **Node.js** (for Claude CLI and helper scripts)
+- **git** (used by scoped Bash tools and the commit helper)
+- **Claude Code CLI** (`npm install -g @anthropic-ai/claude-code`)
+- A **non-root user** with UID 65532 (the sandbox runs as this user)
+
+The easiest approach is to mirror the default image and add your dependencies:
+
+```dockerfile
+FROM node:22-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       git ca-certificates \
+       python3 pylint \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @anthropic-ai/claude-code
+
+RUN useradd -m -u 65532 -s /bin/sh claude
+USER claude
+WORKDIR /workspace
+```
+
+> **Security note:** The custom Dockerfile is always read from the **base branch**, not the PR branch. A pull request cannot swap the Dockerfile — changes take effect only after they are merged.
+
+#### Disabling the sandbox
+
+> [!CAUTION]
+> Disabling the sandbox means Claude has direct access to **all environment variables** on the runner, including `GITHUB_TOKEN` and any other secrets passed via `secrets: inherit`. Only enable this if you understand the security implications and accept the risk that a prompt injection attack could exfiltrate secrets.
+
+```yaml
+sandbox:
+  dangerousDisableSandbox: true
+```
+
+When the sandbox is disabled, Claude CLI is installed directly on the runner via `npm install -g @anthropic-ai/claude-code` and invoked as a host process. The `dockerfile` setting is ignored.
+
 ### Built-in ignore patterns
 
 These files are always stripped from the diff before triage and agent input:
@@ -306,6 +362,8 @@ Max turns scale with the filtered diff size and are capped at 10:
 
 Review Hero runs Claude inside a **Docker sandbox container** to limit the blast radius of prompt injection attacks. Since Claude processes untrusted input (PR diffs, review comments, CI logs), these measures prevent a manipulated model from extracting secrets or escalating privileges.
 
+Repos can [customise the sandbox image](#custom-dockerfile) (e.g. to add linters or language runtimes) or [disable the sandbox entirely](#disabling-the-sandbox) if Docker is unavailable. See [Sandbox configuration](#sandbox-configuration) for details.
+
 ### Sandbox properties
 
 | Property | Review agents | Auto-fix (review) | Auto-fix (CI) |
@@ -334,7 +392,7 @@ If a match is found, all commits are hard-reset and the push is aborted.
 
 ### Base-branch isolation
 
-Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. See the [Custom agents](#custom-agents) section for details.
+Custom agent prompts, `config.yml`, `auto-fix-rules.md`, AI rules files (`.cursorrules`, etc.), and sandbox Dockerfiles are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content, disabling the sandbox, or swapping the Dockerfile. See the [Custom agents](#custom-agents) and [Sandbox configuration](#sandbox-configuration) sections for details.
 
 ## PR template snippet
 

@@ -63,6 +63,7 @@ const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
 const sandboxScript =
   process.env.SANDBOX_SCRIPT ?? ".review-hero/scripts/run-in-sandbox.mjs";
 const sandboxImage = process.env.SANDBOX_IMAGE ?? "claude-sandbox:latest";
+const sandboxDisabled = process.env.SANDBOX_DISABLED === "true";
 
 // ── GitHub API ───────────────────────────────────────────────────────────────
 
@@ -366,6 +367,53 @@ function runClaude(prompt, { commitHelperHostPath } = {}) {
   const promptFile = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
   writeFileSync(promptFile, prompt);
 
+  if (!fixCI && !commitHelperHostPath) {
+    throw new Error(
+      "commitHelperHostPath is required when not running in CI fix mode",
+    );
+  }
+
+  // ── Unsandboxed execution ──────────────────────────────────────────────
+  // When dangerousDisableSandbox is set, run Claude CLI directly on the
+  // runner. The user has accepted the risk that Claude has access to the
+  // full runner environment, including workflow secrets.
+  if (sandboxDisabled) {
+    // Without a container, the commit helper path is the host path directly.
+    const tools = fixCI
+      ? "Read,Edit,Glob,Grep,Bash"
+      : `Read,Edit,Glob,Grep,Bash(${commitHelperHostPath}:*)`;
+
+    const raw = execFileSync(
+      "claude",
+      [
+        "-p",
+        "--output-format",
+        "json",
+        "--model",
+        model,
+        "--max-turns",
+        "30",
+        "--allowedTools",
+        tools,
+      ],
+      {
+        input: readFileSync(promptFile, "utf-8"),
+        encoding: "utf-8",
+        timeout: 10 * 60 * 1000,
+        maxBuffer: 10 * 1024 * 1024,
+        // In unsandboxed mode, inherit the full environment. The user has
+        // opted out of isolation via dangerousDisableSandbox.
+        env: {
+          ...process.env,
+        },
+      },
+    );
+
+    logClaudeSession(raw);
+    return raw;
+  }
+
+  // ── Sandboxed execution ────────────────────────────────────────────────
   // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
   // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
   // without having unrestricted shell access.
@@ -373,12 +421,6 @@ function runClaude(prompt, { commitHelperHostPath } = {}) {
   const tools = fixCI
     ? "Read,Edit,Glob,Grep,Bash"
     : `Read,Edit,Glob,Grep,Bash(${CONTAINER_COMMIT_HELPER}:*)`;
-
-  if (!fixCI && !commitHelperHostPath) {
-    throw new Error(
-      "commitHelperHostPath is required when not running in CI fix mode",
-    );
-  }
 
   // Build a JSON config for the sandbox script.
   const sandboxConfig = {
@@ -719,22 +761,30 @@ async function main() {
     return;
   }
 
-  // Copy the commit helper to /tmp so it can be mounted read-only into the
-  // Docker sandbox. Inside the container it appears at /tools/git-commit-fix.mjs.
+  // Copy the commit helper to /tmp. When sandboxed, it is mounted read-only
+  // into the Docker container at /tools/git-commit-fix.mjs. When unsandboxed,
+  // Claude invokes it directly at this host path.
   const commitHelperSrc = ".review-hero/scripts/git-commit-fix.mjs";
   const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.mjs`;
   copyFileSync(commitHelperSrc, commitHelperTmp);
   chmodSync(commitHelperTmp, 0o755);
 
-  // The prompt references the *container* path for the commit helper, since
-  // Claude runs inside the sandbox and sees it mounted at /tools/.
+  // When sandboxed, the prompt references the container path (/tools/...)
+  // since Claude sees the helper mounted there. When unsandboxed, use the
+  // host path directly since there is no container path remapping.
   const prompt = buildPrompt(comments, ciFailures, {
-    commitHelperPath: CONTAINER_COMMIT_HELPER,
+    commitHelperPath: sandboxDisabled
+      ? commitHelperTmp
+      : CONTAINER_COMMIT_HELPER,
   });
   const headBefore = execSync("git rev-parse HEAD", {
     encoding: "utf-8",
   }).trim();
-  console.log("Running Claude in sandbox to apply fixes...");
+  console.log(
+    sandboxDisabled
+      ? "Running Claude directly on runner to apply fixes (sandbox disabled)..."
+      : "Running Claude in sandbox to apply fixes...",
+  );
   let raw;
   try {
     raw = runClaude(prompt, { commitHelperHostPath: commitHelperTmp });
