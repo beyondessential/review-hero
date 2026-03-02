@@ -180,6 +180,10 @@ exec docker run $DOCKER_ARGS \
   -w /workspace \
   "$IMAGE" \
   sh -c '
+    # The mounted worktree is owned by the host runner user (UID 1001),
+    # not the container claude user (UID 65532). Tell git this is safe.
+    git config --global --add safe.directory /workspace
+
     # Read the API key from the mounted secret file
     export ANTHROPIC_API_KEY="$(cat /run/secrets/api-key)"
 
