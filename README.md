@@ -335,7 +335,7 @@ Repos can [disable the sandbox](#disabling-the-sandbox) if needed. See [Sandbox 
 | Property | Review agents | Auto-fix (review) | Auto-fix (CI) |
 |----------|--------------|-------------------|---------------|
 | Filesystem writes | CWD only (default) | CWD + `/tmp` | CWD + `/tmp` |
-| Network | Sandbox-restricted | Sandbox-restricted | Sandbox-restricted |
+| Network | Blocked (default) | Blocked (default) | Allowed |
 | Bash access | Scoped to `git log`, `git show`, `git diff` | Scoped to commit helper | Unrestricted (needs build tools) |
 | Unsandboxed escape hatch | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` | ❌ `allowUnsandboxedCommands: false` |
 | ANTHROPIC_API_KEY | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) | Via `apiKeyHelper` (temp file) |
@@ -356,11 +356,9 @@ The following directories are denied at **both** the sandbox filesystem level (b
 
 ### Network isolation
 
-The sandbox proxy blocks all outbound network traffic from sandboxed Bash commands unless the domain is pre-approved. In headless mode (`-p`), there is no user to approve new domains, so outbound requests from Bash are effectively denied by default. This blocks:
+For **review-agent** and **review-fix**, the sandbox blocks all outbound network from Bash commands by default. In headless mode (`-p`) there is no user to approve new domains, so every outbound request is denied. These modes don't need network access.
 
-- **GitHub API** (`api.github.com`) — prevents token use even if credentials were somehow discovered
-- **Runner token endpoints** (`*.actions.githubusercontent.com`) — blocks OIDC token and runtime service access
-- **Arbitrary exfiltration** — no data can be sent to attacker-controlled servers
+For **ci-fix**, build tools need to download dependencies, run linters, and talk to package registries, so we allow everything.
 
 Claude CLI itself runs outside the sandbox and can still reach the Anthropic API (`api.anthropic.com`) for model requests.
 

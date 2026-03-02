@@ -345,6 +345,10 @@ try {
               denyRead,
               denyWrite,
             },
+            network: {
+              allowedDomains:
+                MODE === "ci-fix" && !SANDBOX_DISABLED ? ["*"] : [],
+            },
           }
         : {}),
     },
