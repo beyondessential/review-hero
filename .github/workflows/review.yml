@@ -68,11 +68,15 @@ jobs:
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      # ── Checkout caller repo (for config + diff) ─────────────────────
-      - name: Checkout caller repo
+      # ── Checkout caller repo at base branch ──────────────────────────
+      # Read config, custom agent prompts, and ignore patterns from the
+      # base branch — not the PR branch — so a malicious PR cannot inject
+      # custom agents, modify ignore patterns, or tamper with config values.
+      - name: Checkout caller repo (base branch)
         if: steps.check.outputs.should_run == 'true'
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           path: caller
 
       # ── Checkout review-hero (for scripts + base prompts) ────────────
@@ -174,6 +178,23 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
+      # ── Checkout caller config from base branch ──────────────────────
+      # Custom agent prompts and AI rules files are read from the base
+      # branch so that a PR cannot inject malicious prompt content.
+      - name: Checkout caller config (base branch)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: |
+            .github/review-hero
+            .cursorrules
+            .windsurfrules
+            .clinerules
+            .rules
+            .cursor/rules
+          sparse-checkout-cone-mode: false
+          path: .caller-base
+
       # ── Checkout review-hero (for prompts) ───────────────────────────
       - name: Checkout review-hero
         uses: actions/checkout@v6
@@ -201,9 +222,9 @@ jobs:
           name: filtered-diff
           path: /tmp
 
-      # ── Detect AI rules ─────────────────────────────────────────────
+      # ── Detect AI rules (from base branch) ──────────────────────────
       - name: Detect AI rules
-        run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md
+        run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
 
       # ── Run agent ────────────────────────────────────────────────────
       - name: Run ${{ matrix.agent.key }} agent
@@ -230,7 +251,9 @@ jobs:
             if [ "${{ matrix.agent.source }}" = "base" ]; then
               cat ".review-hero/prompts/${{ matrix.agent.key }}.md"
             else
-              cat ".github/review-hero/prompts/${{ matrix.agent.key }}.md"
+              # Read custom prompts from the base branch checkout so a PR
+              # cannot inject malicious agent prompts.
+              cat ".caller-base/.github/review-hero/prompts/${{ matrix.agent.key }}.md"
             fi
 
             if [ -s /tmp/ai-rules.md ]; then

@@ -205,6 +205,8 @@ Ignore: high-level architecture, performance, generic security, generic bugs.
 
 The triage step will automatically discover it and include it in Haiku's agent selection.
 
+> **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged.
+
 ### Built-in ignore patterns
 
 These files are always stripped from the diff before triage and agent input:
