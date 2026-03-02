@@ -270,13 +270,16 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          sh .review-hero/scripts/run-in-sandbox.sh \
-            --mode review-agent \
-            --prompt /tmp/agent-prompt.md \
-            --model "${{ inputs.model }}" \
-            --max-turns ${{ needs.triage.outputs.max_turns }} \
-            --tools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
-            --image claude-sandbox:latest \
+          jq -n \
+            --arg mode "review-agent" \
+            --arg prompt "/tmp/agent-prompt.md" \
+            --arg model "${{ inputs.model }}" \
+            --argjson maxTurns '${{ needs.triage.outputs.max_turns }}' \
+            --arg tools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+            --arg image "claude-sandbox:latest" \
+            '{mode: $mode, prompt: $prompt, model: $model, maxTurns: $maxTurns, tools: $tools, image: $image}' \
+            > /tmp/sandbox-config.json
+          node .review-hero/scripts/run-in-sandbox.mjs /tmp/sandbox-config.json \
             > /tmp/result.json
 
       - name: Upload result

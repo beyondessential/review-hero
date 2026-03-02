@@ -194,6 +194,6 @@ jobs:
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
           AI_RULES_PATH: /tmp/ai-rules.md
           SELF_WORKFLOW: ${{ github.workflow }}
-          SANDBOX_SCRIPT: .review-hero/scripts/run-in-sandbox.sh
+          SANDBOX_SCRIPT: .review-hero/scripts/run-in-sandbox.mjs
           SANDBOX_IMAGE: claude-sandbox:latest
         run: node .review-hero/scripts/auto-fix.mjs

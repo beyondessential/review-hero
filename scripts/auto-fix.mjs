@@ -6,13 +6,13 @@
  *
  * Claude runs inside a Docker sandbox container with no sudo, no secrets in
  * the environment (except the Anthropic API key via a mounted file), and
- * --cap-drop=ALL. See scripts/run-in-sandbox.sh for details.
+ * --cap-drop=ALL. See run-in-sandbox.mjs for details.
  *
  * Environment variables:
  *   GITHUB_TOKEN        — GitHub token (with contents:write, pull-requests:write, actions:read)
  *   GITHUB_REPOSITORY   — owner/repo
  *   PR_NUMBER           — Pull request number
- *   ANTHROPIC_API_KEY   — API key for Claude CLI (passed to sandbox via file mount, not env)
+ *   ANTHROPIC_API_KEY   — API key for Claude CLI (passed to sandbox via file mount)
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
  *   MODEL               — Model to use (default: claude-sonnet-4-6)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
@@ -21,7 +21,7 @@
  *   PROJECT_CONTEXT     — Optional project context string (e.g. "You are reviewing a PR for **Tamanu**, a healthcare management system.")
  *   CUSTOM_RULES_PATH   — Optional path to repo-specific rules to append to the prompt
  *   SELF_WORKFLOW        — Name of this workflow (to exclude from CI failure checks)
- *   SANDBOX_SCRIPT      — Path to run-in-sandbox.sh (default: .review-hero/scripts/run-in-sandbox.sh)
+ *   SANDBOX_SCRIPT      — Path to run-in-sandbox.mjs (default: .review-hero/scripts/run-in-sandbox.mjs)
  *   SANDBOX_IMAGE       — Docker image name for the sandbox (default: claude-sandbox:latest)
  */
 
@@ -61,7 +61,7 @@ const customRulesPath = process.env.CUSTOM_RULES_PATH ?? "";
 const aiRulesPath = process.env.AI_RULES_PATH ?? "";
 const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
 const sandboxScript =
-  process.env.SANDBOX_SCRIPT ?? ".review-hero/scripts/run-in-sandbox.sh";
+  process.env.SANDBOX_SCRIPT ?? ".review-hero/scripts/run-in-sandbox.mjs";
 const sandboxImage = process.env.SANDBOX_IMAGE ?? "claude-sandbox:latest";
 
 // ── GitHub API ───────────────────────────────────────────────────────────────
@@ -355,7 +355,7 @@ function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
-// Container path where the commit helper is mounted by run-in-sandbox.sh
+// Container path where the commit helper is mounted by run-in-sandbox.mjs
 const CONTAINER_COMMIT_HELPER = "/tools/git-commit-fix.mjs";
 
 function runClaude(prompt, { commitHelperHostPath } = {}) {
@@ -380,41 +380,28 @@ function runClaude(prompt, { commitHelperHostPath } = {}) {
     );
   }
 
-  // Run Claude inside the Docker sandbox. The sandbox script handles:
-  // - Mounting the repo worktree (rw)
-  // - Passing the API key via a file mount (not env var or CLI flag)
-  // - Dropping all capabilities, enforcing non-root, no sudo
-  // - Mounting the commit helper read-only at /tools/git-commit-fix.mjs
-  // - For CI-fix: mounting host tool directories read-only
-  const args = [
-    sandboxScript,
-    "--mode",
+  // Build a JSON config for the sandbox script.
+  const sandboxConfig = {
     mode,
-    "--prompt",
-    promptFile,
-    "--model",
+    prompt: promptFile,
     model,
-    "--max-turns",
-    "30",
-    "--tools",
+    maxTurns: 30,
     tools,
-    "--image",
-    sandboxImage,
-  ];
+    image: sandboxImage,
+  };
 
   if (commitHelperHostPath) {
-    args.push("--commit-helper", commitHelperHostPath);
+    sandboxConfig.commitHelper = commitHelperHostPath;
   }
 
-  const raw = execFileSync("sh", args, {
+  const configFile = `/tmp/sandbox-config-${prNumber}-${Date.now()}.json`;
+  writeFileSync(configFile, JSON.stringify(sandboxConfig));
+
+  const raw = execFileSync("node", [sandboxScript, configFile], {
     encoding: "utf-8",
     timeout: 10 * 60 * 1000,
     maxBuffer: 10 * 1024 * 1024,
-    // Only pass the minimum env the sandbox script needs. Notably absent:
-    // GITHUB_TOKEN, REVIEW_HERO_APP_ID, REVIEW_HERO_PRIVATE_KEY.
-    // The sandbox script reads ANTHROPIC_API_KEY and writes it to a temp
-    // file that is mounted into the container — it never reaches the
-    // container's environment or CLI arguments.
+    // Only pass the minimum env the sandbox script needs.
     env: {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
@@ -594,11 +581,23 @@ function scanCommitsForSecrets(headBefore) {
   // Check for exact values of the secrets we know about. We compare the raw
   // values rather than logging them so we don't accidentally leak them in the
   // workflow output.
-  const knownSecrets = [
-    process.env.ANTHROPIC_API_KEY,
-    process.env.GITHUB_TOKEN,
-    process.env.REVIEW_HERO_PRIVATE_KEY,
-  ].filter((s) => s && s.length >= 8);
+  const knownSecretEntries = [
+    ["ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY],
+    ["GITHUB_TOKEN", process.env.GITHUB_TOKEN],
+    ["REVIEW_HERO_PRIVATE_KEY", process.env.REVIEW_HERO_PRIVATE_KEY],
+  ];
+
+  for (const [name, value] of knownSecretEntries) {
+    if (!value || value.length < 8) {
+      console.warn(
+        `Warning: secret scanning skipped for ${name} — not set or too short`,
+      );
+    }
+  }
+
+  const knownSecrets = knownSecretEntries
+    .map(([, value]) => value)
+    .filter((s) => s && s.length >= 8);
 
   for (const secret of knownSecrets) {
     if (combined.includes(secret)) {
