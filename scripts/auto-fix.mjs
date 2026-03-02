@@ -417,18 +417,19 @@ function runClaude(prompt, { commitHelperHostPath } = {}) {
   // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
   // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
   // without having unrestricted shell access.
-  const mode = fixCI ? "ci-fix" : "review-fix";
-  const tools = fixCI
-    ? "Read,Edit,Glob,Grep,Bash"
-    : `Read,Edit,Glob,Grep,Bash(${CONTAINER_COMMIT_HELPER}:*)`;
 
-  // Build a JSON config for the sandbox script.
   const sandboxConfig = {
-    mode,
+    mode: fixCI ? "ci-fix" : "review-fix",
     prompt: promptFile,
     model,
     maxTurns: 30,
-    tools,
+    tools: [
+      "Read",
+      "Edit",
+      "Glob",
+      "Grep",
+      fixCI ? "Bash" : `Bash(${CONTAINER_COMMIT_HELPER}:*)`,
+    ],
     image: sandboxImage,
   };
 

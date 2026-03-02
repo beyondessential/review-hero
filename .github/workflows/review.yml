@@ -360,7 +360,7 @@ jobs:
             --arg prompt "/tmp/agent-prompt.md" \
             --arg model "${{ inputs.model }}" \
             --argjson maxTurns '${{ needs.triage.outputs.max_turns }}' \
-            --arg tools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+            --argjson tools '["Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)"]' \
             --arg image "claude-sandbox:latest" \
             '{mode: $mode, prompt: $prompt, model: $model, maxTurns: $maxTurns, tools: $tools, image: $image}' \
             > /tmp/sandbox-config.json
