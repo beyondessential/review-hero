@@ -371,7 +371,7 @@ function logClaudeSession(raw) {
       if (parsed.max_turns != null) {
         stats.push(`Turns: ${parsed.num_turns} (of ${parsed.max_turns} max)`);
       } else {
-        stats.push(`Turns: ${parsed.num_turns}`);
+        stats.push(`Turns: ${parsed.num_turns} (of 30 max)`);
       }
     }
     if (parsed.duration_ms != null) {
