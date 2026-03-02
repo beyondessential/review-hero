@@ -941,7 +941,7 @@ async function main() {
       core.error(
         `Secret detected in commits (${scanResult.detail}) — resetting to ${headBefore}`,
       );
-      execFileSync(["git", "reset", "--hard", headBefore]);
+      execFileSync("git", ["reset", "--hard", headBefore]);
       await postComment(
         `🦸 **Review Hero Auto-Fix** aborted — detected potential secret leakage in committed content. ` +
           `No changes were pushed. Check the workflow logs.`,

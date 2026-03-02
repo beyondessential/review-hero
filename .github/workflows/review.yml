@@ -288,9 +288,11 @@ jobs:
       # branch, so COPY/ADD instructions can reference sibling files.
       - name: Build Claude sandbox image (custom Dockerfile)
         if: needs.triage.outputs.sandbox_disabled != 'true' && needs.triage.outputs.sandbox_dockerfile != ''
+        env:
+          SANDBOX_DOCKERFILE: ${{ needs.triage.outputs.sandbox_dockerfile }}
         run: |
           docker build -t claude-sandbox:latest \
-            -f ".caller-base/.github/review-hero/${{ needs.triage.outputs.sandbox_dockerfile }}" \
+            -f ".caller-base/.github/review-hero/$SANDBOX_DOCKERFILE" \
             .caller-base/.github/review-hero
 
       # ── Install Claude CLI (unsandboxed mode) ───────────────────────
@@ -360,7 +362,7 @@ jobs:
             --arg prompt "/tmp/agent-prompt.md" \
             --arg model "${{ inputs.model }}" \
             --argjson maxTurns '${{ needs.triage.outputs.max_turns }}' \
-            --argjson tools '["Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)"]' \
+            --argjson tools '["Read","Glob","Grep","Bash(git log:*)","Bash(git show:*)","Bash(git diff:*)"]' \
             --arg image "claude-sandbox:latest" \
             '{mode: $mode, prompt: $prompt, model: $model, maxTurns: $maxTurns, tools: $tools, image: $image}' \
             > /tmp/sandbox-config.json
