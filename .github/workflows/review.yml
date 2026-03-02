@@ -213,8 +213,8 @@ jobs:
         with:
           node-version-file: ".node-version"
 
-      - name: Install Claude CLI
-        run: npm install -g @anthropic-ai/claude-code
+      - name: Build Claude sandbox image
+        run: docker build -t claude-sandbox:latest -f .review-hero/docker/Dockerfile .review-hero/docker
 
       # ── Download filtered diff ───────────────────────────────────────
       - name: Download filtered diff
@@ -228,9 +228,8 @@ jobs:
         run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
 
       # ── Run agent ────────────────────────────────────────────────────
-      - name: Run ${{ matrix.agent.key }} agent
+      - name: Build agent prompt
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
         run: |
@@ -265,11 +264,19 @@ jobs:
             printf '\n\n## PR Title\n\n%s\n\n## PR Diff\n\n```diff\n' "$PR_TITLE"
             cat /tmp/pr-filtered.diff
             echo '```'
-          } | claude -p \
-              --output-format json \
-              --model "${{ inputs.model }}" \
-              --max-turns ${{ needs.triage.outputs.max_turns }} \
-              --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+          } > /tmp/agent-prompt.md
+
+      - name: Run ${{ matrix.agent.key }} agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          sh .review-hero/scripts/run-in-sandbox.sh \
+            --mode review-agent \
+            --prompt /tmp/agent-prompt.md \
+            --model "${{ inputs.model }}" \
+            --max-turns ${{ needs.triage.outputs.max_turns }} \
+            --tools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+            --image claude-sandbox:latest \
             > /tmp/result.json
 
       - name: Upload result
