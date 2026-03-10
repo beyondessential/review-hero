@@ -152,25 +152,29 @@ jobs:
           # directory, then run detection against it. This prevents a PR
           # from injecting prompt content via AI rules files.
           RULES_DIR="/tmp/base-ai-rules-root"
-          mkdir -p "$RULES_DIR/.github" "$RULES_DIR/.cursor/rules" "$RULES_DIR/.rules"
+          mkdir -p "$RULES_DIR"
 
           for f in .cursorrules .windsurfrules .clinerules .rules; do
-            git show "$BASE_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f"
+            git show "$BASE_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f" || true
           done
+
+          mkdir -p "$RULES_DIR/.github" || true
           git show "$BASE_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
-            || rm -f "$RULES_DIR/.github/copilot-instructions.md"
+            || rm -f "$RULES_DIR/.github/copilot-instructions.md" || true
 
           # Cursor rules directory
           for f in $(git ls-tree --name-only "$BASE_SHA" .cursor/rules/ 2>/dev/null || true); do
-            fname=$(basename "$f")
+            mkdir -p "$RULES_DIR/.cursor/rules" || true
+            fname=$(basename "$f") || true
             case "$fname" in *.md|*.mdc) git show "$BASE_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
-          done
+          done || true
 
           # Zed rules directory
           for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
-            fname=$(basename "$f")
+            mkdir -p "$RULES_DIR/.rules" || true
+            fname=$(basename "$f") || true
             case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
-          done
+          done || true
 
           sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md "$RULES_DIR"
 
