@@ -11,20 +11,33 @@ on:
         description: "GitHub Actions runner for all jobs"
         type: string
         default: ubuntu-slim
+      ref:
+        description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
+        type: string
+        default: v1
       ci-runner:
         description: "Runner for auto-fix when fixing CI failures (may need build tools)"
         type: string
         default: ubuntu-latest
     secrets:
       ANTHROPIC_API_KEY:
-        description: "Anthropic API key — set per-repo for billing separation"
+        description: "Anthropic API key"
+        required: false
+      REVIEW_HERO_ANTHROPIC_API_KEY:
+        description: "Anthropic API key (preferred over ANTHROPIC_API_KEY if both are set)"
+        required: false
+      ANTHROPIC_BASE_URL:
+        description: "Custom base URL for the Anthropic API (e.g. for proxies)"
+        required: false
+      REVIEW_HERO_ANTHROPIC_BASE_URL:
+        description: "Custom base URL for the Anthropic API (preferred over ANTHROPIC_BASE_URL if both are set)"
         required: false
       REVIEW_HERO_APP_ID:
         description: "Review Hero GitHub App ID — typically provided as an org-level secret"
-        required: false
+        required: true
       REVIEW_HERO_PRIVATE_KEY:
         description: "Review Hero GitHub App private key — typically provided as an org-level secret"
-        required: false
+        required: true
 
 concurrency:
   group: review-hero-auto-fix-${{ github.event.pull_request.number }}
@@ -87,9 +100,9 @@ jobs:
       - name: Checkout review-hero
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository_owner }}/review-hero
+          repository: beyondessential/review-hero
+          ref: ${{ inputs.ref }}
           path: .review-hero
-          token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Detect Node.js version
@@ -181,11 +194,13 @@ jobs:
       # ── Run auto-fix ─────────────────────────────────────────────────
       - name: Run auto-fix
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEW_HERO_APP_ID: ${{ secrets.REVIEW_HERO_APP_ID }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           MODEL: ${{ inputs.model }}
           FIX_REVIEWS: ${{ needs.check-trigger.outputs.fix_reviews }}
           FIX_CI: ${{ needs.check-trigger.outputs.fix_ci }}
