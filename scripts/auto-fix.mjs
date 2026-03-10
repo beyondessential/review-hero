@@ -280,6 +280,40 @@ async function fetchCIFailures() {
 
 // ── Prompt building ──────────────────────────────────────────────────────────
 
+/**
+ * Build a collapsible "local fix prompt" containing outstanding review
+ * comments and/or CI failures that the developer can copy-paste into their
+ * local coding agent.  Returns an empty string when there's nothing to fix.
+ */
+function buildLocalFixPrompt(outstandingComments, outstandingCIFailures) {
+  if (outstandingComments.length === 0 && outstandingCIFailures.length === 0) {
+    return "";
+  }
+
+  const lines = [
+    "Fix these issues identified on the pull request. One commit per issue fixed.\n",
+  ];
+
+  for (const c of outstandingComments) {
+    const loc = `${c.file}${c.line ? `:${c.line}` : ""}`;
+    lines.push(`- \`${loc}\`: ${c.comment}`);
+  }
+
+  for (const f of outstandingCIFailures) {
+    lines.push(
+      `- CI failure in **${f.workflow} / ${f.job}**:\n\`\`\`\n${f.log}\n\`\`\``,
+    );
+  }
+
+  const prompt = lines.join("\n");
+
+  return (
+    "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +
+    prompt +
+    "\n\n</details>"
+  );
+}
+
 function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
   const sections = [];
 
@@ -655,15 +689,17 @@ async function main() {
         "Claude failed but made commits before failing — pushing partial fixes",
       );
       pushChanges();
-      await postComment(
+      const partialMsg =
         `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
-          `Some fixes were pushed, but the session did not finish.\n\n` +
-          `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
-      );
+        `Some fixes were pushed, but the session did not finish.\n\n` +
+        `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
+        buildLocalFixPrompt(comments, ciFailures);
+      await postComment(partialMsg);
     } else {
-      await postComment(
-        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
-      );
+      const failMsg =
+        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
+        buildLocalFixPrompt(comments, ciFailures);
+      await postComment(failMsg);
     }
     await uncheckCheckboxes();
     process.exit(1);
@@ -709,11 +745,22 @@ async function main() {
     }
   }
 
-  // Count CI fixes
-  const fixedCICount = ciFailures.filter((_, i) => {
-    const result = resultById.get(comments.length + i + 1);
-    return result?.status === "fixed";
-  }).length;
+  // Determine which CI failures were fixed vs skipped
+  const fixedCIFailures = [];
+  const skippedCIFailures = [];
+  for (let i = 0; i < ciFailures.length; i++) {
+    const id = comments.length + i + 1;
+    const result = resultById.get(id);
+    if (result?.status === "fixed") {
+      fixedCIFailures.push(ciFailures[i]);
+    } else {
+      skippedCIFailures.push({
+        ...ciFailures[i],
+        reason: result?.reason ?? "No response from Claude",
+      });
+    }
+  }
+  const fixedCICount = fixedCIFailures.length;
 
   // Build commit message
   const msgParts = [];
@@ -824,6 +871,11 @@ async function main() {
     summaryParts.push(
       `\n\n[View logs](${serverUrl}/${repo}/actions/runs/${runId})`,
     );
+  }
+
+  const localPrompt = buildLocalFixPrompt(skippedComments, skippedCIFailures);
+  if (localPrompt) {
+    summaryParts.push(localPrompt);
   }
 
   await postComment(summaryParts.join(""));
