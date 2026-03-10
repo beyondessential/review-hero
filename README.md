@@ -26,20 +26,18 @@ PR checkbox checked
 2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. Agents have read-only access to the repo so they can explore surrounding code for context.
 3. **Orchestrator** — collects all agent outputs, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
-## Prerequisites (one-time org admin setup)
+## Prerequisites
 
-> [!WARNING]
-> At the moment this app is not configured to be possible to use outside of the beyondessential org.
-> You'll need to fork it and create your own app for your own organisation.
+### 1. Create a GitHub App
 
-### 1. Configure the Review Hero GitHub App
-
-The app needs these permissions:
+Create a [new GitHub App](https://github.com/settings/apps/new) (org-level or personal — either works). The app needs these permissions:
 
 - **Pull requests**: Read & write
 - **Contents**: Read & write (for auto-fix commits)
 - **Issues**: Read & write
 - **Actions**: Read (for fetching CI failure logs)
+
+You can name the app whatever you like — Review Hero detects the app's identity at runtime.
 
 ### 2. Generate a private key
 
@@ -47,36 +45,34 @@ In the GitHub App's settings page, scroll to the **Private keys** section at the
 
 > **Note:** This is _not_ the same as the "Client secret" in the app's OAuth settings. The private key is a PEM file used to mint short-lived installation tokens.
 
-### 3. Install the app on repos
+### 3. Install the app on your repos
 
-Go to the app's **Install App** page and install it on your organisation. Select specific repositories — it must be installed on both the **review-hero** repo (so workflows can check it out) and any consumer repo you want to enable.
+Go to the app's **Install App** page and install it on your account or organisation. Select the specific repositories you want to enable Review Hero on.
 
-### 4. Set org-level secrets
+### 4. Set secrets
 
-Under the org's **Settings → Secrets and variables → Actions**, add:
+You need three secrets. These can be set at the **org level** (recommended — all repos inherit them automatically) or **per-repo**:
 
 | Secret                    | Value                                                    |
 |---------------------------|----------------------------------------------------------|
 | `REVIEW_HERO_APP_ID`      | The App ID (found on the app's settings page)            |
 | `REVIEW_HERO_PRIVATE_KEY` | The full contents of the `.pem` private key file         |
+| `ANTHROPIC_API_KEY`       | Your [Anthropic API key](https://console.anthropic.com/) |
 
-These are automatically inherited by all repos in the org.
+> **Tip:** If you set secrets at the org level, you can scope `REVIEW_HERO_PRIVATE_KEY` to only the repos that use Review Hero. `ANTHROPIC_API_KEY` can also be set per-repo if you want separate billing.
 
-Configure the private key to only be available to the set of consumer repos for Review Hero, and the app ID to be available for every repo within the org.
+#### Namespaced secret variants
+
+If you already use `ANTHROPIC_API_KEY` for other purposes and want a dedicated key for Review Hero, you can set `REVIEW_HERO_ANTHROPIC_API_KEY` instead — it takes priority when both are present.
+
+The same applies to `ANTHROPIC_BASE_URL` / `REVIEW_HERO_ANTHROPIC_BASE_URL`, which let you point Review Hero at a custom API endpoint (e.g. an API proxy or compatible provider). The `REVIEW_HERO_`-prefixed variant takes priority.
+
+| Secret                              | Description                                              |
+|--------------------------------------|----------------------------------------------------------|
+| `REVIEW_HERO_ANTHROPIC_API_KEY`      | Anthropic API key (preferred over `ANTHROPIC_API_KEY`)   |
+| `REVIEW_HERO_ANTHROPIC_BASE_URL`     | Custom API base URL (preferred over `ANTHROPIC_BASE_URL`)|
 
 ## Setup (per repo)
-
-### 0. Secrets
-
-Each consumer repo needs its own API key:
-
-| Secret              | Value                  |
-|---------------------|------------------------|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key |
-
-An admin also needs to add the repo to:
-- the [Review Hero Install App](https://github.com/organizations/beyondessential/settings/apps/review-hero/installations) page
-- the [private key org secret](https://github.com/organizations/beyondessential/settings/secrets/actions/REVIEW_HERO_PRIVATE_KEY) repository access list
 
 ### 1. Add the caller workflow
 
@@ -94,11 +90,11 @@ permissions:
 
 jobs:
   review:
-    uses: beyondessential/review-hero/.github/workflows/review.yml@main
+    uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     secrets: inherit
 ```
 
-`secrets: inherit` passes through both the org-level app credentials and the repo-level Anthropic key automatically.
+`secrets: inherit` passes through the app credentials and Anthropic key automatically.
 
 > **Tip:** If you use `trigger: always` and want reviews to re-run on every push, add `synchronize` to the `types` list. This is not included by default to avoid unnecessary workflow invocations — in `checkbox` mode (the default) `synchronize` events are ignored anyway.
 
@@ -135,7 +131,7 @@ permissions:
 
 jobs:
   auto-fix:
-    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
+    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@v1
     secrets: inherit
 ```
 
@@ -150,7 +146,7 @@ Then add the checkboxes to your PR template:
 
 Each checkbox triggers independently — you can fix review comments, CI failures, or both. Like the review checkbox, they're automatically unchecked after completion.
 
-**Note:** Auto-Fix needs broader permissions than review (`contents: write` to push commits, `actions: read` to fetch CI logs). The Review Hero GitHub App also needs write access to push on behalf of the bot.
+**Note:** Auto-Fix needs broader permissions than review (`contents: write` to push commits, `actions: read` to fetch CI logs). Your GitHub App also needs write access to push on behalf of the bot.
 
 #### Custom auto-fix rules
 
@@ -189,7 +185,7 @@ agents:
 
 ### Custom agents
 
-Drop a `.md` file into `.github/review-hero/prompts/` and it becomes an agent. The filename (minus `.md`) is the agent key, which must consist of **lowercase alphanumeric characters and hyphens only** (e.g. `project-conventions`, `bes-requirements`). Keys that don't match this pattern are ignored. Define the agent's display name and triage description in `config.yml` under `agents`.
+Drop a `.md` file into `.github/review-hero/prompts/` and it becomes an agent. The filename (minus `.md`) is the agent key, which must consist of **lowercase alphanumeric characters and hyphens only** (e.g. `project-conventions`, `my-rules`). Keys that don't match this pattern are ignored. Define the agent's display name and triage description in `config.yml` under `agents`.
 
 Example — `.github/review-hero/prompts/project-conventions.md`:
 
@@ -232,7 +228,7 @@ The caller workflow can pass these optional inputs:
 ```yaml
 jobs:
   review:
-    uses: beyondessential/review-hero/.github/workflows/review.yml@main
+    uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
       model: claude-sonnet-4-6  # Claude model for agents
@@ -251,7 +247,7 @@ jobs:
 ```yaml
 jobs:
   auto-fix:
-    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@main
+    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@v1
     with:
       model: claude-sonnet-4-6
       runner: ubuntu-slim       # Runner for trigger check + review fixes
@@ -280,7 +276,7 @@ The triage step uses Haiku to skip agents that aren't relevant to the changed fi
 
 ### GitHub Actions minutes
 
-Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows), which means all jobs run against the **calling repo's** Actions minute quota and billing — not this repo's. If your org uses GitHub-hosted runners on private repos, each review run (triage + agents + orchestrator) and each auto-fix run count towards the consumer repo's monthly included minutes or usage charges.
+Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows), which means all jobs run against the **calling repo's** Actions minute quota and billing — not this repo's. Each review run (triage + agents + orchestrator) and each auto-fix run count towards your repo's monthly included minutes or usage charges.
 
 ### Review
 
@@ -301,6 +297,24 @@ Max turns scale with the filtered diff size and are capped at 10:
 - One Sonnet session with up to 30 tool-use turns.
 - Has `Read`, `Edit`, `Glob`, and `Grep` tools. If fixing CI failures, `Bash` is also enabled so it can run commands to verify fixes.
 - Cost depends on how many review comments / CI failures need fixing, but is typically comparable to a single review agent run.
+
+## Versioning
+
+Review Hero follows [semantic versioning](https://semver.org/). Consumer workflows should pin to a **major version tag** (e.g. `@v1`), which automatically receives backwards-compatible updates:
+
+```yaml
+uses: beyondessential/review-hero/.github/workflows/review.yml@v1
+```
+
+- **Patch releases** (e.g. `v1.0.1`) — bug fixes, prompt tweaks, minor improvements.
+- **Minor releases** (e.g. `v1.1.0`) — new features, new agents, new inputs with backwards-compatible defaults.
+- **Major releases** (e.g. `v2.0.0`) — breaking changes to workflow inputs, secrets, or behaviour that requires consumer updates.
+
+If you need to pin to an exact version for stability, use the full semver tag:
+
+```yaml
+uses: beyondessential/review-hero/.github/workflows/review.yml@v1.2.3
+```
 
 ## PR template snippet
 
