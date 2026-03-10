@@ -11,6 +11,7 @@
  * Environment variables:
  *   DIFF_PATH           — Path to the raw PR diff file
  *   ANTHROPIC_API_KEY   — API key for Claude
+ *   ANTHROPIC_BASE_URL  — Optional custom base URL for the Anthropic API
  *   REVIEW_HERO_DIR     — Path to the review-hero checkout (prompts/, scripts/)
  *   CALLER_REPO_DIR     — Path to the caller repo checkout (workspace root)
  *   FILTERED_DIFF_PATH  — Where to write the filtered diff for agents to consume
@@ -74,6 +75,16 @@ function envOrDie(name) {
     process.exit(1);
   }
   return val;
+}
+
+/**
+ * Agent keys must be safe for use in filenames, artifact names, and shell
+ * interpolation. Allow only lowercase alphanumeric characters and hyphens.
+ */
+const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function isValidAgentKey(key) {
+  return VALID_AGENT_KEY.test(key);
 }
 
 /**
@@ -186,6 +197,14 @@ function discoverCustomAgents(callerDir, config) {
   for (const file of readdirSync(promptsDir)) {
     if (!file.endsWith(".md")) continue;
     const key = file.replace(/\.md$/, "");
+
+    if (!isValidAgentKey(key)) {
+      console.warn(
+        `Skipping custom agent prompt "${file}": key "${key}" is invalid (must match ${VALID_AGENT_KEY})`,
+      );
+      continue;
+    }
+
     const meta = configAgents[key] || {};
 
     agents.push({
@@ -205,6 +224,7 @@ function discoverCustomAgents(callerDir, config) {
 
 const diffPath = envOrDie("DIFF_PATH");
 const apiKey = envOrDie("ANTHROPIC_API_KEY");
+const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
 const reviewHeroDir = envOrDie("REVIEW_HERO_DIR");
 const callerDir = envOrDie("CALLER_REPO_DIR");
 const filteredDiffPath = envOrDie("FILTERED_DIFF_PATH");
@@ -287,7 +307,7 @@ const selectAgentsTool = {
 
 let selectedKeys;
 try {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
     headers: {
       "x-api-key": apiKey,

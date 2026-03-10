@@ -46,6 +46,7 @@ if (!/^\d+$/.test(prNumber)) {
 }
 
 const appId = process.env.REVIEW_HERO_APP_ID ?? "";
+const appSlug = process.env.APP_SLUG || "review-hero";
 const model = process.env.MODEL ?? "claude-sonnet-4-6";
 const fixReviews = process.env.FIX_REVIEWS === "true";
 const fixCI = process.env.FIX_CI === "true";
@@ -484,10 +485,10 @@ function configureGitIdentity() {
     throw new Error("Invalid app ID");
   }
 
-  const botName = "review-hero[bot]";
+  const botName = `${appSlug}[bot]`;
   const botEmail = appId
-    ? `${appId}+review-hero[bot]@users.noreply.github.com`
-    : "review-hero[bot]@users.noreply.github.com";
+    ? `${appId}+${appSlug}[bot]@users.noreply.github.com`
+    : `${appSlug}[bot]@users.noreply.github.com`;
 
   execSync(`git config user.name "${botName}"`);
   execSync(`git config user.email "${botEmail}"`);

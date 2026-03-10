@@ -15,16 +15,29 @@ on:
         description: "GitHub Actions runner for all jobs"
         type: string
         default: ubuntu-slim
+      ref:
+        description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
+        type: string
+        default: v1
     secrets:
       ANTHROPIC_API_KEY:
-        description: "Anthropic API key — set per-repo for billing separation"
+        description: "Anthropic API key"
+        required: false
+      REVIEW_HERO_ANTHROPIC_API_KEY:
+        description: "Anthropic API key (preferred over ANTHROPIC_API_KEY if both are set)"
+        required: false
+      ANTHROPIC_BASE_URL:
+        description: "Custom base URL for the Anthropic API (e.g. for proxies)"
+        required: false
+      REVIEW_HERO_ANTHROPIC_BASE_URL:
+        description: "Custom base URL for the Anthropic API (preferred over ANTHROPIC_BASE_URL if both are set)"
         required: false
       REVIEW_HERO_APP_ID:
         description: "Review Hero GitHub App ID — typically provided as an org-level secret"
-        required: false
+        required: true
       REVIEW_HERO_PRIVATE_KEY:
         description: "Review Hero GitHub App private key — typically provided as an org-level secret"
-        required: false
+        required: true
       REVIEW_HERO_BOOTSTRAP_BRANCH:
         description: "Optional branch to read config from when the default branch has no Review Hero config yet (useful during initial setup)"
         required: false
@@ -62,7 +75,7 @@ jobs:
             const match = body?.match(/\[(?<checked>[ x])\]\s+\*\*Run Review Hero\*\* <!-- #ai-review -->/);
             core.setOutput('should_run', match?.groups.checked === 'x');
 
-      # ── Generate app token (for cross-repo checkout) ─────────────────
+      # ── Generate app token ───────────────────────────────────────────
       - name: Generate app token
         if: steps.check.outputs.should_run == 'true'
         id: app-token
@@ -118,9 +131,9 @@ jobs:
         if: steps.check.outputs.should_run == 'true'
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository_owner }}/review-hero
+          repository: beyondessential/review-hero
+          ref: ${{ inputs.ref }}
           path: review-hero
-          token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Ensure Node.js version file
@@ -174,7 +187,8 @@ jobs:
         env:
           DIFF_PATH: /tmp/pr.diff
           FILTERED_DIFF_PATH: /tmp/pr-filtered.diff
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           REVIEW_HERO_DIR: review-hero
           CALLER_REPO_DIR: caller
         run: node review-hero/scripts/triage.mjs
@@ -235,9 +249,9 @@ jobs:
       - name: Checkout review-hero
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository_owner }}/review-hero
+          repository: beyondessential/review-hero
+          ref: ${{ inputs.ref }}
           path: .review-hero
-          token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Ensure Node.js version file
@@ -265,7 +279,8 @@ jobs:
       # ── Run agent ────────────────────────────────────────────────────
       - name: Run ${{ matrix.agent.key }} agent
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
         run: |
@@ -305,14 +320,14 @@ jobs:
               --model "${{ inputs.model }}" \
               --max-turns ${{ needs.triage.outputs.max_turns }} \
               --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
-            > /tmp/result.json
+            > /tmp/${{ matrix.agent.key }}-result.json
 
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: review-${{ matrix.agent.key }}
-          path: /tmp/result.json
+          path: /tmp/${{ matrix.agent.key }}-result.json
           retention-days: 1
 
   orchestrate-review:
@@ -333,9 +348,9 @@ jobs:
       - name: Checkout review-hero
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository_owner }}/review-hero
+          repository: beyondessential/review-hero
+          ref: ${{ inputs.ref }}
           path: review-hero
-          token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Setup Node.js
@@ -344,12 +359,17 @@ jobs:
           node-version: latest
 
       # ── Download agent artifacts ─────────────────────────────────────
-      - name: Download all artifacts
+      # Use merge-multiple so all agent results land as flat files in
+      # /tmp/artifacts (e.g. bugs-result.json, design-result.json).
+      # Each file is already uniquely named by the agent key, so there
+      # are no collisions and no dependency on subdirectory structure.
+      - name: Download agent artifacts
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           path: /tmp/artifacts
           pattern: review-*
+          merge-multiple: true
 
       # ── Orchestrate ──────────────────────────────────────────────────
       - name: Run orchestrator
@@ -360,4 +380,5 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ARTIFACTS_DIR: /tmp/artifacts
           AGENT_NAMES: ${{ needs.triage.outputs.agent_names }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: node review-hero/scripts/orchestrate.mjs

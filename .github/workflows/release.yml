@@ -1,0 +1,40 @@
+name: Release — Update major version tag
+
+# When a GitHub Release is published (e.g. v1.2.3), this workflow
+# force-moves the floating major version tag (e.g. v1) to point at the
+# same commit. This is the standard convention for GitHub Actions so
+# consumers can pin to `@v1` and get compatible updates automatically.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-major-tag:
+    runs-on: ubuntu-slim
+    if: github.event.release.tag_name != ''
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Parse version and move major tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # Extract major version (e.g. "v1" from "v1.2.3")
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$TAG' does not match semver pattern vMAJOR.MINOR.PATCH — skipping."
+            exit 0
+          fi
+
+          MAJOR="v${BASH_REMATCH[1]}"
+          echo "Moving ${MAJOR} → ${TAG}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$MAJOR" "$TAG"
+          git push origin "$MAJOR" --force
