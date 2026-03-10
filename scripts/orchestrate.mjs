@@ -12,6 +12,7 @@
  *   PR_NUMBER           — Pull request number
  *   ARTIFACTS_DIR       — Directory containing agent result files
  *   AGENT_NAMES         — JSON map of agent key → display name
+ *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -237,7 +238,7 @@ async function githubGraphQL(query, variables) {
   return result.data;
 }
 
-async function resolvePreviousReviewHeroThreads(prNumber) {
+async function resolvePreviousReviewHeroThreads(prNumber, botLogin) {
   const repo = getEnvOrThrow("GITHUB_REPOSITORY");
   const [owner, name] = repo.split("/");
 
@@ -268,7 +269,7 @@ async function resolvePreviousReviewHeroThreads(prNumber) {
   for (const thread of threads) {
     if (thread.isResolved) continue;
     const author = thread.comments.nodes[0]?.author?.login;
-    if (author !== "review-hero[bot]") continue;
+    if (author !== botLogin) continue;
 
     try {
       await githubGraphQL(
@@ -355,11 +356,13 @@ async function main() {
   const prNumber = getEnvOrThrow("PR_NUMBER");
   const artifactsDir = getEnvOrThrow("ARTIFACTS_DIR");
   const agentNames = loadAgentNames();
+  const appSlug = process.env.APP_SLUG || "review-hero";
+  const botLogin = `${appSlug}[bot]`;
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
 
   // Resolve previous Review Hero comments so they don't clutter the PR
-  await resolvePreviousReviewHeroThreads(prNumber);
+  await resolvePreviousReviewHeroThreads(prNumber, botLogin);
 
   // Discover agent results. We support two layouts:
   //   1. <dir>/<key>-result.json  (current: merge-multiple flat files)
