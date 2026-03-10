@@ -270,14 +270,14 @@ jobs:
               --model "${{ inputs.model }}" \
               --max-turns ${{ needs.triage.outputs.max_turns }} \
               --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
-            > /tmp/result.json
+            > /tmp/${{ matrix.agent.key }}-result.json
 
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: review-${{ matrix.agent.key }}
-          path: /tmp/result.json
+          path: /tmp/${{ matrix.agent.key }}-result.json
           retention-days: 1
 
   orchestrate-review:
@@ -309,12 +309,17 @@ jobs:
           node-version: latest
 
       # ── Download agent artifacts ─────────────────────────────────────
-      - name: Download all artifacts
+      # Use merge-multiple so all agent results land as flat files in
+      # /tmp/artifacts (e.g. bugs-result.json, design-result.json).
+      # Each file is already uniquely named by the agent key, so there
+      # are no collisions and no dependency on subdirectory structure.
+      - name: Download agent artifacts
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           path: /tmp/artifacts
           pattern: review-*
+          merge-multiple: true
 
       # ── Orchestrate ──────────────────────────────────────────────────
       - name: Run orchestrator

@@ -17,14 +17,14 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
+const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SEVERITY_ORDER = { critical: 0, suggestion: 1, nitpick: 2 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getEnvOrThrow(name) {
   const value = process.env[name];
-  if (!value)
-    throw new Error(`Missing required environment variable: ${name}`);
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
 
@@ -361,13 +361,35 @@ async function main() {
   // Resolve previous Review Hero comments so they don't clutter the PR
   await resolvePreviousReviewHeroThreads(prNumber);
 
-  // Discover which agent artifacts are present (rather than relying on a
-  // hardcoded list, scan the artifacts directory for review-* subdirs)
-  const agentKeys = [];
+  // Discover agent results. We support two layouts:
+  //   1. <dir>/<key>-result.json  (current: merge-multiple flat files)
+  //   2. <dir>/review-<key>/result.json  (legacy: per-artifact subdirs)
+  // The flat-file layout is preferred because download-artifact with
+  // merge-multiple avoids the single-artifact gotcha where a pattern
+  // matching one artifact extracts directly into the target path without
+  // creating a subdirectory.
+  const agentResults = new Map(); // key → filePath
+
   try {
     for (const entry of readdirSync(artifactsDir, { withFileTypes: true })) {
+      // Layout 1: <key>-result.json flat files
+      if (entry.isFile()) {
+        const match = entry.name.match(/^(.+)-result\.json$/);
+        if (match && VALID_AGENT_KEY.test(match[1])) {
+          agentResults.set(match[1], `${artifactsDir}/${entry.name}`);
+        }
+        continue;
+      }
+
+      // Layout 2: review-<key>/result.json subdirectories (fallback)
       if (entry.isDirectory() && entry.name.startsWith("review-")) {
-        agentKeys.push(entry.name.replace(/^review-/, ""));
+        const key = entry.name.replace(/^review-/, "");
+        if (!VALID_AGENT_KEY.test(key)) continue;
+        if (agentResults.has(key)) continue; // flat file takes precedence
+        const subPath = `${artifactsDir}/${entry.name}/result.json`;
+        if (existsSync(subPath)) {
+          agentResults.set(key, subPath);
+        }
       }
     }
   } catch {
@@ -379,14 +401,7 @@ async function main() {
   let agentsCompleted = 0;
   let agentsFailed = 0;
 
-  for (const agentKey of agentKeys) {
-    const filePath = `${artifactsDir}/review-${agentKey}/result.json`;
-    if (!existsSync(filePath)) {
-      console.warn(`Missing artifact: ${filePath}`);
-      agentsFailed++;
-      continue;
-    }
-
+  for (const [agentKey, filePath] of agentResults) {
     const findings = parseAgentResult(filePath, agentKey);
     if (findings === null) {
       const name = agentNames[agentKey] ?? agentKey;

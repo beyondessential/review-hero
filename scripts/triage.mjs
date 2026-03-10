@@ -77,6 +77,16 @@ function envOrDie(name) {
 }
 
 /**
+ * Agent keys must be safe for use in filenames, artifact names, and shell
+ * interpolation. Allow only lowercase alphanumeric characters and hyphens.
+ */
+const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function isValidAgentKey(key) {
+  return VALID_AGENT_KEY.test(key);
+}
+
+/**
  * Rudimentary glob match — supports `*` (any within segment) and `**` (any
  * path depth).  Good enough for lockfile patterns; we don't need full minimatch.
  */
@@ -186,6 +196,14 @@ function discoverCustomAgents(callerDir, config) {
   for (const file of readdirSync(promptsDir)) {
     if (!file.endsWith(".md")) continue;
     const key = file.replace(/\.md$/, "");
+
+    if (!isValidAgentKey(key)) {
+      console.warn(
+        `Skipping custom agent prompt "${file}": key "${key}" is invalid (must match ${VALID_AGENT_KEY})`,
+      );
+      continue;
+    }
+
     const meta = configAgents[key] || {};
 
     agents.push({
