@@ -205,7 +205,19 @@ Ignore: high-level architecture, performance, generic security, generic bugs.
 
 The triage step will automatically discover it and include it in Haiku's agent selection.
 
-> **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the **base branch**, not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged.
+> **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the repository's **default branch** (e.g. `main`), not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged to the default branch.
+
+### Bootstrap branch (initial setup)
+
+When you first install Review Hero on a repo, the default branch won't have a `.github/review-hero/config.yml` yet — the PR that adds it is what you're trying to review! To work around this, you can set an optional repo-level secret:
+
+| Secret                          | Value                                                        |
+|---------------------------------|--------------------------------------------------------------|
+| `REVIEW_HERO_BOOTSTRAP_BRANCH` | Branch name to read config from while the default branch has none |
+
+When this secret is set and the default branch has no `config.yml`, Review Hero will read all trusted content (config, custom agent prompts, AI rules, auto-fix rules) from the bootstrap branch instead. Once your setup PR is merged and the default branch has the config, the bootstrap branch is ignored — you can delete the secret at that point.
+
+> **Tip:** Set this to the name of your setup PR's branch (e.g. `add-review-hero`), then delete the secret after merging.
 
 ### Built-in ignore patterns
 
