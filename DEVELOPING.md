@@ -4,28 +4,11 @@ This document is for maintainers of Review Hero. For setup and usage, see [READM
 
 ## Project structure
 
-```
-.github/
-  workflows/
-    review.yml          # Reusable workflow — the review pipeline (triage → agents → orchestrate)
-    auto-fix.yml        # Reusable workflow — the auto-fix pipeline
-    ai-review.yml       # Caller workflow — dogfooding Review Hero on this repo
-    ai-auto-fix.yml     # Caller workflow — dogfooding auto-fix on this repo
-    release.yml         # Moves floating major version tags on release
-prompts/
-    agent-prompt.md     # Base prompt shared by all review agents
-    bugs.md             # Bugs & Correctness agent specialisation
-    performance.md      # Performance agent specialisation
-    design.md           # Design & Architecture agent specialisation
-    security.md         # Security agent specialisation
-    auto-fix.md         # Auto-fix prompt
-scripts/
-    triage.mjs          # Triage: diff filtering, agent discovery, Haiku agent selection
-    orchestrate.mjs     # Orchestrator: dedup findings, post review comments
-    auto-fix.mjs        # Auto-fix: fetch comments/CI failures, run Claude, commit/push
-    git-commit-fix.mjs  # Helper for Claude to commit individual fixes during auto-fix
-    detect-ai-rules.sh  # Detects AI rules files (.cursorrules, copilot-instructions, etc.)
-```
+Source is in `scripts/`. Entrypoints (end-user) are in `.github/workflows`: `review.yml`, `auto-fix.yml`. Base prompts are in `prompts`.
+
+We also dog-food Review Hero on its own repo. This is done through the `ai-review.yml` and `ai-auto-fix.yml` workflows.
+
+The `release.yml` workflow is for release management of this repo (described below).
 
 ## Branch protection
 
@@ -107,21 +90,7 @@ If a release breaks things, you have two options:
    git push origin v1 --force
    ```
 
-## Testing changes
-
-There's no test suite — Review Hero is tested by dogfooding. This repo has its own caller workflows (`ai-review.yml` and `ai-auto-fix.yml`) that exercise the full pipeline.
-
-To test changes before merging:
-
-1. Push your branch.
-2. In a test repo (or this repo), temporarily point the caller workflow at your branch:
-
-   ```yaml
-   uses: beyondessential/review-hero/.github/workflows/review.yml@my-branch
-   ```
-
-3. Open a PR and trigger a review. Check the Actions logs for the results.
-4. Remember to revert the ref back to `@v1` after testing.
+This requires repo admin.
 
 ## Secrets and environment variables
 

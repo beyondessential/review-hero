@@ -26,7 +26,7 @@ PR checkbox checked
 2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. Agents have read-only access to the repo so they can explore surrounding code for context.
 3. **Orchestrator** — collects all agent outputs, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
-## Prerequisites
+## Prerequisites (once per owner — user or org)
 
 ### 1. Create a GitHub App
 
