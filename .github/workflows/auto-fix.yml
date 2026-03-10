@@ -93,32 +93,33 @@ jobs:
           ref: ${{ github.head_ref }}
           token: ${{ steps.app-token.outputs.token }}
 
-      # ── Fetch default branch ─────────────────────────────────────────
+      # ── Resolve trusted ref ──────────────────────────────────────────
       # Config, auto-fix rules, and AI rules are read from the repo's
       # default branch — not the PR branch — so a malicious PR cannot
-      # inject prompt content via these files.
-      - name: Fetch default branch
-        run: git fetch origin ${{ github.event.repository.default_branch }} --depth=1
-
-      # ── Resolve trusted ref ──────────────────────────────────────────
-      # If the default branch has no Review Hero config and a bootstrap
-      # branch is configured, fetch and use that instead. This is useful
-      # during initial setup when the default branch doesn't have the
-      # config yet.
+      # inject prompt content via these files. If the default branch has
+      # no Review Hero config and a bootstrap branch is configured, fetch
+      # and use that instead (useful during initial setup).
       - name: Resolve trusted ref
         id: trusted-ref
         env:
           BOOTSTRAP_BRANCH: ${{ secrets.REVIEW_HERO_BOOTSTRAP_BRANCH }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          git fetch origin "$DEFAULT_BRANCH" --depth=1
           DEFAULT_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
-          CONFIG_CONTENT=$(git show "$DEFAULT_SHA:.github/review-hero/config.yml" 2>/dev/null || echo "")
-          if [ -n "$CONFIG_CONTENT" ]; then
+
+          # Check for config file existence (not content) so that an
+          # empty config.yml is still treated as "present", consistent
+          # with the existence check in review.yml.
+          if git show "$DEFAULT_SHA:.github/review-hero/config.yml" >/dev/null 2>&1; then
             echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
             echo "Config found on default branch"
           elif [ -n "$BOOTSTRAP_BRANCH" ]; then
             echo "No config on default branch, fetching bootstrap branch: $BOOTSTRAP_BRANCH"
-            git fetch origin "$BOOTSTRAP_BRANCH" --depth=1
+            if ! git fetch origin "$BOOTSTRAP_BRANCH" --depth=1; then
+              echo "::error::Bootstrap branch '$BOOTSTRAP_BRANCH' not found on origin. Check the REVIEW_HERO_BOOTSTRAP_BRANCH secret."
+              exit 1
+            fi
             BOOTSTRAP_SHA=$(git rev-parse "origin/$BOOTSTRAP_BRANCH")
             echo "sha=$BOOTSTRAP_SHA" >> "$GITHUB_OUTPUT"
           else
