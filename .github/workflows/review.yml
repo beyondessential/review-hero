@@ -38,6 +38,9 @@ on:
       REVIEW_HERO_PRIVATE_KEY:
         description: "Review Hero GitHub App private key — typically provided as an org-level secret"
         required: true
+      REVIEW_HERO_BOOTSTRAP_BRANCH:
+        description: "Optional branch to read config from when the default branch has no Review Hero config yet (useful during initial setup)"
+        required: false
 
 concurrency:
   group: review-hero-${{ github.event.pull_request.number }}
@@ -51,6 +54,7 @@ jobs:
       max_turns: ${{ steps.triage.outputs.max_turns }}
       agent_names: ${{ steps.triage.outputs.agent_names }}
       project_context: ${{ steps.config.outputs.project_context }}
+      trusted_ref: ${{ steps.resolve-trusted-ref.outputs.sha }}
     steps:
       # ── Trigger check ────────────────────────────────────────────────
       - id: check
@@ -81,15 +85,56 @@ jobs:
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      # ── Checkout caller repo at base branch ──────────────────────────
+      # ── Checkout caller repo at default branch ───────────────────────
       # Read config, custom agent prompts, and ignore patterns from the
-      # base branch — not the PR branch — so a malicious PR cannot inject
-      # custom agents, modify ignore patterns, or tamper with config values.
-      - name: Checkout caller repo (base branch)
+      # repo's default branch — not the PR branch — so a malicious PR
+      # cannot inject custom agents, modify ignore patterns, or tamper
+      # with config values.
+      - name: Checkout caller repo (default branch)
         if: steps.check.outputs.should_run == 'true'
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.repository.default_branch }}
+          path: caller
+
+      # ── Resolve trusted ref ──────────────────────────────────────────
+      # If the default branch has no Review Hero config and a bootstrap
+      # branch is configured, re-checkout from the bootstrap branch. This
+      # is useful during initial setup when the default branch doesn't
+      # have the config yet.
+      - name: Resolve trusted ref
+        if: steps.check.outputs.should_run == 'true'
+        id: resolve-trusted-ref
+        env:
+          BOOTSTRAP_BRANCH: ${{ secrets.REVIEW_HERO_BOOTSTRAP_BRANCH }}
+        run: |
+          # Pin to a SHA so triage and all parallel review-agent jobs
+          # read identical config even if the branch moves between jobs.
+          DEFAULT_SHA=$(git -C caller rev-parse HEAD)
+          if [ -f "caller/.github/review-hero/config.yml" ]; then
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "is_bootstrap=false" >> "$GITHUB_OUTPUT"
+            echo "Config found on default branch (${DEFAULT_SHA})"
+          elif [ -n "$BOOTSTRAP_BRANCH" ]; then
+            if ! git -C caller fetch origin "$BOOTSTRAP_BRANCH" --depth=1; then
+              echo "::error::Bootstrap branch '$BOOTSTRAP_BRANCH' not found on origin. Check the REVIEW_HERO_BOOTSTRAP_BRANCH secret."
+              exit 1
+            fi
+            BOOTSTRAP_SHA=$(git -C caller rev-parse FETCH_HEAD)
+            echo "sha=$BOOTSTRAP_SHA" >> "$GITHUB_OUTPUT"
+            echo "is_bootstrap=true" >> "$GITHUB_OUTPUT"
+            echo "No config on default branch, using bootstrap branch: $BOOTSTRAP_BRANCH (${BOOTSTRAP_SHA})"
+          else
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "is_bootstrap=false" >> "$GITHUB_OUTPUT"
+            echo "No config on default branch and no bootstrap branch configured"
+          fi
+
+      - name: Re-checkout from bootstrap branch
+        if: steps.check.outputs.should_run == 'true' && steps.resolve-trusted-ref.outputs.is_bootstrap == 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.resolve-trusted-ref.outputs.sha }}
           path: caller
 
       # ── Checkout review-hero (for scripts + base prompts) ────────────
@@ -192,13 +237,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      # ── Checkout caller config from base branch ──────────────────────
-      # Custom agent prompts and AI rules files are read from the base
-      # branch so that a PR cannot inject malicious prompt content.
-      - name: Checkout caller config (base branch)
+      # ── Checkout caller config from trusted ref ──────────────────────
+      # Custom agent prompts and AI rules files are read from a trusted
+      # ref (default branch, or bootstrap branch during initial setup)
+      # so that a PR cannot inject malicious prompt content.
+      - name: Checkout caller config (trusted ref)
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.triage.outputs.trusted_ref || github.event.repository.default_branch }}
           sparse-checkout: |
             .github/review-hero
             .github/copilot-instructions.md
@@ -237,7 +283,7 @@ jobs:
           name: filtered-diff
           path: /tmp
 
-      # ── Detect AI rules (from base branch) ──────────────────────────
+      # ── Detect AI rules (from trusted ref) ──────────────────────────
       - name: Detect AI rules
         run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
 
@@ -267,7 +313,7 @@ jobs:
             if [ "${{ matrix.agent.source }}" = "base" ]; then
               cat ".review-hero/prompts/${{ matrix.agent.key }}.md"
             else
-              # Read custom prompts from the base branch checkout so a PR
+              # Read custom prompts from the trusted ref checkout so a PR
               # cannot inject malicious agent prompts.
               cat ".caller-base/.github/review-hero/prompts/${{ matrix.agent.key }}.md"
             fi

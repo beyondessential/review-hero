@@ -38,6 +38,9 @@ on:
       REVIEW_HERO_PRIVATE_KEY:
         description: "Review Hero GitHub App private key — typically provided as an org-level secret"
         required: true
+      REVIEW_HERO_BOOTSTRAP_BRANCH:
+        description: "Optional branch to read config from when the default branch has no Review Hero config yet (useful during initial setup)"
+        required: false
 
 concurrency:
   group: review-hero-auto-fix-${{ github.event.pull_request.number }}
@@ -90,11 +93,39 @@ jobs:
           ref: ${{ github.head_ref }}
           token: ${{ steps.app-token.outputs.token }}
 
-      # ── Fetch base branch ────────────────────────────────────────────
-      # Config, auto-fix rules, and AI rules are read from the base branch
-      # so a malicious PR cannot inject prompt content via these files.
-      - name: Fetch base branch
-        run: git fetch origin ${{ github.event.pull_request.base.sha }} --depth=1
+      # ── Resolve trusted ref ──────────────────────────────────────────
+      # Config, auto-fix rules, and AI rules are read from the repo's
+      # default branch — not the PR branch — so a malicious PR cannot
+      # inject prompt content via these files. If the default branch has
+      # no Review Hero config and a bootstrap branch is configured, fetch
+      # and use that instead (useful during initial setup).
+      - name: Resolve trusted ref
+        id: trusted-ref
+        env:
+          BOOTSTRAP_BRANCH: ${{ secrets.REVIEW_HERO_BOOTSTRAP_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch origin "$DEFAULT_BRANCH" --depth=1
+          DEFAULT_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
+
+          # Check for config file existence (not content) so that an
+          # empty config.yml is still treated as "present", consistent
+          # with the existence check in review.yml.
+          if git show "$DEFAULT_SHA:.github/review-hero/config.yml" >/dev/null 2>&1; then
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "Config found on default branch"
+          elif [ -n "$BOOTSTRAP_BRANCH" ]; then
+            echo "No config on default branch, fetching bootstrap branch: $BOOTSTRAP_BRANCH"
+            if ! git fetch origin "$BOOTSTRAP_BRANCH" --depth=1; then
+              echo "::error::Bootstrap branch '$BOOTSTRAP_BRANCH' not found on origin. Check the REVIEW_HERO_BOOTSTRAP_BRANCH secret."
+              exit 1
+            fi
+            BOOTSTRAP_SHA=$(git rev-parse "origin/$BOOTSTRAP_BRANCH")
+            echo "sha=$BOOTSTRAP_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "No config on default branch and no bootstrap branch configured"
+          fi
 
       # ── Checkout review-hero (for scripts + prompts) ─────────────────
       - name: Checkout review-hero
@@ -119,15 +150,16 @@ jobs:
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # ── Read project context from caller config (base branch) ────────
+      # ── Read project context from caller config (trusted ref) ────────
       - name: Read caller config
         id: config
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.trusted-ref.outputs.sha }}
         run: |
-          # Read config from the base branch, not the PR branch, to prevent
-          # a malicious PR from injecting prompt content via config values.
-          CONFIG_CONTENT=$(git show "$BASE_SHA:.github/review-hero/config.yml" 2>/dev/null || echo "")
+          # Read config from the trusted ref (default branch, or bootstrap
+          # branch during initial setup), not the PR branch, to prevent a
+          # malicious PR from injecting prompt content via config values.
+          CONFIG_CONTENT=$(git show "$TRUSTED_SHA:.github/review-hero/config.yml" 2>/dev/null || echo "")
           if [ -n "$CONFIG_CONTENT" ]; then
             PROJECT=$(echo "$CONFIG_CONTENT" | yq -r '.project // ""')
             DESCRIPTION=$(echo "$CONFIG_CONTENT" | yq -r '.description // ""')
@@ -147,46 +179,46 @@ jobs:
             echo "REVIEW_HERO_EOF"
           } >> "$GITHUB_OUTPUT"
 
-          # Extract auto-fix rules from the base branch to a temp file
+          # Extract auto-fix rules from the trusted ref to a temp file
           RULES_TMP="/tmp/base-auto-fix-rules.md"
-          git show "$BASE_SHA:.github/review-hero/auto-fix-rules.md" > "$RULES_TMP" 2>/dev/null || true
+          git show "$TRUSTED_SHA:.github/review-hero/auto-fix-rules.md" > "$RULES_TMP" 2>/dev/null || true
           if [ -s "$RULES_TMP" ]; then
             echo "custom_rules_path=${RULES_TMP}" >> "$GITHUB_OUTPUT"
           else
             echo "custom_rules_path=" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── Detect AI rules (from base branch) ──────────────────────────
+      # ── Detect AI rules (from trusted ref) ──────────────────────────
       - name: Detect AI rules
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.trusted-ref.outputs.sha }}
         run: |
-          # Extract known AI rules files from the base branch into a temp
+          # Extract known AI rules files from the trusted ref into a temp
           # directory, then run detection against it. This prevents a PR
           # from injecting prompt content via AI rules files.
           RULES_DIR="/tmp/base-ai-rules-root"
           mkdir -p "$RULES_DIR"
 
           for f in .cursorrules .windsurfrules .clinerules .rules; do
-            git show "$BASE_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f" || true
+            git show "$TRUSTED_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f" || true
           done
 
           mkdir -p "$RULES_DIR/.github" || true
-          git show "$BASE_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
+          git show "$TRUSTED_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
             || rm -f "$RULES_DIR/.github/copilot-instructions.md" || true
 
           # Cursor rules directory
-          for f in $(git ls-tree --name-only "$BASE_SHA" .cursor/rules/ 2>/dev/null || true); do
+          for f in $(git ls-tree --name-only "$TRUSTED_SHA" .cursor/rules/ 2>/dev/null || true); do
             mkdir -p "$RULES_DIR/.cursor/rules" || true
             fname=$(basename "$f") || true
-            case "$fname" in *.md|*.mdc) git show "$BASE_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
+            case "$fname" in *.md|*.mdc) git show "$TRUSTED_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
           done || true
 
           # Zed rules directory
-          for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
+          for f in $(git ls-tree --name-only "$TRUSTED_SHA" .rules/ 2>/dev/null || true); do
             mkdir -p "$RULES_DIR/.rules" || true
             fname=$(basename "$f") || true
-            case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
+            case "$fname" in *.md) git show "$TRUSTED_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
           done || true
 
           sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md "$RULES_DIR"
