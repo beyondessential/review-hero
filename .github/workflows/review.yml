@@ -309,15 +309,6 @@ jobs:
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      # ── Detect app slug from the app token ───────────────────────────
-      - name: Detect app slug
-        id: app
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          SLUG=$(gh api /app --jq '.slug')
-          echo "slug=${SLUG}" >> "$GITHUB_OUTPUT"
-
       # ── Checkout review-hero (for orchestrate script) ────────────────
       - name: Checkout review-hero
         uses: actions/checkout@v6
@@ -354,5 +345,5 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ARTIFACTS_DIR: /tmp/artifacts
           AGENT_NAMES: ${{ needs.triage.outputs.agent_names }}
-          APP_SLUG: ${{ steps.app.outputs.slug }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: node review-hero/scripts/orchestrate.mjs
