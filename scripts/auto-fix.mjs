@@ -656,11 +656,24 @@ async function main() {
         "Claude failed but made commits before failing — pushing partial fixes",
       );
       pushChanges();
+      // Filter out comments on files already touched by the partial commits
+      // so the local fix prompt only contains genuinely outstanding items.
+      const touchedFiles = new Set(
+        execFileSync("git", ["diff", "--name-only", `${headBefore}..HEAD`], {
+          encoding: "utf-8",
+        })
+          .trim()
+          .split("\n")
+          .filter(Boolean),
+      );
+      const remainingComments = comments.filter(
+        (c) => !touchedFiles.has(c.file),
+      );
       const partialMsg =
         `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
         `Some fixes were pushed, but the session did not finish.\n\n` +
         `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
-        buildLocalFixPrompt(comments);
+        buildLocalFixPrompt(remainingComments);
       await postComment(partialMsg);
     } else {
       const failMsg =
