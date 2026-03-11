@@ -11,7 +11,7 @@
  *   there is nothing to report.
  */
 export function buildLocalFixPrompt(comments) {
-  if (comments.length === 0) return "";
+  if (!comments?.length) return "";
 
   const items = [];
 
