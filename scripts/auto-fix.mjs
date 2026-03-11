@@ -660,12 +660,12 @@ async function main() {
         `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
         `Some fixes were pushed, but the session did not finish.\n\n` +
         `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
-        buildLocalFixPrompt(comments, ciFailures);
+        buildLocalFixPrompt(comments);
       await postComment(partialMsg);
     } else {
       const failMsg =
         `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
-        buildLocalFixPrompt(comments, ciFailures);
+        buildLocalFixPrompt(comments);
       await postComment(failMsg);
     }
     await uncheckCheckboxes();
@@ -840,7 +840,7 @@ async function main() {
     );
   }
 
-  const localPrompt = buildLocalFixPrompt(skippedComments, skippedCIFailures);
+  const localPrompt = buildLocalFixPrompt(skippedComments);
   if (localPrompt) {
     summaryParts.push(localPrompt);
   }
