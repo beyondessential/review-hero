@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import * as core from "@actions/core";
+import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -279,40 +280,6 @@ async function fetchCIFailures() {
 }
 
 // ── Prompt building ──────────────────────────────────────────────────────────
-
-/**
- * Build a collapsible "local fix prompt" containing outstanding review
- * comments and/or CI failures that the developer can copy-paste into their
- * local coding agent.  Returns an empty string when there's nothing to fix.
- */
-function buildLocalFixPrompt(outstandingComments, outstandingCIFailures) {
-  if (outstandingComments.length === 0 && outstandingCIFailures.length === 0) {
-    return "";
-  }
-
-  const items = [];
-
-  for (const c of outstandingComments) {
-    const loc = `${c.file}${c.line ? `:${c.line}` : ""}`;
-    items.push(`\`${loc}\`: ${c.comment}`);
-  }
-
-  for (const f of outstandingCIFailures) {
-    items.push(
-      `CI failure in **${f.workflow} / ${f.job}**:\n\`\`\`\n${f.log}\n\`\`\``,
-    );
-  }
-
-  const prompt =
-    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n-------\n\n" +
-    items.join("\n\n-------\n\n");
-
-  return (
-    "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +
-    prompt +
-    "\n\n</details>"
-  );
-}
 
 function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
   const sections = [];

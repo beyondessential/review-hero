@@ -16,6 +16,7 @@
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
 const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -168,32 +169,6 @@ function buildInlineComment(group, agentNames) {
       return `**[${agentName}]** \`${f.severity}\`\n\n${f.comment}`;
     })
     .join("\n\n---\n\n");
-}
-
-/**
- * Build a collapsible "local fix prompt" containing all review findings that
- * the developer can copy-paste into their local coding agent.
- * Returns an empty string when there are no findings.
- */
-function buildLocalFixPrompt(findings) {
-  if (findings.length === 0) return "";
-
-  const items = [];
-
-  for (const f of findings) {
-    const loc = `${f.file}${f.line ? `:${f.line}` : ""}`;
-    items.push(`\`${loc}\`: ${f.comment}`);
-  }
-
-  const prompt =
-    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n-------\n\n" +
-    items.join("\n\n-------\n\n");
-
-  return (
-    "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +
-    prompt +
-    "\n\n</details>"
-  );
 }
 
 function buildSummaryTable(nitpicks, agentNames) {
