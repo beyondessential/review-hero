@@ -170,6 +170,32 @@ function buildInlineComment(group, agentNames) {
     .join("\n\n---\n\n");
 }
 
+/**
+ * Build a collapsible "local fix prompt" containing all review findings that
+ * the developer can copy-paste into their local coding agent.
+ * Returns an empty string when there are no findings.
+ */
+function buildLocalFixPrompt(findings) {
+  if (findings.length === 0) return "";
+
+  const lines = [
+    "Fix these issues identified on the pull request. One commit per issue fixed.\n",
+  ];
+
+  for (const f of findings) {
+    const loc = `${f.file}${f.line ? `:${f.line}` : ""}`;
+    lines.push(`- \`${loc}\`: ${f.comment}`);
+  }
+
+  const prompt = lines.join("\n");
+
+  return (
+    "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +
+    prompt +
+    "\n\n</details>"
+  );
+}
+
 function buildSummaryTable(nitpicks, agentNames) {
   if (nitpicks.length === 0) return "";
 
@@ -490,6 +516,11 @@ async function main() {
   const nitpickTable = buildSummaryTable(nitpicks, agentNames);
   if (nitpickTable) {
     summaryParts.push(`\n\n${nitpickTable}`);
+  }
+
+  const localPrompt = buildLocalFixPrompt(allFindings);
+  if (localPrompt) {
+    summaryParts.push(localPrompt);
   }
 
   await postComment(prNumber, summaryParts.join(""));
