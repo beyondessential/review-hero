@@ -17,6 +17,7 @@
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
+import { join } from "node:path";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
 const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -365,40 +366,37 @@ async function main() {
   // Resolve previous Review Hero comments so they don't clutter the PR
   await resolvePreviousReviewHeroThreads(prNumber, botLogin);
 
-  // Discover agent results. We support two layouts:
-  //   1. <dir>/<key>-result.json  (current: merge-multiple flat files)
-  //   2. <dir>/review-<key>/result.json  (legacy: per-artifact subdirs)
-  // The flat-file layout is preferred because download-artifact with
-  // merge-multiple avoids the single-artifact gotcha where a pattern
-  // matching one artifact extracts directly into the target path without
-  // creating a subdirectory.
+  // Recursively scan the artifacts directory for *-result.json files.
+  // This is intentionally layout-agnostic: download-artifact may place
+  // files flat (merge-multiple), in per-artifact subdirectories, or even
+  // directly in the target path (single-pattern match quirk).  A
+  // recursive search finds them regardless.
   const agentResults = new Map(); // key → filePath
 
-  try {
-    for (const entry of readdirSync(artifactsDir, { withFileTypes: true })) {
-      // Layout 1: <key>-result.json flat files
-      if (entry.isFile()) {
+  function scanForResults(dir) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scanForResults(fullPath);
+      } else if (entry.isFile()) {
         const match = entry.name.match(/^(.+)-result\.json$/);
         if (match && VALID_AGENT_KEY.test(match[1])) {
-          agentResults.set(match[1], `${artifactsDir}/${entry.name}`);
-        }
-        continue;
-      }
-
-      // Layout 2: review-<key>/result.json subdirectories (fallback)
-      if (entry.isDirectory() && entry.name.startsWith("review-")) {
-        const key = entry.name.replace(/^review-/, "");
-        if (!VALID_AGENT_KEY.test(key)) continue;
-        if (agentResults.has(key)) continue; // flat file takes precedence
-        const subPath = `${artifactsDir}/${entry.name}/result.json`;
-        if (existsSync(subPath)) {
-          agentResults.set(key, subPath);
+          // First match wins (shallowest, since we scan top-down)
+          if (!agentResults.has(match[1])) {
+            agentResults.set(match[1], fullPath);
+          }
         }
       }
     }
-  } catch {
-    // artifacts dir might not exist if all agents failed
   }
+
+  scanForResults(artifactsDir);
 
   // Collect findings from all agents
   const allFindings = [];
