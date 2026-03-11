@@ -491,7 +491,17 @@ async function main() {
     summaryParts.push(`\n\n${nitpickTable}`);
   }
 
-  const localPrompt = buildLocalFixPrompt(allFindings);
+  // Collapse each dedup group into a single item so the local fix prompt
+  // doesn't contain near-duplicate entries that were already merged during
+  // deduplication.  Each group shares a (file, ~line) so we take the first
+  // finding's location and join the unique comments.
+  const dedupedFindings = [...groups.values()].map((group) => ({
+    file: group[0].file,
+    line: group[0].line,
+    comment: [...new Set(group.map((f) => f.comment))].join("\n\n"),
+  }));
+
+  const localPrompt = buildLocalFixPrompt(dedupedFindings);
   if (localPrompt) {
     summaryParts.push(localPrompt);
   }
