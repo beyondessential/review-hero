@@ -15,7 +15,8 @@
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 import { join } from "node:path";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
@@ -488,6 +489,21 @@ async function main() {
   const nitpickTable = buildSummaryTable(nitpicks, agentNames);
   if (nitpickTable) {
     summaryParts.push(`\n\n${nitpickTable}`);
+  }
+
+  // Collapse each dedup group into a single item so the local fix prompt
+  // doesn't contain near-duplicate entries that were already merged during
+  // deduplication.  Each group shares a (file, ~line) so we take the first
+  // finding's location and join the unique comments.
+  const dedupedFindings = [...groups.values()].map((group) => ({
+    file: group[0].file,
+    line: group[0].line,
+    comment: [...new Set(group.map((f) => f.comment))].join("\n\n"),
+  }));
+
+  const localPrompt = buildLocalFixPrompt(dedupedFindings);
+  if (localPrompt) {
+    summaryParts.push(localPrompt);
   }
 
   await postComment(prNumber, summaryParts.join(""));

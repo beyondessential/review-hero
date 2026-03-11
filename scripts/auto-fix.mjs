@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import * as core from "@actions/core";
+import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -655,15 +656,30 @@ async function main() {
         "Claude failed but made commits before failing — pushing partial fixes",
       );
       pushChanges();
-      await postComment(
+      // Filter out comments on files already touched by the partial commits
+      // so the local fix prompt only contains genuinely outstanding items.
+      const touchedFiles = new Set(
+        execFileSync("git", ["diff", "--name-only", `${headBefore}..HEAD`], {
+          encoding: "utf-8",
+        })
+          .trim()
+          .split("\n")
+          .filter(Boolean),
+      );
+      const remainingComments = comments.filter(
+        (c) => !touchedFiles.has(c.file),
+      );
+      const partialMsg =
         `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
-          `Some fixes were pushed, but the session did not finish.\n\n` +
-          `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
-      );
+        `Some fixes were pushed, but the session did not finish.\n\n` +
+        `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
+        buildLocalFixPrompt(remainingComments);
+      await postComment(partialMsg);
     } else {
-      await postComment(
-        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.`,
-      );
+      const failMsg =
+        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
+        buildLocalFixPrompt(comments);
+      await postComment(failMsg);
     }
     await uncheckCheckboxes();
     process.exit(1);
@@ -709,11 +725,22 @@ async function main() {
     }
   }
 
-  // Count CI fixes
-  const fixedCICount = ciFailures.filter((_, i) => {
-    const result = resultById.get(comments.length + i + 1);
-    return result?.status === "fixed";
-  }).length;
+  // Determine which CI failures were fixed vs skipped
+  const fixedCIFailures = [];
+  const skippedCIFailures = [];
+  for (let i = 0; i < ciFailures.length; i++) {
+    const id = comments.length + i + 1;
+    const result = resultById.get(id);
+    if (result?.status === "fixed") {
+      fixedCIFailures.push(ciFailures[i]);
+    } else {
+      skippedCIFailures.push({
+        ...ciFailures[i],
+        reason: result?.reason ?? "No response from Claude",
+      });
+    }
+  }
+  const fixedCICount = fixedCIFailures.length;
 
   // Build commit message
   const msgParts = [];
@@ -824,6 +851,11 @@ async function main() {
     summaryParts.push(
       `\n\n[View logs](${serverUrl}/${repo}/actions/runs/${runId})`,
     );
+  }
+
+  const localPrompt = buildLocalFixPrompt(skippedComments);
+  if (localPrompt) {
+    summaryParts.push(localPrompt);
   }
 
   await postComment(summaryParts.join(""));
