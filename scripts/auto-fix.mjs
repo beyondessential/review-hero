@@ -290,22 +290,22 @@ function buildLocalFixPrompt(outstandingComments, outstandingCIFailures) {
     return "";
   }
 
-  const lines = [
-    "Fix these issues identified on the pull request. One commit per issue fixed.\n",
-  ];
+  const items = [];
 
   for (const c of outstandingComments) {
     const loc = `${c.file}${c.line ? `:${c.line}` : ""}`;
-    lines.push(`- \`${loc}\`: ${c.comment}`);
+    items.push(`\`${loc}\`: ${c.comment}`);
   }
 
   for (const f of outstandingCIFailures) {
-    lines.push(
-      `- CI failure in **${f.workflow} / ${f.job}**:\n\`\`\`\n${f.log}\n\`\`\``,
+    items.push(
+      `CI failure in **${f.workflow} / ${f.job}**:\n\`\`\`\n${f.log}\n\`\`\``,
     );
   }
 
-  const prompt = lines.join("\n");
+  const prompt =
+    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n-------\n\n" +
+    items.join("\n\n-------\n\n");
 
   return (
     "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +

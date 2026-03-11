@@ -178,16 +178,16 @@ function buildInlineComment(group, agentNames) {
 function buildLocalFixPrompt(findings) {
   if (findings.length === 0) return "";
 
-  const lines = [
-    "Fix these issues identified on the pull request. One commit per issue fixed.\n",
-  ];
+  const items = [];
 
   for (const f of findings) {
     const loc = `${f.file}${f.line ? `:${f.line}` : ""}`;
-    lines.push(`- \`${loc}\`: ${f.comment}`);
+    items.push(`\`${loc}\`: ${f.comment}`);
   }
 
-  const prompt = lines.join("\n");
+  const prompt =
+    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n-------\n\n" +
+    items.join("\n\n-------\n\n");
 
   return (
     "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +
