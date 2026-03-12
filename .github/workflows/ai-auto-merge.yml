@@ -1,0 +1,13 @@
+name: Review Hero Auto-Merge
+on:
+  pull_request:
+    types: [opened, reopened, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    uses: beyondessential/review-hero/.github/workflows/auto-merge.yml@v1
+    secrets: inherit

@@ -1,0 +1,171 @@
+name: Review Hero Auto-Merge
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: "Claude model for conflict resolution"
+        type: string
+        default: claude-sonnet-4-6
+      runner:
+        description: "GitHub Actions runner for all jobs"
+        type: string
+        default: ubuntu-slim
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: "Anthropic API key — set per-repo for billing separation"
+        required: false
+      REVIEW_HERO_APP_ID:
+        description: "Review Hero GitHub App ID — typically provided as an org-level secret"
+        required: false
+      REVIEW_HERO_PRIVATE_KEY:
+        description: "Review Hero GitHub App private key — typically provided as an org-level secret"
+        required: false
+
+concurrency:
+  group: review-hero-auto-merge-${{ github.event.pull_request.number }}
+
+jobs:
+  check-trigger:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      auto_merge: ${{ steps.check.outputs.auto_merge }}
+    steps:
+      - id: check
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const action = context.payload.action;
+            if (action !== 'edited' && action !== 'opened' && action !== 'reopened') {
+              core.setOutput('auto_merge', 'false');
+              return;
+            }
+            const body = context.payload.pull_request?.body ?? '';
+            const match = body.match(/\[(?<checked>[ x])\]\s+\*\*Auto-merge upstream\*\* <!-- #auto-merge -->/);
+            core.setOutput('auto_merge', match?.groups.checked === 'x' ? 'true' : 'false');
+
+  auto-merge:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.auto_merge == 'true'
+    runs-on: ${{ inputs.runner }}
+    steps:
+      # ── Generate app token ───────────────────────────────────────────
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.REVIEW_HERO_APP_ID }}
+          private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      # ── Checkout caller repo (at PR branch, with push access) ────────
+      - name: Checkout caller repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      # ── Fetch base branch ────────────────────────────────────────────
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      # ── Checkout review-hero (for scripts + prompts) ─────────────────
+      - name: Checkout review-hero
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository_owner }}/review-hero
+          path: .review-hero
+          token: ${{ steps.app-token.outputs.token }}
+
+      # ── Setup ────────────────────────────────────────────────────────
+      - name: Detect Node.js version
+        run: "[ -f .node-version ] || echo latest > .node-version"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install review-hero dependencies
+        run: npm ci --prefix .review-hero
+
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # ── Read project context from caller config (base branch) ────────
+      - name: Read caller config
+        id: config
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          CONFIG_CONTENT=$(git show "$BASE_SHA:.github/review-hero/config.yml" 2>/dev/null || echo "")
+          if [ -n "$CONFIG_CONTENT" ]; then
+            PROJECT=$(echo "$CONFIG_CONTENT" | yq -r '.project // ""')
+            DESCRIPTION=$(echo "$CONFIG_CONTENT" | yq -r '.description // ""')
+            if [ -n "$PROJECT" ] && [ -n "$DESCRIPTION" ]; then
+              CONTEXT="You are resolving merge conflicts on a PR for **${PROJECT}**, ${DESCRIPTION}."
+            elif [ -n "$PROJECT" ]; then
+              CONTEXT="You are resolving merge conflicts on a PR for **${PROJECT}**."
+            else
+              CONTEXT=""
+            fi
+          else
+            CONTEXT=""
+          fi
+          {
+            echo "project_context<<REVIEW_HERO_EOF"
+            echo "$CONTEXT"
+            echo "REVIEW_HERO_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          RULES_TMP="/tmp/base-auto-merge-rules.md"
+          git show "$BASE_SHA:.github/review-hero/auto-merge-rules.md" > "$RULES_TMP" 2>/dev/null || true
+          if [ -s "$RULES_TMP" ]; then
+            echo "custom_rules_path=${RULES_TMP}" >> "$GITHUB_OUTPUT"
+          else
+            echo "custom_rules_path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Detect AI rules (from base branch) ──────────────────────────
+      - name: Detect AI rules
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          RULES_DIR="/tmp/base-ai-rules-root"
+          mkdir -p "$RULES_DIR/.github" "$RULES_DIR/.cursor/rules" "$RULES_DIR/.rules"
+
+          for f in .cursorrules .windsurfrules .clinerules .rules; do
+            git show "$BASE_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f"
+          done
+          git show "$BASE_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
+            || rm -f "$RULES_DIR/.github/copilot-instructions.md"
+
+          for f in $(git ls-tree --name-only "$BASE_SHA" .cursor/rules/ 2>/dev/null || true); do
+            fname=$(basename "$f")
+            case "$fname" in *.md|*.mdc) git show "$BASE_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
+          done
+
+          for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
+            fname=$(basename "$f")
+            case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
+          done
+
+          sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md "$RULES_DIR"
+
+      # ── Run auto-merge ──────────────────────────────────────────────
+      - name: Run auto-merge
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_HERO_APP_ID: ${{ secrets.REVIEW_HERO_APP_ID }}
+          MODEL: ${{ inputs.model }}
+          PROMPT_PATH: .review-hero/prompts/auto-merge.md
+          PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
+          CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
+          AI_RULES_PATH: /tmp/ai-rules.md
+          BASE_SHA: origin/${{ github.event.pull_request.base.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: node .review-hero/scripts/auto-merge.mjs
