@@ -135,8 +135,8 @@ export function configureGitIdentity(appId, appSlug) {
     ? `${appId}+${appSlug}[bot]@users.noreply.github.com`
     : `${appSlug}[bot]@users.noreply.github.com`;
 
-  execSync(`git config user.name "${botName}"`);
-  execSync(`git config user.email "${botEmail}"`);
+  execFileSync("git", ["config", "user.name", botName]);
+  execFileSync("git", ["config", "user.email", botEmail]);
 }
 
 export function hasChanges() {
@@ -147,6 +147,7 @@ export function hasChanges() {
   );
 }
 
+// Callers must invoke configureGitIdentity() before calling createCommit().
 export function createCommit(commitMessage) {
   execSync("git add -A");
   // Remove .review-hero from the index — it's our tooling checkout, not part
@@ -156,12 +157,26 @@ export function createCommit(commitMessage) {
   execFileSync("git", ["commit", "-m", commitMessage]);
 }
 
+function isNonFastForward(errMsg) {
+  return /non-fast-forward|fetch first|cannot lock ref/i.test(errMsg);
+}
+
 export function pushChanges() {
   try {
     execSync("git push");
-  } catch {
-    console.warn("Push rejected — pulling with rebase and retrying");
-    execSync("git pull --rebase");
+  } catch (pushErr) {
+    const errMsg = pushErr.message ?? String(pushErr);
+    if (!isNonFastForward(errMsg)) {
+      throw pushErr;
+    }
+    console.warn("Push rejected (non-fast-forward) — pulling with rebase and retrying");
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf-8" }).trim();
+    try {
+      execSync(`git pull --rebase origin ${branch}`);
+    } catch (rebaseErr) {
+      execSync("git rebase --abort");
+      throw rebaseErr;
+    }
     execSync("git push");
   }
   console.log("Pushed changes");
