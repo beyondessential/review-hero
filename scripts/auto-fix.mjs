@@ -506,8 +506,35 @@ function createCommit(commitMessage) {
 }
 
 function pushChanges() {
-  execSync("git push");
-  console.log("Pushed auto-fix commits");
+  try {
+    execSync("git push");
+  } catch (err) {
+    // Only attempt the pull-rebase recovery for non-fast-forward rejections.
+    // Auth errors, branch protection failures, and network issues will have
+    // the same root cause on retry and should surface immediately.
+    const stderr = err.stderr?.toString() ?? "";
+    const isNonFastForward =
+      stderr.includes("rejected") && stderr.includes("non-fast-forward");
+    if (!isNonFastForward) {
+      throw err;
+    }
+
+    // Push was rejected because the remote branch moved ahead while we were
+    // running (e.g. another workflow or manual rebase). Pull with rebase to
+    // incorporate the new remote head, then retry once.
+    console.warn("Push rejected (non-fast-forward) — pulling with rebase and retrying");
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      encoding: "utf-8",
+    }).trim();
+    try {
+      execSync(`git pull --rebase origin ${branch}`);
+    } catch (rebaseErr) {
+      execSync("git rebase --abort");
+      throw rebaseErr;
+    }
+    execSync("git push");
+  }
+  console.log("Pushed changes");
 }
 
 // ── GitHub interactions ──────────────────────────────────────────────────────
