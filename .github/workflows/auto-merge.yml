@@ -11,15 +11,31 @@ on:
         description: "GitHub Actions runner for all jobs"
         type: string
         default: ubuntu-slim
+      ref:
+        description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
+        type: string
+        default: v1
     secrets:
       ANTHROPIC_API_KEY:
-        description: "Anthropic API key — set per-repo for billing separation"
+        description: "Anthropic API key"
+        required: false
+      REVIEW_HERO_ANTHROPIC_API_KEY:
+        description: "Anthropic API key (preferred over ANTHROPIC_API_KEY if both are set)"
+        required: false
+      ANTHROPIC_BASE_URL:
+        description: "Custom base URL for the Anthropic API (e.g. for proxies)"
+        required: false
+      REVIEW_HERO_ANTHROPIC_BASE_URL:
+        description: "Custom base URL for the Anthropic API (preferred over ANTHROPIC_BASE_URL if both are set)"
         required: false
       REVIEW_HERO_APP_ID:
         description: "Review Hero GitHub App ID — typically provided as an org-level secret"
-        required: false
+        required: true
       REVIEW_HERO_PRIVATE_KEY:
         description: "Review Hero GitHub App private key — typically provided as an org-level secret"
+        required: true
+      REVIEW_HERO_BOOTSTRAP_BRANCH:
+        description: "Optional branch to read config from when the default branch has no Review Hero config yet (useful during initial setup)"
         required: false
 
 concurrency:
@@ -66,6 +82,32 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
+      # ── Resolve trusted ref ────────────────────────────────────────
+      - name: Resolve trusted ref
+        id: trusted-ref
+        env:
+          BOOTSTRAP_BRANCH: ${{ secrets.REVIEW_HERO_BOOTSTRAP_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch origin "$DEFAULT_BRANCH" --depth=1
+          DEFAULT_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
+
+          if git show "$DEFAULT_SHA:.github/review-hero/config.yml" >/dev/null 2>&1; then
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "Config found on default branch"
+          elif [ -n "$BOOTSTRAP_BRANCH" ]; then
+            echo "No config on default branch, fetching bootstrap branch: $BOOTSTRAP_BRANCH"
+            if ! git fetch origin "$BOOTSTRAP_BRANCH" --depth=1; then
+              echo "::error::Bootstrap branch '$BOOTSTRAP_BRANCH' not found on origin. Check the REVIEW_HERO_BOOTSTRAP_BRANCH secret."
+              exit 1
+            fi
+            BOOTSTRAP_SHA=$(git rev-parse "origin/$BOOTSTRAP_BRANCH")
+            echo "sha=$BOOTSTRAP_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "No config on default branch and no bootstrap branch configured"
+          fi
+
       # ── Fetch base branch ────────────────────────────────────────────
       - name: Fetch base branch
         run: git fetch origin ${{ github.event.pull_request.base.ref }}
@@ -74,9 +116,9 @@ jobs:
       - name: Checkout review-hero
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository_owner }}/review-hero
+          repository: beyondessential/review-hero
+          ref: ${{ inputs.ref }}
           path: .review-hero
-          token: ${{ steps.app-token.outputs.token }}
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Detect Node.js version
@@ -93,13 +135,13 @@ jobs:
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # ── Read project context from caller config (base branch) ────────
+      # ── Read project context from caller config (trusted ref) ────────
       - name: Read caller config
         id: config
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.trusted-ref.outputs.sha }}
         run: |
-          CONFIG_CONTENT=$(git show "$BASE_SHA:.github/review-hero/config.yml" 2>/dev/null || echo "")
+          CONFIG_CONTENT=$(git show "$TRUSTED_SHA:.github/review-hero/config.yml" 2>/dev/null || echo "")
           if [ -n "$CONFIG_CONTENT" ]; then
             PROJECT=$(echo "$CONFIG_CONTENT" | yq -r '.project // ""')
             DESCRIPTION=$(echo "$CONFIG_CONTENT" | yq -r '.description // ""')
@@ -120,47 +162,53 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           RULES_TMP="/tmp/base-auto-merge-rules.md"
-          git show "$BASE_SHA:.github/review-hero/auto-merge-rules.md" > "$RULES_TMP" 2>/dev/null || true
+          git show "$TRUSTED_SHA:.github/review-hero/auto-merge-rules.md" > "$RULES_TMP" 2>/dev/null || true
           if [ -s "$RULES_TMP" ]; then
             echo "custom_rules_path=${RULES_TMP}" >> "$GITHUB_OUTPUT"
           else
             echo "custom_rules_path=" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── Detect AI rules (from base branch) ──────────────────────────
+      # ── Detect AI rules (from trusted ref) ──────────────────────────
       - name: Detect AI rules
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.trusted-ref.outputs.sha }}
         run: |
           RULES_DIR="/tmp/base-ai-rules-root"
-          mkdir -p "$RULES_DIR/.github" "$RULES_DIR/.cursor/rules" "$RULES_DIR/.rules"
+          mkdir -p "$RULES_DIR"
 
           for f in .cursorrules .windsurfrules .clinerules .rules; do
-            git show "$BASE_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f"
-          done
-          git show "$BASE_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
-            || rm -f "$RULES_DIR/.github/copilot-instructions.md"
-
-          for f in $(git ls-tree --name-only "$BASE_SHA" .cursor/rules/ 2>/dev/null || true); do
-            fname=$(basename "$f")
-            case "$fname" in *.md|*.mdc) git show "$BASE_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
+            git show "$TRUSTED_SHA:$f" > "$RULES_DIR/$f" 2>/dev/null || rm -f "$RULES_DIR/$f" || true
           done
 
-          for f in $(git ls-tree --name-only "$BASE_SHA" .rules/ 2>/dev/null || true); do
-            fname=$(basename "$f")
-            case "$fname" in *.md) git show "$BASE_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
-          done
+          mkdir -p "$RULES_DIR/.github" || true
+          git show "$TRUSTED_SHA:.github/copilot-instructions.md" > "$RULES_DIR/.github/copilot-instructions.md" 2>/dev/null \
+            || rm -f "$RULES_DIR/.github/copilot-instructions.md" || true
+
+          for f in $(git ls-tree --name-only "$TRUSTED_SHA" .cursor/rules/ 2>/dev/null || true); do
+            mkdir -p "$RULES_DIR/.cursor/rules" || true
+            fname=$(basename "$f") || true
+            case "$fname" in *.md|*.mdc) git show "$TRUSTED_SHA:$f" > "$RULES_DIR/.cursor/rules/$fname" 2>/dev/null || true ;; esac
+          done || true
+
+          for f in $(git ls-tree --name-only "$TRUSTED_SHA" .rules/ 2>/dev/null || true); do
+            mkdir -p "$RULES_DIR/.rules" || true
+            fname=$(basename "$f") || true
+            case "$fname" in *.md) git show "$TRUSTED_SHA:$f" > "$RULES_DIR/.rules/$fname" 2>/dev/null || true ;; esac
+          done || true
 
           sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md "$RULES_DIR"
 
       # ── Run auto-merge ──────────────────────────────────────────────
       - name: Run auto-merge
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEW_HERO_APP_ID: ${{ secrets.REVIEW_HERO_APP_ID }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           MODEL: ${{ inputs.model }}
           PROMPT_PATH: .review-hero/prompts/auto-merge.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}

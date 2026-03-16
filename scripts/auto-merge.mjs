@@ -11,6 +11,7 @@
  *   PR_NUMBER           — Pull request number
  *   ANTHROPIC_API_KEY   — API key for Claude CLI
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
+ *   APP_SLUG            — GitHub App slug (for git commit identity, default: review-hero)
  *   MODEL               — Model to use (default: claude-sonnet-4-6)
  *   PROMPT_PATH         — Path to the auto-merge conflict resolution prompt
  *   PROJECT_CONTEXT     — Optional project context string
@@ -40,6 +41,7 @@ if (!/^\d+$/.test(prNumber)) {
 }
 
 const appId = process.env.REVIEW_HERO_APP_ID ?? "";
+const appSlug = process.env.APP_SLUG || "review-hero";
 const model = process.env.MODEL ?? "claude-sonnet-4-6";
 const promptPath = getEnvOrThrow("PROMPT_PATH");
 const projectContext = process.env.PROJECT_CONTEXT ?? "";
@@ -129,10 +131,10 @@ function configureGitIdentity() {
     throw new Error("Invalid app ID");
   }
 
-  const botName = "review-hero[bot]";
+  const botName = `${appSlug}[bot]`;
   const botEmail = appId
-    ? `${appId}+review-hero[bot]@users.noreply.github.com`
-    : "review-hero[bot]@users.noreply.github.com";
+    ? `${appId}+${appSlug}[bot]@users.noreply.github.com`
+    : `${appSlug}[bot]@users.noreply.github.com`;
 
   execSync(`git config user.name "${botName}"`);
   execSync(`git config user.email "${botEmail}"`);
@@ -242,7 +244,9 @@ function runClaude(prompt, { commitHelperPath } = {}) {
     throw new Error("commitHelperPath is required");
   }
   const commitTool = `Bash(${commitHelperPath}:*)`;
-  const tools = `Read,Edit,Glob,Grep,${commitTool}`;
+  // Allow git log so Claude can check commit history to understand intent
+  const gitLogTool = "Bash(git log:*)";
+  const tools = `Read,Edit,Glob,Grep,${commitTool},${gitLogTool}`;
 
   const raw = execSync(
     `cat "${tmpPath}" | claude -p ` +
