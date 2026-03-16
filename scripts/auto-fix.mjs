@@ -506,8 +506,17 @@ function createCommit(commitMessage) {
 }
 
 function pushChanges() {
-  execSync("git push");
-  console.log("Pushed auto-fix commits");
+  try {
+    execSync("git push");
+  } catch {
+    // Push can be rejected if the remote branch was force-pushed while we
+    // were running (e.g. another workflow or manual rebase). Pull with
+    // rebase to incorporate the new remote head, then retry once.
+    console.warn("Push rejected — pulling with rebase and retrying");
+    execSync("git pull --rebase");
+    execSync("git push");
+  }
+  console.log("Pushed changes");
 }
 
 // ── GitHub interactions ──────────────────────────────────────────────────────
