@@ -40,6 +40,7 @@ on:
 
 concurrency:
   group: review-hero-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   check-trigger:
@@ -110,7 +111,9 @@ jobs:
 
       # ── Fetch base branch ────────────────────────────────────────────
       - name: Fetch base branch
-        run: git fetch origin ${{ github.event.pull_request.base.ref }}
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: git fetch origin "$BASE_REF"
 
       # ── Checkout review-hero (for scripts + prompts) ─────────────────
       - name: Checkout review-hero
@@ -155,10 +158,11 @@ jobs:
           else
             CONTEXT=""
           fi
+          DELIM="REVIEW_HERO_$(openssl rand -hex 8)"
           {
-            echo "project_context<<REVIEW_HERO_EOF"
+            echo "project_context<<$DELIM"
             echo "$CONTEXT"
-            echo "REVIEW_HERO_EOF"
+            echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
           RULES_TMP="/tmp/base-auto-merge-rules.md"

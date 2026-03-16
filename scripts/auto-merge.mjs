@@ -163,12 +163,13 @@ function attemptMerge() {
     });
     return { conflicts: false };
   } catch (err) {
-    // Check if the failure was due to merge conflicts
-    const conflicted = getConflictedFiles();
-    if (conflicted.length > 0) {
-      return { conflicts: true, files: conflicted };
+    // Exit code 1 means merge conflicts; anything else is a real failure
+    if (err.status === 1) {
+      const conflicted = getConflictedFiles();
+      if (conflicted.length > 0) {
+        return { conflicts: true, files: conflicted };
+      }
     }
-    // Some other merge failure
     throw new Error(`Merge failed: ${err.stderr || err.message}`);
   }
 }
@@ -181,8 +182,14 @@ function createCommit(commitMessage) {
 }
 
 function pushChanges() {
-  execSync("git push");
-  console.log("Pushed auto-merge commits");
+  try {
+    execSync("git push");
+  } catch {
+    console.warn("Push rejected — pulling with rebase and retrying");
+    execSync("git pull --rebase");
+    execSync("git push");
+  }
+  console.log("Pushed changes");
 }
 
 // ── Prompt building ──────────────────────────────────────────────────────────
@@ -248,13 +255,17 @@ function runClaude(prompt, { commitHelperPath } = {}) {
   const gitLogTool = "Bash(git log:*)";
   const tools = `Read,Edit,Glob,Grep,${commitTool},${gitLogTool}`;
 
-  const raw = execSync(
-    `cat "${tmpPath}" | claude -p ` +
-      `--output-format json ` +
-      `--model "${model}" ` +
-      `--max-turns 30 ` +
-      `--allowedTools "${tools}"`,
+  const raw = execFileSync(
+    "claude",
+    [
+      "-p",
+      "--output-format", "json",
+      "--model", model,
+      "--max-turns", "30",
+      "--allowedTools", tools,
+    ],
     {
+      input: readFileSync(tmpPath, "utf-8"),
       encoding: "utf-8",
       timeout: 10 * 60 * 1000,
       maxBuffer: 10 * 1024 * 1024,
@@ -458,6 +469,23 @@ async function main() {
     // No remaining conflicts
   }
 
+  // If conflict markers remain, abort — don't commit broken code
+  if (remainingConflicts.length > 0) {
+    execSync("git merge --abort 2>/dev/null || true");
+    const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+    const runId = process.env.GITHUB_RUN_ID;
+    const logsUrl = runId
+      ? `${serverUrl}/${repo}/actions/runs/${runId}`
+      : `${serverUrl}/${repo}/actions`;
+    await postComment(
+      `🦸 **Review Hero Auto-Merge** could not fully resolve all conflicts.\n\n` +
+        `⚠️ Conflict markers still present in: ${remainingConflicts.map((f) => `\`${f}\``).join(", ")}. These need manual resolution.\n\n` +
+        `[View logs](${logsUrl})`,
+    );
+    await uncheckCheckbox();
+    process.exit(1);
+  }
+
   // Catch any remaining uncommitted changes
   if (hasChanges()) {
     createCommit(`merge: resolve conflicts from ${baseRef}`);
@@ -490,12 +518,6 @@ async function main() {
   if (skippedCount > 0) {
     summaryParts.push(
       `\n\n⚠️ ${skippedCount} conflict${skippedCount === 1 ? " was" : "s were"} skipped and may need manual resolution.`,
-    );
-  }
-
-  if (remainingConflicts.length > 0) {
-    summaryParts.push(
-      `\n\n⚠️ Conflict markers still present in: ${remainingConflicts.map((f) => `\`${f}\``).join(", ")}. These need manual resolution.`,
     );
   }
 
