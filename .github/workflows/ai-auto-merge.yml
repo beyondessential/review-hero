@@ -9,5 +9,5 @@ permissions:
 
 jobs:
   auto-merge:
-    uses: beyondessential/review-hero/.github/workflows/auto-merge.yml@v1
+    uses: beyondessential/review-hero/.github/workflows/auto-merge.yml@main
     secrets: inherit
