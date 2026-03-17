@@ -124,7 +124,11 @@ export function createGitHubApi(token, repo) {
     }
   }
 
-  return { api, graphql, postComment, uncheckCheckboxes };
+  async function uncheckCheckbox(prNumber, label, anchor) {
+    return uncheckCheckboxes(prNumber, [{ label, anchor }]);
+  }
+
+  return { api, graphql, postComment, uncheckCheckboxes, uncheckCheckbox };
 }
 
 function escapeRegExp(s) {
@@ -379,8 +383,11 @@ export function workflowLogsUrl(repo) {
   const serverUrl = /^https:\/\/[a-zA-Z0-9._-]/.test(rawServerUrl)
     ? rawServerUrl.replace(/\/$/, "")
     : "https://github.com";
-  const runId = process.env.GITHUB_RUN_ID;
+  const rawRunId = process.env.GITHUB_RUN_ID;
+  const runId = /^\d+$/.test(rawRunId ?? "") ? rawRunId : null;
+  const safeRepo = /^[\w.-]+\/[\w.-]+$/.test(repo ?? "") ? repo : null;
+  if (!safeRepo) return `${serverUrl}/actions`;
   return runId
-    ? `${serverUrl}/${repo}/actions/runs/${runId}`
-    : `${serverUrl}/${repo}/actions`;
+    ? `${serverUrl}/${safeRepo}/actions/runs/${runId}`
+    : `${serverUrl}/${safeRepo}/actions`;
 }
