@@ -71,13 +71,15 @@ jobs:
               core.setOutput('should_run', 'true');
               return;
             }
-            // checkbox mode: only run when PR body is edited and checkbox is checked
-            if (context.payload.action !== 'edited') {
+            // checkbox mode: only run when checkbox is checked.
+            // Check on opened (pre-ticked template), reopened, or edited.
+            const action = context.payload.action;
+            if (action !== 'edited' && action !== 'opened' && action !== 'reopened') {
               core.setOutput('should_run', 'false');
               return;
             }
-            const body = context.payload.pull_request?.body;
-            const match = body?.match(/\[(?<checked>[ x])\]\s+\*\*Run Review Hero\*\* <!-- #ai-review -->/);
+            const body = context.payload.pull_request?.body ?? '';
+            const match = body.match(/\[(?<checked>[ x])\]\s+\*\*Run Review Hero\*\* <!-- #ai-review -->/);
             core.setOutput('should_run', match?.groups.checked === 'x');
 
       # ── Generate app token ───────────────────────────────────────────
