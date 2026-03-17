@@ -93,16 +93,24 @@ export function createGitHubApi(token, repo) {
     });
   }
 
-  async function uncheckCheckbox(prNumber, label, anchor) {
+  async function uncheckCheckboxes(prNumber, checkboxes) {
     try {
       const pr = await api(`/pulls/${prNumber}`);
       if (!pr.body) return;
 
-      const pattern = new RegExp(
-        `\\[x\\]\\s+\\*\\*${escapeRegExp(label)}\\*\\* <!-- ${escapeRegExp(anchor)} -->`,
-      );
-      const replacement = `[ ] **${label}** <!-- ${anchor} -->`;
-      const updated = pr.body.replace(pattern, replacement);
+      let updated = pr.body;
+      const unchecked = [];
+      for (const { label, anchor } of checkboxes) {
+        const pattern = new RegExp(
+          `\\[x\\]\\s+\\*\\*${escapeRegExp(label)}\\*\\* <!-- ${escapeRegExp(anchor)} -->`,
+        );
+        const replacement = `[ ] **${label}** <!-- ${anchor} -->`;
+        const next = updated.replace(pattern, replacement);
+        if (next !== updated) {
+          updated = next;
+          unchecked.push(label);
+        }
+      }
 
       if (updated === pr.body) return;
 
@@ -110,13 +118,13 @@ export function createGitHubApi(token, repo) {
         method: "PATCH",
         body: JSON.stringify({ body: updated }),
       });
-      console.log(`Unchecked ${label} checkbox`);
+      for (const label of unchecked) console.log(`Unchecked ${label} checkbox`);
     } catch (err) {
       console.warn(`Failed to uncheck checkbox: ${err.message}`);
     }
   }
 
-  return { api, graphql, postComment, uncheckCheckbox };
+  return { api, graphql, postComment, uncheckCheckboxes };
 }
 
 function escapeRegExp(s) {
@@ -165,14 +173,14 @@ export function pushChanges() {
   try {
     execSync("git push");
   } catch (pushErr) {
-    const errMsg = pushErr.message ?? String(pushErr);
+    const errMsg = pushErr.stderr?.toString() ?? pushErr.message ?? String(pushErr);
     if (!isNonFastForward(errMsg)) {
       throw pushErr;
     }
     console.warn("Push rejected (non-fast-forward) — pulling with rebase and retrying");
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf-8" }).trim();
     try {
-      execSync(`git pull --rebase origin ${branch}`);
+      execFileSync("git", ["pull", "--rebase", "origin", branch]);
     } catch (rebaseErr) {
       execSync("git rebase --abort");
       throw rebaseErr;
@@ -367,7 +375,10 @@ export function copyCommitHelper(prNumber) {
 // ── Workflow logs URL ────────────────────────────────────────────────────────
 
 export function workflowLogsUrl(repo) {
-  const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+  const rawServerUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+  const serverUrl = /^https:\/\/[a-zA-Z0-9._-]/.test(rawServerUrl)
+    ? rawServerUrl.replace(/\/$/, "")
+    : "https://github.com";
   const runId = process.env.GITHUB_RUN_ID;
   return runId
     ? `${serverUrl}/${repo}/actions/runs/${runId}`

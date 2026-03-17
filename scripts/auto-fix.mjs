@@ -288,12 +288,10 @@ async function replyToThread(threadId, body) {
 }
 
 async function uncheckCheckboxes() {
-  if (fixReviews) {
-    await gh.uncheckCheckbox(prNumber, "Auto-fix review suggestions", "#auto-fix");
-  }
-  if (fixCI) {
-    await gh.uncheckCheckbox(prNumber, "Auto-fix CI failures", "#auto-fix-ci");
-  }
+  const checkboxes = [];
+  if (fixReviews) checkboxes.push({ label: "Auto-fix review suggestions", anchor: "#auto-fix" });
+  if (fixCI) checkboxes.push({ label: "Auto-fix CI failures", anchor: "#auto-fix-ci" });
+  if (checkboxes.length > 0) await gh.uncheckCheckboxes(prNumber, checkboxes);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
