@@ -10,33 +10,37 @@
  *   PR_NUMBER           — Pull request number
  *   ANTHROPIC_API_KEY   — API key for Claude CLI
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
+ *   APP_SLUG            — GitHub App slug (for git commit identity, default: review-hero)
  *   MODEL               — Model to use (default: claude-sonnet-4-6)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
  *   FIX_CI              — 'true' to fix CI failures
  *   PROMPT_PATH         — Path to the base auto-fix prompt
  *   PROJECT_CONTEXT     — Optional project context string (e.g. "You are reviewing a PR for **Tamanu**, a healthcare management system.")
  *   CUSTOM_RULES_PATH   — Optional path to repo-specific rules to append to the prompt
+ *   AI_RULES_PATH       — Optional path to AI rules file
  *   SELF_WORKFLOW        — Name of this workflow (to exclude from CI failure checks)
  */
 
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  copyFileSync,
-  chmodSync,
-} from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import * as core from "@actions/core";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
+import {
+  getEnvOrThrow,
+  createGitHubApi,
+  configureGitIdentity,
+  hasChanges,
+  createCommit,
+  pushChanges,
+  excludeReviewHero,
+  restoreReviewHero,
+  runClaude,
+  parseClaudeResult,
+  buildBasePromptSections,
+  copyCommitHelper,
+  workflowLogsUrl,
+} from "./lib.mjs";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function getEnvOrThrow(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required environment variable: ${name}`);
-  return value;
-}
+// ── Config ───────────────────────────────────────────────────────────────────
 
 const token = getEnvOrThrow("GITHUB_TOKEN");
 const repo = getEnvOrThrow("GITHUB_REPOSITORY");
@@ -57,81 +61,14 @@ const customRulesPath = process.env.CUSTOM_RULES_PATH ?? "";
 const aiRulesPath = process.env.AI_RULES_PATH ?? "";
 const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
 
-// ── GitHub API ───────────────────────────────────────────────────────────────
-
-async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function withRetry(fn, attempts = 3) {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (attempt < attempts - 1) {
-        console.warn(`Attempt ${attempt + 1} failed, retrying: ${err.message}`);
-        await sleep(1000 * (attempt + 1));
-      } else {
-        throw err;
-      }
-    }
-  }
-}
-
-async function githubApi(endpoint, options = {}) {
-  const baseUrl = `https://api.github.com/repos/${repo}`;
-
-  return withRetry(async () => {
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`GitHub API ${response.status}: ${body}`);
-    }
-
-    return response.json();
-  });
-}
-
-async function githubGraphQL(query, variables) {
-  return withRetry(async () => {
-    const response = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query, variables }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`GitHub GraphQL ${response.status}: ${body}`);
-    }
-
-    const result = await response.json();
-    if (result.errors) {
-      throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
-    }
-    return result.data;
-  });
-}
+const gh = createGitHubApi(token, repo);
 
 // ── Data fetching ────────────────────────────────────────────────────────────
 
 async function fetchUnresolvedComments() {
   const [owner, name] = repo.split("/");
 
-  const data = await githubGraphQL(
+  const data = await gh.graphql(
     `query($owner: String!, $repo: String!, $pr: Int!) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $pr) {
@@ -228,12 +165,12 @@ async function fetchJobLog(jobId) {
 }
 
 async function fetchCIFailures() {
-  const pr = await githubApi(`/pulls/${prNumber}`);
+  const pr = await gh.api(`/pulls/${prNumber}`);
   const headSha = pr.head.sha;
 
   console.log(`Fetching CI failures for commit ${headSha.slice(0, 7)}`);
 
-  const runsData = await githubApi(
+  const runsData = await gh.api(
     `/actions/runs?head_sha=${headSha}&per_page=100`,
   );
   const runs = (runsData.workflow_runs ?? []).filter(
@@ -250,7 +187,7 @@ async function fetchCIFailures() {
   let totalChars = 0;
 
   for (const run of runs) {
-    const jobsData = await githubApi(
+    const jobsData = await gh.api(
       `/actions/runs/${run.id}/jobs?filter=latest&per_page=100`,
     );
     const failedJobs = (jobsData.jobs ?? []).filter(
@@ -282,42 +219,14 @@ async function fetchCIFailures() {
 // ── Prompt building ──────────────────────────────────────────────────────────
 
 function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
-  const sections = [];
-
-  // Project context (if provided by the caller's config.yml)
-  if (projectContext) {
-    sections.push(`## Project Context\n\n${projectContext}`);
-  }
-
-  // Base auto-fix prompt — replace the placeholder helper path with the
-  // actual (possibly /tmp-copied) path so Claude invokes the right script.
-  let basePrompt = readFileSync(promptPath, "utf-8");
-  if (commitHelperPath) {
-    basePrompt = basePrompt.replaceAll(
-      ".review-hero/scripts/git-commit-fix.mjs",
-      commitHelperPath,
-    );
-  }
-  sections.push(basePrompt);
-
-  // Custom rules from the consumer repo (if present)
-  if (customRulesPath && existsSync(customRulesPath)) {
-    sections.push(readFileSync(customRulesPath, "utf-8"));
-  }
-
-  // AI rules from other tools (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
-  if (aiRulesPath) {
-    try {
-      const aiRules = readFileSync(aiRulesPath, "utf-8").trim();
-      if (aiRules) {
-        sections.push(
-          `## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when applying fixes.\n\n${aiRules}`,
-        );
-      }
-    } catch {
-      // No AI rules file or unreadable — skip
-    }
-  }
+  const sections = buildBasePromptSections({
+    projectContext,
+    promptPath,
+    commitHelperPath,
+    customRulesPath,
+    aiRulesPath,
+    aiRulesLabel: "Follow them when applying fixes.",
+  });
 
   if (comments.length > 0) {
     const commentsList = comments
@@ -346,202 +255,11 @@ function buildPrompt(comments, ciFailures, { commitHelperPath } = {}) {
   return sections.join("\n\n");
 }
 
-// ── Claude execution ─────────────────────────────────────────────────────────
-
-function runClaude(prompt, { commitHelperPath } = {}) {
-  if (!/^[a-z0-9.-]+$/.test(model)) {
-    throw new Error(`Invalid model name: ${model}`);
-  }
-
-  const tmpPath = `/tmp/auto-fix-prompt-${prNumber}-${Date.now()}.md`;
-  writeFileSync(tmpPath, prompt);
-
-  // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
-  // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
-  // without having unrestricted shell access.
-  if (!fixCI && !commitHelperPath) {
-    throw new Error(
-      "commitHelperPath is required when not running in CI fix mode",
-    );
-  }
-  const commitTool = commitHelperPath ? `Bash(${commitHelperPath}:*)` : null;
-  const tools = fixCI
-    ? "Read,Edit,Glob,Grep,Bash"
-    : `Read,Edit,Glob,Grep,${commitTool}`;
-
-  const raw = execSync(
-    `cat "${tmpPath}" | claude -p ` +
-      `--output-format json ` +
-      `--model "${model}" ` +
-      `--max-turns 30 ` +
-      `--allowedTools "${tools}"`,
-    {
-      encoding: "utf-8",
-      timeout: 10 * 60 * 1000,
-      maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env },
-    },
-  );
-
-  logClaudeSession(raw);
-  return raw;
-}
-
-function logClaudeSession(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-
-    // Log cost and usage stats
-    const stats = [];
-    if (parsed.model) stats.push(`Model: ${parsed.model}`);
-    if (parsed.num_turns != null) {
-      if (parsed.max_turns != null) {
-        stats.push(`Turns: ${parsed.num_turns} (of ${parsed.max_turns} max)`);
-      } else {
-        stats.push(`Turns: ${parsed.num_turns} (of 30 max)`);
-      }
-    }
-    if (parsed.duration_ms != null) {
-      const secs = (parsed.duration_ms / 1000).toFixed(1);
-      stats.push(`Duration: ${secs}s`);
-    }
-    if (parsed.cost_usd != null) {
-      stats.push("Cost: $" + Number(parsed.cost_usd).toFixed(4));
-    }
-    if (parsed.usage) {
-      const u = parsed.usage;
-      if (u.input_tokens != null)
-        stats.push(`Input tokens: ${u.input_tokens.toLocaleString()}`);
-      if (u.output_tokens != null)
-        stats.push(`Output tokens: ${u.output_tokens.toLocaleString()}`);
-    }
-    if (stats.length > 0) {
-      core.info(`Claude session: ${stats.join(" | ")}`);
-    }
-
-    // Log the full response in a collapsible group
-    const transcript = typeof parsed.result === "string" ? parsed.result : raw;
-    core.startGroup("Claude auto-fix transcript");
-    try {
-      core.info(transcript);
-    } finally {
-      core.endGroup();
-    }
-  } catch {
-    // JSON parse failed — log the raw output directly
-    core.startGroup("Claude auto-fix output (raw)");
-    try {
-      core.info(raw);
-    } finally {
-      core.endGroup();
-    }
-  }
-}
-
-function parseClaudeResult(raw) {
-  let text = raw;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.result)) return parsed.result;
-    if (parsed.result) text = parsed.result;
-    else if (Array.isArray(parsed)) return parsed;
-  } catch {
-    // Not valid JSON at top level — search for embedded array below
-  }
-
-  let searchFrom = 0;
-  while (searchFrom < text.length) {
-    const start = text.indexOf("[", searchFrom);
-    if (start === -1) break;
-    let searchEnd = text.length;
-    while (searchEnd > start) {
-      const end = text.lastIndexOf("]", searchEnd - 1);
-      if (end <= start) break;
-      try {
-        const arr = JSON.parse(text.slice(start, end + 1));
-        if (Array.isArray(arr)) return arr;
-      } catch {
-        // try shorter span
-      }
-      searchEnd = end;
-    }
-    searchFrom = start + 1;
-  }
-
-  return [];
-}
-
-// ── Git operations ───────────────────────────────────────────────────────────
-
-function hasChanges() {
-  return Boolean(
-    execSync("git status --porcelain --ignore-submodules", {
-      encoding: "utf-8",
-    }).trim(),
-  );
-}
-
-function configureGitIdentity() {
-  if (appId && !/^\d+$/.test(appId)) {
-    throw new Error("Invalid app ID");
-  }
-
-  const botName = `${appSlug}[bot]`;
-  const botEmail = appId
-    ? `${appId}+${appSlug}[bot]@users.noreply.github.com`
-    : `${appSlug}[bot]@users.noreply.github.com`;
-
-  execSync(`git config user.name "${botName}"`);
-  execSync(`git config user.email "${botEmail}"`);
-}
-
-function createCommit(commitMessage) {
-  configureGitIdentity();
-  execSync("git add -A");
-  // Remove .review-hero from the index — it's our tooling checkout, not part
-  // of the caller's repo. Git sees it as a "subproject commit" because it
-  // contains its own .git directory and we never want that committed.
-  execSync("git rm -rf --cached --ignore-unmatch .review-hero");
-  execFileSync("git", ["commit", "-m", commitMessage]);
-}
-
-function pushChanges() {
-  try {
-    execSync("git push");
-  } catch (err) {
-    // Only attempt the pull-rebase recovery for non-fast-forward rejections.
-    // Auth errors, branch protection failures, and network issues will have
-    // the same root cause on retry and should surface immediately.
-    const stderr = err.stderr?.toString() ?? "";
-    const isNonFastForward =
-      stderr.includes("rejected") && stderr.includes("non-fast-forward");
-    if (!isNonFastForward) {
-      throw err;
-    }
-
-    // Push was rejected because the remote branch moved ahead while we were
-    // running (e.g. another workflow or manual rebase). Pull with rebase to
-    // incorporate the new remote head, then retry once.
-    console.warn("Push rejected (non-fast-forward) — pulling with rebase and retrying");
-    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
-      encoding: "utf-8",
-    }).trim();
-    try {
-      execSync(`git pull --rebase origin ${branch}`);
-    } catch (rebaseErr) {
-      execSync("git rebase --abort");
-      throw rebaseErr;
-    }
-    execSync("git push");
-  }
-  console.log("Pushed changes");
-}
-
 // ── GitHub interactions ──────────────────────────────────────────────────────
 
 async function resolveThread(threadId) {
   try {
-    await githubGraphQL(
+    await gh.graphql(
       `mutation($threadId: ID!) {
         resolveReviewThread(input: { threadId: $threadId }) {
           thread { id }
@@ -556,7 +274,7 @@ async function resolveThread(threadId) {
 
 async function replyToThread(threadId, body) {
   try {
-    await githubGraphQL(
+    await gh.graphql(
       `mutation($threadId: ID!, $body: String!) {
         addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
           comment { id }
@@ -569,60 +287,18 @@ async function replyToThread(threadId, body) {
   }
 }
 
-async function postComment(body) {
-  await githubApi(`/issues/${prNumber}/comments`, {
-    method: "POST",
-    body: JSON.stringify({ body }),
-  });
-}
-
 async function uncheckCheckboxes() {
-  try {
-    const pr = await githubApi(`/pulls/${prNumber}`);
-    if (!pr.body) return;
-
-    let updated = pr.body;
-    if (fixReviews) {
-      updated = updated.replace(
-        /\[x\]\s+\*\*Auto-fix review suggestions\*\* <!-- #auto-fix -->/,
-        "[ ] **Auto-fix review suggestions** <!-- #auto-fix -->",
-      );
-    }
-    if (fixCI) {
-      updated = updated.replace(
-        /\[x\]\s+\*\*Auto-fix CI failures\*\* <!-- #auto-fix-ci -->/,
-        "[ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->",
-      );
-    }
-
-    if (updated === pr.body) return;
-
-    await githubApi(`/pulls/${prNumber}`, {
-      method: "PATCH",
-      body: JSON.stringify({ body: updated }),
-    });
-    console.log("Unchecked auto-fix checkbox(es)");
-  } catch (err) {
-    console.warn(`Failed to uncheck checkbox: ${err.message}`);
-  }
+  const checkboxes = [];
+  if (fixReviews) checkboxes.push({ label: "Auto-fix review suggestions", anchor: "#auto-fix" });
+  if (fixCI) checkboxes.push({ label: "Auto-fix CI failures", anchor: "#auto-fix-ci" });
+  if (checkboxes.length > 0) await gh.uncheckCheckboxes(prNumber, checkboxes);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  // Exclude .review-hero from git tracking. It's a nested checkout of the
-  // review-hero repo (with its own .git dir) used only for scripts/prompts.
-  // Without this, `git add -A` records it as a subproject commit in the PR.
-  const excludePath = ".git/info/exclude";
-  const excludeContent = execSync(`cat "${excludePath}" 2>/dev/null || true`, {
-    encoding: "utf-8",
-  });
-  if (!excludeContent.includes(".review-hero")) {
-    execSync(`mkdir -p .git/info && echo ".review-hero" >> "${excludePath}"`);
-  }
-
-  // Configure git identity before Claude runs so its commits use the bot identity
-  configureGitIdentity();
+  excludeReviewHero();
+  configureGitIdentity(appId, appSlug);
 
   console.log(
     `Auto-fixing PR #${prNumber} (reviews: ${fixReviews}, ci: ${fixCI})`,
@@ -643,7 +319,7 @@ async function main() {
   }
 
   if (comments.length === 0 && ciFailures.length === 0) {
-    await postComment("🦸 **Review Hero Auto-Fix** — Nothing to fix.");
+    await gh.postComment(prNumber, "🦸 **Review Hero Auto-Fix** — Nothing to fix.");
     await uncheckCheckboxes();
     return;
   }
@@ -651,26 +327,26 @@ async function main() {
   // Copy the commit helper to /tmp so Claude cannot modify it via the Edit
   // tool during the session — the Bash restriction only limits which scripts
   // can be *executed*, but Edit has unrestricted write access to the worktree.
-  const commitHelperSrc = ".review-hero/scripts/git-commit-fix.mjs";
-  const commitHelperTmp = `/tmp/git-commit-fix-${prNumber}-${Date.now()}.mjs`;
-  copyFileSync(commitHelperSrc, commitHelperTmp);
-  chmodSync(commitHelperTmp, 0o755);
+  const commitHelperPath = copyCommitHelper(prNumber);
 
-  const prompt = buildPrompt(comments, ciFailures, {
-    commitHelperPath: commitHelperTmp,
-  });
+  const prompt = buildPrompt(comments, ciFailures, { commitHelperPath });
   const headBefore = execSync("git rev-parse HEAD", {
     encoding: "utf-8",
   }).trim();
   console.log("Running Claude to apply fixes...");
   let raw;
   try {
-    raw = runClaude(prompt, { commitHelperPath: commitHelperTmp });
+    // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
+    // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
+    // without having unrestricted shell access.
+    const commitTool = `Bash(${commitHelperPath}:*)`;
+    const tools = fixCI
+      ? "Read,Edit,Glob,Grep,Bash"
+      : `Read,Edit,Glob,Grep,${commitTool}`;
+    raw = runClaude({ prompt, model, tools, prNumber });
   } catch (err) {
     console.error(`Claude failed: ${err.message}`);
-
-    // Restore .review-hero/ before any recovery work
-    execSync("git checkout -- .review-hero/ 2>/dev/null || true");
+    restoreReviewHero();
 
     // Even though Claude failed/timed out, it may have already committed some
     // fixes via the git-commit-fix helper. Push those partial results rather
@@ -678,6 +354,8 @@ async function main() {
     const headAfterFailure = execSync("git rev-parse HEAD", {
       encoding: "utf-8",
     }).trim();
+    const logsUrl = workflowLogsUrl(repo);
+
     if (headBefore !== headAfterFailure) {
       console.log(
         "Claude failed but made commits before failing — pushing partial fixes",
@@ -699,14 +377,14 @@ async function main() {
       const partialMsg =
         `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
         `Some fixes were pushed, but the session did not finish.\n\n` +
-        `Check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
+        `Check the [workflow logs](${logsUrl}) for details.` +
         buildLocalFixPrompt(remainingComments);
-      await postComment(partialMsg);
+      await gh.postComment(prNumber, partialMsg);
     } else {
       const failMsg =
-        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}) for details.` +
+        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${logsUrl}) for details.` +
         buildLocalFixPrompt(comments);
-      await postComment(failMsg);
+      await gh.postComment(prNumber, failMsg);
     }
     await uncheckCheckboxes();
     process.exit(1);
@@ -716,7 +394,7 @@ async function main() {
   // This is a defence-in-depth measure — the commit helper is already copied
   // to /tmp, but we also don't want any worktree edits to .review-hero/
   // leaking into the leftover sweep commit.
-  execSync("git checkout -- .review-hero/ 2>/dev/null || true");
+  restoreReviewHero();
 
   const results = parseClaudeResult(raw);
   const resultById = new Map(results.map((r) => [Number(r.id), r]));
@@ -872,12 +550,9 @@ async function main() {
     );
   }
 
-  const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
-  const runId = process.env.GITHUB_RUN_ID;
-  if (runId) {
-    summaryParts.push(
-      `\n\n[View logs](${serverUrl}/${repo}/actions/runs/${runId})`,
-    );
+  const logsUrl = workflowLogsUrl(repo);
+  if (process.env.GITHUB_RUN_ID) {
+    summaryParts.push(`\n\n[View logs](${logsUrl})`);
   }
 
   const localPrompt = buildLocalFixPrompt(skippedComments);
@@ -885,7 +560,7 @@ async function main() {
     summaryParts.push(localPrompt);
   }
 
-  await postComment(summaryParts.join(""));
+  await gh.postComment(prNumber, summaryParts.join(""));
   await uncheckCheckboxes();
   console.log("Done");
 }
@@ -893,13 +568,9 @@ async function main() {
 main().catch(async (err) => {
   console.error(err);
   try {
-    const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
-    const runId = process.env.GITHUB_RUN_ID;
-    const logsUrl = runId
-      ? `${serverUrl}/${repo}/actions/runs/${runId}`
-      : `${serverUrl}/${repo}/actions`;
-    await postComment(
-      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${logsUrl}) for details.`,
+    await gh.postComment(
+      prNumber,
+      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.`,
     );
     await uncheckCheckboxes();
   } catch {
