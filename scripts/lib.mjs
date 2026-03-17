@@ -384,9 +384,15 @@ export function copyCommitHelper(prNumber) {
 
 export function workflowLogsUrl(repo) {
   const rawServerUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
-  const serverUrl = /^https:\/\/[a-zA-Z0-9._-]/.test(rawServerUrl)
-    ? rawServerUrl.replace(/\/$/, "")
-    : "https://github.com";
+  let serverUrl = "https://github.com";
+  try {
+    const parsed = new URL(rawServerUrl);
+    if (parsed.protocol === "https:" && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(parsed.hostname)) {
+      serverUrl = parsed.origin;
+    }
+  } catch {
+    // Invalid URL — fall back to default
+  }
   const rawRunId = process.env.GITHUB_RUN_ID;
   const runId = /^\d+$/.test(rawRunId ?? "") ? rawRunId : null;
   const safeRepo = /^[\w.-]+\/[\w.-]+$/.test(repo ?? "") ? repo : null;
