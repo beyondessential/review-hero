@@ -105,7 +105,7 @@ export function createGitHubApi(token, repo) {
           `\\[x\\]\\s+\\*\\*${escapeRegExp(label)}\\*\\* <!-- ${escapeRegExp(anchor)} -->`,
         );
         const replacement = `[ ] **${label}** <!-- ${anchor} -->`;
-        const next = updated.replace(pattern, replacement);
+        const next = updated.replace(pattern, () => replacement);
         if (next !== updated) {
           updated = next;
           unchecked.push(label);
