@@ -186,7 +186,11 @@ export function pushChanges() {
     try {
       execFileSync("git", ["pull", "--rebase", "origin", branch]);
     } catch (rebaseErr) {
-      execSync("git rebase --abort");
+      try {
+        execSync("git rebase --abort");
+      } catch (abortErr) {
+        console.warn(`git rebase --abort failed: ${abortErr.message}`);
+      }
       throw rebaseErr;
     }
     execSync("git push");
