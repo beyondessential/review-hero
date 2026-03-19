@@ -8,7 +8,7 @@ Focus on document semantics and progressive enhancement.
 - **Inappropriate ARIA roles.** Ensure ARIA roles do more enhancement than polluting.
 - **Decorative elements.** Interrogate whether `aria-hidden` is appropriate. (e.g. Some images and many icons accompany a text label.)
 - **Unnecessary props.** Are there props that simply mirror the semantics of an ARIA role? Could we omit the prop and use an ARIA attribute as source of truth for that state?
-- **CSS properties that modify semantics.** Some CSS properties affect discoverability of an element from the accessibility tree, or break the default semantics of an element. Check whether this is appropriate; and whether any ARIA roles need to be added as a result.
+- **CSS properties that modify semantics.** Some CSS properties hide an element from the accessibility tree, or break the default semantics of an element. Check this is appropriate, and whether any ARIA roles should be added as a result.
 
 ## Ignore
 
