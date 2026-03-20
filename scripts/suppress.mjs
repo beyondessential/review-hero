@@ -33,9 +33,14 @@ export function loadSuppressions(filePath) {
   }
 }
 
+const BATCH_SIZE = 50;
+
 /**
  * Use Claude Haiku to filter findings against suppression rules.
  * Returns { kept: Finding[], suppressed: Finding[] }.
+ *
+ * Findings are processed in batches of 50 to stay within context limits
+ * and make partial failures recoverable (failed batches keep all findings).
  *
  * On failure, returns all findings as kept (safe fallback).
  */
@@ -56,28 +61,35 @@ export async function filterWithSuppressions(
     })
     .join("\n");
 
-  const findingsList = findings
-    .map(
-      (f, i) =>
-        `${i}. [${f.severity}] ${f.file}:${f.line} — ${f.comment.slice(0, 300)}`,
-    )
-    .join("\n");
+  const allKept = [];
+  const allSuppressed = [];
 
-  try {
-    const response = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1000,
-        messages: [
-          {
-            role: "user",
-            content: `You are filtering code review findings against suppression rules. A finding should be suppressed if it raises essentially the same concern a suppression rule describes, in a matching context. Be conservative — only suppress clear matches.
+  // Process in batches to keep each API call within context limits
+  for (let batchStart = 0; batchStart < findings.length; batchStart += BATCH_SIZE) {
+    const batch = findings.slice(batchStart, batchStart + BATCH_SIZE);
+
+    const findingsList = batch
+      .map(
+        (f, i) =>
+          `${i}. [${f.severity}] ${f.file}:${f.line} — ${f.comment.slice(0, 300)}`,
+      )
+      .join("\n");
+
+    try {
+      const response = await fetch(`${baseUrl}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1000,
+          messages: [
+            {
+              role: "user",
+              content: `You are filtering code review findings against suppression rules. A finding should be suppressed if it raises essentially the same concern a suppression rule describes, in a matching context. Be conservative — only suppress clear matches.
 
 ## Suppression Rules
 ${suppressionList}
@@ -86,43 +98,46 @@ ${suppressionList}
 ${findingsList}
 
 Output ONLY a JSON array of finding indices (0-based) to SUPPRESS. Output \`[]\` if none match.`,
-          },
-        ],
-      }),
-    });
+            },
+          ],
+        }),
+      });
 
-    if (!response.ok) {
-      throw new Error(`API ${response.status}: ${await response.text()}`);
-    }
-
-    const result = await response.json();
-    const text = result.content?.[0]?.text ?? "";
-
-    const match = text.match(/\[[\s\S]*?\]/);
-    if (!match) return { kept: findings, suppressed: [] };
-
-    const rawIndices = JSON.parse(match[0]);
-    const suppressedIndices = new Set(
-      Array.isArray(rawIndices)
-        ? rawIndices.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < findings.length)
-        : [],
-    );
-    const kept = [];
-    const suppressed = [];
-
-    for (let i = 0; i < findings.length; i++) {
-      if (suppressedIndices.has(i)) {
-        suppressed.push(findings[i]);
-      } else {
-        kept.push(findings[i]);
+      if (!response.ok) {
+        throw new Error(`API ${response.status}: ${await response.text()}`);
       }
-    }
 
-    return { kept, suppressed };
-  } catch (err) {
-    console.warn(
-      `Suppression filter failed, keeping all findings: ${err.message}`,
-    );
-    return { kept: findings, suppressed: [] };
+      const result = await response.json();
+      const text = result.content?.[0]?.text ?? "";
+
+      const match = text.match(/\[[\s\S]*?\]/);
+      if (!match) {
+        // No parseable response — keep all findings in this batch
+        allKept.push(...batch);
+        continue;
+      }
+
+      const rawIndices = JSON.parse(match[0]);
+      const suppressedIndices = new Set(
+        Array.isArray(rawIndices)
+          ? rawIndices.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < batch.length)
+          : [],
+      );
+
+      for (let i = 0; i < batch.length; i++) {
+        if (suppressedIndices.has(i)) {
+          allSuppressed.push(batch[i]);
+        } else {
+          allKept.push(batch[i]);
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `Suppression filter batch failed, keeping ${batch.length} findings: ${err.message}`,
+      );
+      allKept.push(...batch);
+    }
   }
+
+  return { kept: allKept, suppressed: allSuppressed };
 }
