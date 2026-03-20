@@ -149,22 +149,27 @@ function applyConsensus(findings, voterCount) {
 
   const threshold = Math.floor(voterCount / 2) + 1;
 
-  // Group findings by (file, approximate line)
-  const groups = [];
+  // Sort by (file, line) so nearby findings are adjacent — O(n log n).
+  // Then a single linear pass groups consecutive findings within ±5 lines.
+  const sorted = [...findings].sort((a, b) => {
+    if (a.file !== b.file) return a.file.localeCompare(b.file);
+    return a.line - b.line;
+  });
 
-  for (const finding of findings) {
-    let matched = false;
-    for (const group of groups) {
-      if (
-        group[0].file === finding.file &&
-        Math.abs(group[0].line - finding.line) <= 5
-      ) {
-        group.push(finding);
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) {
+  const groups = [];
+  for (const finding of sorted) {
+    const prev = groups[groups.length - 1];
+    // Match against the group's line range (min..max), not just the anchor.
+    // This avoids splitting chains where voter 0 flags line 10, voter 1
+    // flags line 14, voter 2 flags line 18 — all within ±5 of a neighbour
+    // but >5 from the anchor.
+    if (
+      prev &&
+      prev[0].file === finding.file &&
+      finding.line - prev[prev.length - 1].line <= 5
+    ) {
+      prev.push(finding);
+    } else {
       groups.push([finding]);
     }
   }
