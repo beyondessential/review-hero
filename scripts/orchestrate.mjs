@@ -144,7 +144,7 @@ function parseAgentResult(filePath, agentKey, voter) {
  */
 function applyConsensus(findings, voterCount) {
   if (voterCount <= 1) {
-    return findings.map(({ voter, ...rest }) => rest);
+    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
   }
 
   const threshold = Math.ceil(voterCount / 2);
@@ -196,7 +196,7 @@ function applyConsensus(findings, voterCount) {
     );
   }
 
-  return kept;
+  return { kept, dropped };
 }
 
 // ── Deduplication ────────────────────────────────────────────────────────────
@@ -436,7 +436,7 @@ async function main() {
   const agentNames = loadAgentNames();
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
-  const voterCount = Math.max(1, parseInt(process.env.VOTERS || "1"));
+  const voterCount = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
   const suppressionsPath = process.env.SUPPRESSIONS_PATH || "";
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   const anthropicBaseUrl =
@@ -550,9 +550,9 @@ async function main() {
   }
 
   // ── Apply voter consensus ─────────────────────────────────────────────
-  let findings = applyConsensus(allFindings, voterCount);
-  const consensusDropped =
-    voterCount > 1 ? allFindings.length - findings.length : 0;
+  const consensus = applyConsensus(allFindings, voterCount);
+  let findings = consensus.kept;
+  const consensusDropped = consensus.dropped;
 
   // ── Apply suppression filter ──────────────────────────────────────────
   const staticSuppressions = loadSuppressions(suppressionsPath);

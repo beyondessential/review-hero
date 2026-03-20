@@ -341,6 +341,9 @@ jobs:
             0) VOTER_PROMPT="## Review Approach\n\nFocus on the most impactful issues. Be selective — only flag things that a senior engineer would consider worth changing before merge. Prefer fewer, higher-confidence findings." ;;
             1) VOTER_PROMPT="## Review Approach\n\nReview with fresh eyes. Consider edge cases, error paths, and assumptions in the code. Think about what could go wrong in production under unusual conditions." ;;
             2) VOTER_PROMPT="## Review Approach\n\nThink about this code from a maintainer's perspective. Consider readability, correctness of the approach, and whether the code does what the PR title suggests. Flag anything misleading or subtly wrong." ;;
+            3) VOTER_PROMPT="## Review Approach\n\nFocus on security, data integrity, and trust boundaries. Consider how inputs flow through the system and whether any validation or sanitisation is missing." ;;
+            4) VOTER_PROMPT="## Review Approach\n\nConsider the testing and operational perspective. Think about whether the code is testable, observable, and whether failures would be easy to diagnose in production." ;;
+            *) VOTER_PROMPT="## Review Approach\n\nReview this code independently. Focus on correctness and anything that could surprise a future developer reading this code for the first time." ;;
           esac
 
           # Build the prompt by concatenating:

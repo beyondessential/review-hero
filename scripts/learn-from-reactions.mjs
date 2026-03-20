@@ -172,15 +172,24 @@ Only output the JSON array.`,
 /**
  * Format suppressions as YAML for appending to suppressions.yml.
  */
+function escapeYamlString(str) {
+  return str
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t");
+}
+
 export function formatSuppressionsYaml(suppressions) {
   if (suppressions.length === 0) return "";
   return suppressions
     .map((s) => {
-      const lines = [`- pattern: "${s.pattern.replace(/"/g, '\\"')}"`];
+      const lines = [`- pattern: "${escapeYamlString(s.pattern)}"`];
       if (s.context)
-        lines.push(`  context: "${s.context.replace(/"/g, '\\"')}"`);
+        lines.push(`  context: "${escapeYamlString(s.context)}"`);
       if (s.reason)
-        lines.push(`  reason: "${s.reason.replace(/"/g, '\\"')}"`);
+        lines.push(`  reason: "${escapeYamlString(s.reason)}"`);
       return lines.join("\n");
     })
     .join("\n");

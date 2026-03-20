@@ -365,7 +365,7 @@ for (const a of allAgents) {
 }
 
 // Build matrix for the review-agent job
-const voters = Math.max(1, parseInt(process.env.VOTERS || "1"));
+const voters = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
 
 const matrix = {
   agents:
