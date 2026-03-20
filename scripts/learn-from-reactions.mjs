@@ -30,7 +30,7 @@ export async function findRejectedFindings(
             nodes {
               id
               isResolved
-              comments(first: 10) {
+              comments(first: 50) {
                 nodes {
                   body
                   path
