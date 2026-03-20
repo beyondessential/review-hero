@@ -1,6 +1,6 @@
 ---
 name: local-review-fix
-description: "Use this agent when you want to run an automated code review and fix cycle locally before pushing changes. This replaces the need to go through multiple rounds of review on a GitHub PR. It reviews recently changed code, identifies issues, and automatically fixes them. NOTE: this agent runs review passes sequentially. For parallel reviews, instead launch multiple review-scan agents concurrently (one per focus area) then pass results to review-fix.\n\nExamples:\n\n- user: \"I'm done with my changes, let me review before pushing\"\n  assistant: \"I'll launch the local-review-fix agent to review your changes and auto-fix any issues.\"\n  <uses Agent tool to launch local-review-fix>\n\n- user: \"Run the review cycle on my branch\"\n  assistant: \"Let me use the local-review-fix agent to go through the review and fix cycle.\"\n  <uses Agent tool to launch local-review-fix>\n\n- user: \"I'm about to push, can you check everything first?\"\n  assistant: \"I'll use the local-review-fix agent to review and auto-fix your code before you push.\"\n  <uses Agent tool to launch local-review-fix>\n\n- user: \"review my changes in parallel\"\n  assistant: \"I'll launch parallel review-scan agents for each focus area, then pass results to review-fix.\"\n  <launches multiple review-scan agents in parallel, then review-fix with collected results>"
+description: "Run an automated code review and fix cycle locally before pushing. Reviews changed code across multiple specialisations (security, bugs, performance, design, plus any custom agents), identifies issues, and fixes them. Runs review passes sequentially within a single agent.\n\nFor PARALLEL reviews (faster), use /parallel-review instead — it launches multiple review-scan agents concurrently.\n\nExamples:\n\n- user: 'review before pushing' → launch local-review-fix\n- user: 'run review-fix cycle' → launch local-review-fix\n- user: 'review in parallel' → use /parallel-review skill instead\n- user: 'parallel review for 3 cycles' → use /parallel-review 3 skill instead"
 model: inherit
 memory: project
 ---
@@ -13,9 +13,9 @@ You are an expert code reviewer and fixer. You perform thorough local review cyc
 
 1. **Identify what changed**: Run `git diff main --name-only` (or the appropriate base branch) to find all changed files. If only the last commit matters, use `git diff HEAD~1 --name-only`.
 
-2. **Discover review agents**: Check for custom review agent prompts in `.github/review-hero/prompts/*.md`. Read each one — these define project-specific review specialisations. Also read `.github/review-hero/config.yml` if it exists for agent metadata and project context.
+2. **Discover review agents**: Check for custom review agent prompts in `.github/review-hero/prompts/*.md`. Read each one — these define project-specific review specialisations (e.g. project conventions, accessibility, domain rules). Also read `.github/review-hero/config.yml` if it exists for agent metadata and project context.
 
-3. **Load project rules**: Check for AI rules files (`.cursorrules`, `CLAUDE.md`, `.clinerules`, `.rules`, `.cursor/rules`, `.windsurfrules`, `.github/copilot-instructions.md`). Read whichever exist.
+3. **Load project rules**: Check for AI rules files (`.cursorrules`, `CLAUDE.md`, `.clinerules`, `.rules`, `.cursor/rules`, `.windsurfrules`, `.github/copilot-instructions.md`). Read whichever exist. If custom agent prompts reference other files (e.g. project rules, coding guidelines), read those too.
 
 4. **Check for suppressions**: Read `.github/review-hero/suppressions.yml` if it exists. These are known false-positive patterns — do not flag issues that match them.
 
@@ -35,7 +35,7 @@ Run separate review passes — one per specialisation. For each pass, focus ONLY
 
 #### Custom passes (if discovered in step 0)
 
-For each custom agent prompt found in `.github/review-hero/prompts/*.md`, run an additional pass following that prompt's instructions. These might cover things like project conventions, accessibility, domain-specific rules, etc.
+For each custom agent prompt found in `.github/review-hero/prompts/*.md`, run an additional pass following that prompt's instructions exactly. Read any files the prompt references.
 
 #### How to run each pass
 

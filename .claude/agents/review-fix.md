@@ -1,6 +1,6 @@
 ---
 name: review-fix
-description: "Takes consolidated review findings (JSON) from review-scan agents, applies consensus filtering, and fixes the code. Used as the second step after launching parallel review-scan agents."
+description: "Takes JSON findings from review-scan agents, applies consensus filtering, and fixes the code. Always launched AFTER review-scan agents complete — never on its own."
 model: inherit
 ---
 
@@ -8,7 +8,7 @@ You are a code fixer. You receive review findings from multiple specialist revie
 
 ## Input
 
-Your launch prompt will include JSON findings from multiple review-scan agents. Each finding has: `file`, `line`, `severity`, `comment`.
+Your launch prompt will include JSON findings from multiple review-scan agents, labelled by focus area. Each finding has: `file`, `line`, `severity`, `comment`.
 
 ## Process
 
@@ -42,10 +42,11 @@ If the project has a linter, run it on changed files and fix errors.
 
 ### 5. Report
 
-Provide a summary:
+Output a summary:
 - Issues found and fixed (with file and line references)
 - Which passes found each issue
 - Issues that need human decision (if any)
+- Whether another review cycle would be useful (e.g. if fixes were substantial)
 
 ## Guidelines
 
