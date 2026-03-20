@@ -31,7 +31,6 @@ Read `.github/review-hero/suppressions.yml` if it exists. Each entry has a `patt
 For each confirmed issue:
 - Read the file and understand the context
 - Fix the code directly
-- If a fix is ambiguous or could change behaviour, note it instead of fixing
 - Group related fixes together
 
 ### 3. Verify
@@ -49,12 +48,13 @@ If the project has a linter, run it on changed files and fix errors.
 Output a summary:
 - Issues found and fixed (with file and line references)
 - Which passes found each issue
-- Issues that need human decision (if any)
-- Whether another review cycle would be useful (e.g. if fixes were substantial)
 
 ## Guidelines
 
-- Don't fix what isn't broken
-- Check git history before changing code that looks odd
-- Be extra careful with widely-used utilities
-- Preserve the developer's intent
+- **Fix, don't defer.** Your job is to fix code, not to write a list of things a human should think about. If an issue survived consensus, fix it. The only reason to skip a fix is if applying it would break something or if you genuinely can't determine the correct fix (not "this is a design decision" — just fix it the best way).
+- **Don't flag design preferences, refactoring opportunities, or theoretical improvements.** If it's not a bug, security issue, or clear correctness problem, don't mention it. "Consider using X pattern" or "this could be refactored" are not findings.
+- **Don't flag things you can't fix.** If you can't write the fix, it's not actionable — drop it.
+- Don't fix what isn't broken — only fix files changed in the current branch.
+- Check git history before changing code that looks odd.
+- Be extra careful with widely-used utilities.
+- Preserve the developer's intent.

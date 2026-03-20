@@ -57,3 +57,4 @@ Output ONLY a JSON array. No markdown, no explanation, no preamble.
 - Don't flag issues that linters, formatters, or type checkers would catch
 - Quality over quantity — 3 good findings beat 10 mediocre ones
 - Depth over breadth — go deep in your focus area
+- Only flag things that can be fixed in the code right now. Don't flag refactoring opportunities, design preferences, "consider using X" suggestions, or things that would require a broader discussion. If you can't describe a concrete code change, don't flag it.
