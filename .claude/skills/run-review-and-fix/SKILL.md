@@ -1,7 +1,7 @@
 ---
 name: run-review-and-fix
 description: "Run a parallel multi-agent code review and fix cycle. Launches specialist review-scan agents concurrently, collects findings, then launches review-fix. Supports multiple cycles (e.g. /run-review-and-fix 3)."
-user_invocable: true
+user-invocable: true
 ---
 
 # Parallel Review — Orchestration Instructions
