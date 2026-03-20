@@ -356,11 +356,23 @@ for (const a of allAgents) {
 }
 
 // Build matrix for the review-agent job
+const voters = Math.max(1, parseInt(process.env.VOTERS || "1"));
+
 const matrix = {
-  agents: selectedAgents.map((a) => ({
-    key: a.key,
-    source: a.source,
-  })),
+  agents:
+    voters > 1
+      ? selectedAgents.flatMap((a) =>
+          Array.from({ length: voters }, (_, i) => ({
+            key: a.key,
+            source: a.source,
+            voter: String(i),
+          })),
+        )
+      : selectedAgents.map((a) => ({
+          key: a.key,
+          source: a.source,
+          voter: "",
+        })),
 };
 
 console.log(
@@ -370,6 +382,11 @@ console.log(
   `Agents: ${selectedAgents.map((a) => a.key).join(", ")} (${selectedAgents.length}/${allAgents.length})`,
 );
 console.log(`Max turns: ${maxTurns}`);
+if (voters > 1) {
+  console.log(
+    `Voters: ${voters} per agent (${matrix.agents.length} total jobs)`,
+  );
+}
 
 // Output for GitHub Actions
 const outputFile = process.env.GITHUB_OUTPUT;

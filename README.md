@@ -10,21 +10,23 @@ Review Hero runs a set of specialised review agents in parallel (bugs, performan
 PR checkbox checked
         │
         ▼
-   ┌─────────┐   Haiku selects    ┌────────────────────┐
-   │ Triage  │──── agents ───────>│ Review agents (x N) │
-   │ (Haiku) │   filters diff     │ (Sonnet, parallel)  │
-   └─────────┘                    └─────────┬───────────┘
-                                            │ JSON findings
-                                            ▼
-                                   ┌─────────────────┐
-                                   │  Orchestrator   │
-                                   │  dedup + post   │
-                                   └─────────────────┘
+   ┌─────────┐   Haiku selects    ┌──────────────────────────────┐
+   │ Triage  │──── agents ───────>│ Review agents (x N x voters) │
+   │ (Haiku) │   filters diff     │ (Sonnet, parallel)           │
+   └─────────┘                    └──────────────┬────────────────┘
+                                                 │ JSON findings
+                                                 ▼
+                                        ┌─────────────────┐
+                                        │  Orchestrator   │
+                                        │  consensus      │
+                                        │  suppress       │
+                                        │  dedup + post   │
+                                        └─────────────────┘
 ```
 
 1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, and scales the agent turn budget by diff size.
-2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. Agents have read-only access to the repo so they can explore surrounding code for context.
-3. **Orchestrator** — collects all agent outputs, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
+2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. When `voters > 1`, each agent runs multiple times independently for consensus. Agents have read-only access to the repo so they can explore surrounding code for context.
+3. **Orchestrator** — collects all agent outputs, applies voter consensus (when enabled), filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
 ## Prerequisites (once per owner — user or org)
 
@@ -283,6 +285,53 @@ These files are always stripped from the diff before triage and agent input:
 
 Extend this list with `ignore_patterns` in your config.
 
+## Noise reduction
+
+Review Hero includes two complementary mechanisms to improve signal-to-noise ratio.
+
+### Voter consensus
+
+When `voters` is set to 2 or more, each review agent runs N independent times and only findings that a majority of voters agree on are kept. This significantly reduces false positives — noise tends to vary between runs while real issues are consistently found.
+
+```yaml
+jobs:
+  review:
+    uses: beyondessential/review-hero/.github/workflows/review.yml@v1
+    with:
+      voters: 3  # Run each agent 3 times, keep findings with ≥2/3 agreement
+    secrets: inherit
+```
+
+The consensus threshold is `ceil(voters / 2)` — for 3 voters, a finding needs at least 2 voters to agree (same file, within 5 lines).
+
+**Cost impact:** Voters multiply agent costs linearly (3 voters = 3x agent cost). Start with `voters: 3` and adjust based on your noise tolerance.
+
+### Suppression rules
+
+Create `.github/review-hero/suppressions.yml` to define patterns of findings to filter out:
+
+```yaml
+- pattern: "missing error handling on optional field"
+  context: "when the value has a default or is in test code"
+  reason: "our codebase uses defaults extensively, this is expected"
+
+- pattern: "consider using a constant for this value"
+  context: "single-use values in test files"
+  reason: "magic numbers in tests are fine"
+```
+
+Each suppression rule is a natural language description. At review time, Claude Haiku checks each finding against suppressions and filters out matches. The Anthropic API key (already required) covers this — Haiku calls are very cheap.
+
+### Learning from feedback
+
+Review Hero automatically learns from developer feedback:
+
+1. **During review** — If previous Review Hero comments on the same PR have 👎 reactions, those rejected findings are used as ephemeral suppressions for the current review cycle (so the same false positive doesn't reappear when re-reviewing).
+
+2. **During auto-fix** — When auto-fix runs and detects 👎 reactions on Review Hero comments, it reads any developer replies in the thread to understand why, generates suppression rules, and commits them to `.github/review-hero/suppressions.yml` on the PR branch. After the PR merges, those suppressions become permanent.
+
+To reject a Review Hero finding: add a 👎 reaction to the comment. Optionally reply in the thread explaining why — this helps generate better suppression rules.
+
 ## Workflow inputs
 
 The caller workflow can pass these optional inputs:
@@ -295,6 +344,7 @@ jobs:
       trigger: checkbox        # 'checkbox' (default) or 'always'
       model: claude-sonnet-4-6  # Claude model for agents
       runner: ubuntu-slim      # Runner for all jobs
+      voters: 1                # Voters per agent (>=2 enables consensus)
     secrets: inherit
 ```
 
@@ -303,6 +353,7 @@ jobs:
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
 | `model`   | `claude-sonnet-4-6`| The Claude model used by review agents. |
 | `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
+| `voters`  | `1`                | Independent voters per agent. `>=2` enables consensus filtering. |
 
 ### Auto-Fix inputs
 

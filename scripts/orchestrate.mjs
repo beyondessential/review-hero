@@ -1,8 +1,9 @@
 /**
  * Review Hero — Orchestrator
  *
- * Reads structured JSON findings from review agent artifacts, deduplicates
- * them, and posts a consolidated PR review via the GitHub API.
+ * Reads structured JSON findings from review agent artifacts, applies voter
+ * consensus (when multiple voters per agent), filters against suppression
+ * rules, deduplicates, and posts a consolidated PR review via the GitHub API.
  *
  * Environment variables:
  *   GITHUB_TOKEN        — GitHub App token for posting reviews
@@ -13,10 +14,19 @@
  *   ARTIFACTS_DIR       — Directory containing agent result files
  *   AGENT_NAMES         — JSON map of agent key → display name
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
+ *   VOTERS              — Number of voters per agent (default: 1)
+ *   SUPPRESSIONS_PATH   — Path to suppressions YAML file (optional)
+ *   ANTHROPIC_API_KEY   — API key for Haiku-based filtering (optional)
+ *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
+import { loadSuppressions, filterWithSuppressions } from "./suppress.mjs";
+import {
+  findRejectedFindings,
+  generateSuppressions,
+} from "./learn-from-reactions.mjs";
 import { join } from "node:path";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
@@ -44,7 +54,7 @@ function loadAgentNames() {
 
 // ── Finding parsing ──────────────────────────────────────────────────────────
 
-function validateFindings(findings, agentKey) {
+function validateFindings(findings, agentKey, voter) {
   return findings
     .filter(
       (f) =>
@@ -62,6 +72,7 @@ function validateFindings(findings, agentKey) {
       severity: f.severity,
       comment: f.comment,
       agent: agentKey,
+      ...(voter !== undefined && { voter }),
     }));
 }
 
@@ -69,7 +80,7 @@ function validateFindings(findings, agentKey) {
  * Parse agent output. Returns null on parse failure (distinct from [] which
  * means "parsed OK, no findings").
  */
-function parseAgentResult(filePath, agentKey) {
+function parseAgentResult(filePath, agentKey, voter) {
   try {
     const raw = readFileSync(filePath, "utf-8");
 
@@ -81,7 +92,7 @@ function parseAgentResult(filePath, agentKey) {
       if (parsed.result) {
         text = parsed.result;
       } else if (Array.isArray(parsed)) {
-        return validateFindings(parsed, agentKey);
+        return validateFindings(parsed, agentKey, voter);
       }
     } catch {
       // Not valid JSON at top level — might be raw text with JSON embedded
@@ -116,11 +127,76 @@ function parseAgentResult(filePath, agentKey) {
       return null;
     }
 
-    return validateFindings(findings, agentKey);
+    return validateFindings(findings, agentKey, voter);
   } catch (err) {
     console.warn(`Failed to parse ${filePath}: ${err.message}`);
     return null;
   }
+}
+
+// ── Voter consensus ──────────────────────────────────────────────────────────
+
+/**
+ * Apply voter consensus: only keep findings that appear in >= threshold voters.
+ * Two findings "match" if they target the same file within 5 lines.
+ *
+ * Returns findings with voter tags stripped.
+ */
+function applyConsensus(findings, voterCount) {
+  if (voterCount <= 1) {
+    return findings.map(({ voter, ...rest }) => rest);
+  }
+
+  const threshold = Math.ceil(voterCount / 2);
+
+  // Group findings by (file, approximate line)
+  const groups = [];
+
+  for (const finding of findings) {
+    let matched = false;
+    for (const group of groups) {
+      if (
+        group[0].file === finding.file &&
+        Math.abs(group[0].line - finding.line) <= 5
+      ) {
+        group.push(finding);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      groups.push([finding]);
+    }
+  }
+
+  // Keep groups where findings come from >= threshold distinct voters
+  const kept = [];
+  let dropped = 0;
+
+  for (const group of groups) {
+    const distinctVoters = new Set(group.map((f) => f.voter));
+    if (distinctVoters.size >= threshold) {
+      // Pick the best finding (highest severity, most detailed comment)
+      const best = [...group].sort((a, b) => {
+        const sevDiff =
+          SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+        if (sevDiff !== 0) return sevDiff;
+        return b.comment.length - a.comment.length;
+      })[0];
+      const { voter, ...finding } = best;
+      kept.push(finding);
+    } else {
+      dropped += group.length;
+    }
+  }
+
+  if (dropped > 0) {
+    console.log(
+      `Consensus: kept ${kept.length} findings, dropped ${dropped} (below ${threshold}/${voterCount} voter threshold)`,
+    );
+  }
+
+  return kept;
 }
 
 // ── Deduplication ────────────────────────────────────────────────────────────
@@ -360,18 +436,58 @@ async function main() {
   const agentNames = loadAgentNames();
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
+  const voterCount = Math.max(1, parseInt(process.env.VOTERS || "1"));
+  const suppressionsPath = process.env.SUPPRESSIONS_PATH || "";
+  const apiKey = process.env.ANTHROPIC_API_KEY || "";
+  const anthropicBaseUrl =
+    process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+  const repo = getEnvOrThrow("GITHUB_REPOSITORY");
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
+  if (voterCount > 1) {
+    console.log(`Voter consensus enabled: ${voterCount} voters per agent`);
+  }
+
+  // ── Learn from reactions ──────────────────────────────────────────────
+  // Before resolving old threads, check for thumbs-down reactions so we
+  // can generate ephemeral suppression rules for this review cycle.
+  let learnedSuppressions = [];
+  if (apiKey) {
+    try {
+      const rejected = await findRejectedFindings(
+        githubGraphQL,
+        repo,
+        prNumber,
+        botLogin,
+      );
+      if (rejected.length > 0) {
+        console.log(
+          `Found ${rejected.length} thumbs-down reaction${rejected.length === 1 ? "" : "s"} on previous review`,
+        );
+        learnedSuppressions = await generateSuppressions(rejected, {
+          apiKey,
+          baseUrl: anthropicBaseUrl,
+        });
+        if (learnedSuppressions.length > 0) {
+          console.log(
+            `Generated ${learnedSuppressions.length} suppression${learnedSuppressions.length === 1 ? "" : "s"} from developer feedback`,
+          );
+        }
+      }
+    } catch (err) {
+      console.warn(`Reaction learning failed: ${err.message}`);
+    }
+  }
 
   // Resolve previous Review Hero comments so they don't clutter the PR
   await resolvePreviousReviewHeroThreads(prNumber, botLogin);
 
-  // Recursively scan the artifacts directory for *-result.json files.
-  // This is intentionally layout-agnostic: download-artifact may place
-  // files flat (merge-multiple), in per-artifact subdirectories, or even
-  // directly in the target path (single-pattern match quirk).  A
-  // recursive search finds them regardless.
-  const agentResults = new Map(); // key → filePath
+  // ── Scan for results ──────────────────────────────────────────────────
+  // Result files follow one of two patterns:
+  //   {key}-result.json          (single voter / voters=1)
+  //   {key}-voter-{n}-result.json (multi-voter)
+  const RESULT_PATTERN = /^(.+?)(?:-voter-(\d+))?-result\.json$/;
+  const agentResults = []; // { agentKey, voter, filePath }
 
   function scanForResults(dir) {
     let entries;
@@ -385,12 +501,13 @@ async function main() {
       if (entry.isDirectory()) {
         scanForResults(fullPath);
       } else if (entry.isFile()) {
-        const match = entry.name.match(/^(.+)-result\.json$/);
+        const match = entry.name.match(RESULT_PATTERN);
         if (match && VALID_AGENT_KEY.test(match[1])) {
-          // First match wins (shallowest, since we scan top-down)
-          if (!agentResults.has(match[1])) {
-            agentResults.set(match[1], fullPath);
-          }
+          agentResults.push({
+            agentKey: match[1],
+            voter: match[2] !== undefined ? parseInt(match[2]) : undefined,
+            filePath: fullPath,
+          });
         }
       }
     }
@@ -398,21 +515,28 @@ async function main() {
 
   scanForResults(artifactsDir);
 
-  // Collect findings from all agents
+  // ── Collect findings ──────────────────────────────────────────────────
   const allFindings = [];
   let agentsCompleted = 0;
   let agentsFailed = 0;
+  const seenAgentVoters = new Set();
 
-  for (const [agentKey, filePath] of agentResults) {
-    const findings = parseAgentResult(filePath, agentKey);
+  for (const { agentKey, voter, filePath } of agentResults) {
+    const dedupKey = voter !== undefined ? `${agentKey}-${voter}` : agentKey;
+    if (seenAgentVoters.has(dedupKey)) continue;
+    seenAgentVoters.add(dedupKey);
+
+    const findings = parseAgentResult(filePath, agentKey, voter);
     if (findings === null) {
       const name = agentNames[agentKey] ?? agentKey;
-      console.warn(`${name}: failed to parse output`);
+      const voterLabel = voter !== undefined ? ` (voter ${voter})` : "";
+      console.warn(`${name}${voterLabel}: failed to parse output`);
       agentsFailed++;
       continue;
     }
     const name = agentNames[agentKey] ?? agentKey;
-    console.log(`${name}: ${findings.length} findings`);
+    const voterLabel = voter !== undefined ? ` (voter ${voter})` : "";
+    console.log(`${name}${voterLabel}: ${findings.length} findings`);
     allFindings.push(...findings);
     agentsCompleted++;
   }
@@ -425,8 +549,41 @@ async function main() {
     return;
   }
 
-  // Deduplicate
-  const groups = deduplicateFindings(allFindings);
+  // ── Apply voter consensus ─────────────────────────────────────────────
+  let findings = applyConsensus(allFindings, voterCount);
+  const consensusDropped =
+    voterCount > 1 ? allFindings.length - findings.length : 0;
+
+  // ── Apply suppression filter ──────────────────────────────────────────
+  const staticSuppressions = loadSuppressions(suppressionsPath);
+  const allSuppressions = [...staticSuppressions, ...learnedSuppressions];
+  let suppressedCount = 0;
+
+  if (allSuppressions.length > 0 && apiKey && findings.length > 0) {
+    console.log(
+      `Filtering against ${allSuppressions.length} suppression rule${allSuppressions.length === 1 ? "" : "s"} (${staticSuppressions.length} static, ${learnedSuppressions.length} learned)`,
+    );
+    try {
+      const { kept, suppressed } = await filterWithSuppressions(
+        findings,
+        allSuppressions,
+        { apiKey, baseUrl: anthropicBaseUrl },
+      );
+      suppressedCount = suppressed.length;
+      if (suppressedCount > 0) {
+        console.log(`Suppressed ${suppressedCount} finding(s)`);
+        for (const f of suppressed) {
+          console.log(`  suppressed: ${f.file}:${f.line} — ${f.comment.slice(0, 80)}`);
+        }
+      }
+      findings = kept;
+    } catch (err) {
+      console.warn(`Suppression filter failed: ${err.message}`);
+    }
+  }
+
+  // ── Deduplicate ───────────────────────────────────────────────────────
+  const groups = deduplicateFindings(findings);
 
   // Split by severity
   const inlineComments = [];
@@ -482,7 +639,22 @@ async function main() {
     ` | ${counts.critical} critical | ${counts.suggestion} suggestion${counts.suggestion === 1 ? "" : "s"} | ${counts.nitpick} nitpick${counts.nitpick === 1 ? "" : "s"}`,
   ];
 
-  if (allFindings.length === 0) {
+  // Show filtering stats when non-trivial filtering occurred
+  const filterStats = [];
+  if (voterCount > 1) {
+    filterStats.push(`consensus ${voterCount} voters`);
+  }
+  if (consensusDropped > 0) {
+    filterStats.push(`${consensusDropped} below threshold`);
+  }
+  if (suppressedCount > 0) {
+    filterStats.push(`${suppressedCount} suppressed`);
+  }
+  if (filterStats.length > 0) {
+    summaryParts.push(` | Filtering: ${filterStats.join(", ")}`);
+  }
+
+  if (findings.length === 0) {
     summaryParts.push("\n\nNo issues found. Looks good! ✅");
   }
 
