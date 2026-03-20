@@ -259,14 +259,23 @@ const diffLines = filteredDiff
   .split("\n")
   .filter((l) => l.startsWith("+") || l.startsWith("-")).length;
 
-// Scale max-turns with diff size (capped at 10)
+// Choose model based on diff size — Opus for large PRs where deeper
+// reasoning pays off, Sonnet for everything else.
+const defaultModel = process.env.DEFAULT_MODEL || "claude-sonnet-4-6";
+const OPUS_THRESHOLD = 500;
+const agentModel =
+  diffLines >= OPUS_THRESHOLD ? "claude-opus-4-6" : defaultModel;
+
+// Scale max-turns with diff size. Opus gets fewer turns since it reasons
+// more deeply per turn and to keep within timeout budgets.
+const isOpus = agentModel.includes("opus");
 let maxTurns;
 if (diffLines < 100) {
   maxTurns = 3;
-} else if (diffLines < 500) {
+} else if (diffLines < OPUS_THRESHOLD) {
   maxTurns = 5;
 } else {
-  maxTurns = 10;
+  maxTurns = isOpus ? 6 : 10;
 }
 
 // Discover all agents
@@ -382,6 +391,7 @@ console.log(
   `Agents: ${selectedAgents.map((a) => a.key).join(", ")} (${selectedAgents.length}/${allAgents.length})`,
 );
 console.log(`Max turns: ${maxTurns}`);
+console.log(`Model: ${agentModel}${isOpus ? " (upgraded for large PR)" : ""}`);
 if (voters > 1) {
   console.log(
     `Voters: ${voters} per agent (${matrix.agents.length} total jobs)`,
@@ -393,5 +403,6 @@ const outputFile = process.env.GITHUB_OUTPUT;
 if (outputFile) {
   appendFileSync(outputFile, `matrix=${JSON.stringify(matrix)}\n`);
   appendFileSync(outputFile, `max_turns=${maxTurns}\n`);
+  appendFileSync(outputFile, `agent_model=${agentModel}\n`);
   appendFileSync(outputFile, `agent_names=${JSON.stringify(agentNames)}\n`);
 }

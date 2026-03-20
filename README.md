@@ -304,7 +304,13 @@ jobs:
 
 The consensus threshold is `ceil(voters / 2)` — for 3 voters, a finding needs at least 2 voters to agree (same file, within 5 lines).
 
-**Cost impact:** Voters multiply agent costs linearly (3 voters = 3x agent cost). Start with `voters: 3` and adjust based on your noise tolerance.
+Each voter gets a different review lens (e.g. "focus on impact", "think about edge cases", "maintainer's perspective") to maximise diversity. When findings survive consensus across these lenses, they're much more likely to be real.
+
+**Cost impact:** Voters multiply agent costs linearly. The default of 3 voters strikes a good balance between noise reduction and cost.
+
+### Automatic Opus upgrade for large PRs
+
+For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. Max turns are reduced (6 instead of 10) to stay within timeout budgets — Opus uses fewer but deeper reasoning turns. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
 
 ### Suppression rules
 
@@ -342,18 +348,18 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
-      model: claude-sonnet-4-6  # Claude model for agents
+      model: claude-sonnet-4-6  # Default model (auto-upgrades to Opus for large PRs)
       runner: ubuntu-slim      # Runner for all jobs
-      voters: 1                # Voters per agent (>=2 enables consensus)
+      voters: 3                # Voters per agent (1 to disable consensus)
     secrets: inherit
 ```
 
 | Input     | Default            | Description |
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
-| `model`   | `claude-sonnet-4-6`| The Claude model used by review agents. |
+| `model`   | `claude-sonnet-4-6`| Default Claude model for review agents. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
-| `voters`  | `1`                | Independent voters per agent. `>=2` enables consensus filtering. |
+| `voters`  | `3`                | Independent voters per agent. `>=2` enables consensus filtering. Set to `1` to disable. |
 
 ### Auto-Fix inputs
 

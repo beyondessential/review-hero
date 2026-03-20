@@ -18,7 +18,7 @@ on:
       voters:
         description: "Number of independent voters per agent (>=2 enables consensus filtering to reduce noise)"
         type: number
-        default: 1
+        default: 3
       ref:
         description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
         type: string
@@ -56,6 +56,7 @@ jobs:
       should_run: ${{ steps.check.outputs.should_run }}
       matrix: ${{ steps.triage.outputs.matrix }}
       max_turns: ${{ steps.triage.outputs.max_turns }}
+      agent_model: ${{ steps.triage.outputs.agent_model }}
       agent_names: ${{ steps.triage.outputs.agent_names }}
       project_context: ${{ steps.config.outputs.project_context }}
       trusted_ref: ${{ steps.resolve-trusted-ref.outputs.sha }}
@@ -207,6 +208,7 @@ jobs:
           REVIEW_HERO_DIR: review-hero
           CALLER_REPO_DIR: caller
           VOTERS: ${{ inputs.voters }}
+          DEFAULT_MODEL: ${{ inputs.model }}
         run: node review-hero/scripts/triage.mjs
 
       # ── Prepare suppressions for downstream jobs ─────────────────────
@@ -321,6 +323,8 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
           VOTER: ${{ matrix.agent.voter }}
+          AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
+        timeout-minutes: 20
         run: |
           # Build result filename — include voter suffix when multi-voter
           RESULT_NAME="${{ matrix.agent.key }}"
@@ -328,12 +332,24 @@ jobs:
             RESULT_NAME="${RESULT_NAME}-voter-${VOTER}"
           fi
 
+          # Voter-specific review lens — each voter approaches the review
+          # from a different angle to maximise diversity. When findings
+          # survive consensus across these different lenses, they're much
+          # more likely to be real issues.
+          VOTER_PROMPT=""
+          case "$VOTER" in
+            0) VOTER_PROMPT="## Review Approach\n\nFocus on the most impactful issues. Be selective — only flag things that a senior engineer would consider worth changing before merge. Prefer fewer, higher-confidence findings." ;;
+            1) VOTER_PROMPT="## Review Approach\n\nReview with fresh eyes. Consider edge cases, error paths, and assumptions in the code. Think about what could go wrong in production under unusual conditions." ;;
+            2) VOTER_PROMPT="## Review Approach\n\nThink about this code from a maintainer's perspective. Consider readability, correctness of the approach, and whether the code does what the PR title suggests. Flag anything misleading or subtly wrong." ;;
+          esac
+
           # Build the prompt by concatenating:
           # 1. Project context (if any)
           # 2. Base agent prompt
-          # 3. Specialisation prompt
-          # 4. Repository AI rules (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
-          # 5. PR title + diff
+          # 3. Voter-specific review lens (if multi-voter)
+          # 4. Specialisation prompt
+          # 5. Repository AI rules (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
+          # 6. PR title + diff
 
           {
             if [ -n "$PROJECT_CONTEXT" ]; then
@@ -341,6 +357,10 @@ jobs:
             fi
 
             cat .review-hero/prompts/agent-prompt.md
+
+            if [ -n "$VOTER_PROMPT" ]; then
+              printf '\n\n%b' "$VOTER_PROMPT"
+            fi
 
             printf '\n\n'
             if [ "${{ matrix.agent.source }}" = "base" ]; then
@@ -361,7 +381,7 @@ jobs:
             echo '```'
           } | claude -p \
               --output-format json \
-              --model "${{ inputs.model }}" \
+              --model "$AGENT_MODEL" \
               --max-turns ${{ needs.triage.outputs.max_turns }} \
               --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
             > "/tmp/${RESULT_NAME}-result.json"
