@@ -19,13 +19,14 @@ PR checkbox checked
                                         ┌─────────────────┐
                                         │  Orchestrator   │
                                         │  consensus      │
+                                        │  suppress       │
                                         │  dedup + post   │
                                         └─────────────────┘
 ```
 
 1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, and scales the agent turn budget by diff size.
 2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. When `voters > 1`, each agent runs multiple times independently for consensus. Agents have read-only access to the repo so they can explore surrounding code for context.
-3. **Orchestrator** — collects all agent outputs, applies voter consensus (when enabled), deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
+3. **Orchestrator** — collects all agent outputs, applies voter consensus (when enabled), filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
 ## Prerequisites (once per owner — user or org)
 
@@ -286,7 +287,7 @@ Extend this list with `ignore_patterns` in your config.
 
 ## Noise reduction
 
-Review Hero includes mechanisms to improve signal-to-noise ratio.
+Review Hero includes two complementary mechanisms to improve signal-to-noise ratio.
 
 ### Voter consensus
 
@@ -308,6 +309,32 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 ### Automatic Opus upgrade for large PRs
 
 For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. Max turns are reduced (6 instead of 10) to stay within timeout budgets — Opus uses fewer but deeper reasoning turns. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
+
+### Suppression rules
+
+Create `.github/review-hero/suppressions.yml` to define patterns of findings to filter out:
+
+```yaml
+- pattern: "missing error handling on optional field"
+  context: "when the value has a default or is in test code"
+  reason: "our codebase uses defaults extensively, this is expected"
+
+- pattern: "consider using a constant for this value"
+  context: "single-use values in test files"
+  reason: "magic numbers in tests are fine"
+```
+
+Each suppression rule is a natural language description. At review time, Claude Haiku checks each finding against suppressions and filters out matches. The Anthropic API key (already required) covers this — Haiku calls are very cheap.
+
+### Learning from feedback
+
+Review Hero automatically learns from developer feedback:
+
+1. **During review** — If previous Review Hero comments on the same PR have 👎 reactions, those rejected findings are used as ephemeral suppressions for the current review cycle (so the same false positive doesn't reappear when re-reviewing).
+
+2. **During auto-fix** — When auto-fix runs and detects 👎 reactions on Review Hero comments, it reads any developer replies in the thread to understand why, generates suppression rules, and commits them to `.github/review-hero/suppressions.yml` on the PR branch. After the PR merges, those suppressions become permanent.
+
+To reject a Review Hero finding: add a 👎 reaction to the comment. Optionally reply in the thread explaining why — this helps generate better suppression rules.
 
 ## Workflow inputs
 

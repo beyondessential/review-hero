@@ -2,8 +2,8 @@
  * Review Hero — Orchestrator
  *
  * Reads structured JSON findings from review agent artifacts, applies voter
- * consensus (when multiple voters per agent), deduplicates, and posts a
- * consolidated PR review via the GitHub API.
+ * consensus (when multiple voters per agent), filters against suppression
+ * rules, deduplicates, and posts a consolidated PR review via the GitHub API.
  *
  * Environment variables:
  *   GITHUB_TOKEN        — GitHub App token for posting reviews
@@ -15,10 +15,18 @@
  *   AGENT_NAMES         — JSON map of agent key → display name
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
  *   VOTERS              — Number of voters per agent (default: 1)
+ *   SUPPRESSIONS_PATH   — Path to suppressions YAML file (optional)
+ *   ANTHROPIC_API_KEY   — API key for Haiku-based filtering (optional)
+ *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
+import { loadSuppressions, filterWithSuppressions } from "./suppress.mjs";
+import {
+  findRejectedFindings,
+  generateSuppressions,
+} from "./learn-from-reactions.mjs";
 import { join } from "node:path";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
@@ -461,13 +469,46 @@ async function main() {
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
   const voterCount = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
+  const suppressionsPath = process.env.SUPPRESSIONS_PATH || "";
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   const anthropicBaseUrl =
     process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+  const repo = getEnvOrThrow("GITHUB_REPOSITORY");
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
   if (voterCount > 1) {
     console.log(`Voter consensus enabled: ${voterCount} voters per agent`);
+  }
+
+  // ── Learn from reactions ──────────────────────────────────────────────
+  // Before resolving old threads, check for thumbs-down reactions so we
+  // can generate ephemeral suppression rules for this review cycle.
+  let learnedSuppressions = [];
+  if (apiKey) {
+    try {
+      const rejected = await findRejectedFindings(
+        githubGraphQL,
+        repo,
+        prNumber,
+        botLogin,
+      );
+      if (rejected.length > 0) {
+        console.log(
+          `Found ${rejected.length} thumbs-down reaction${rejected.length === 1 ? "" : "s"} on previous review`,
+        );
+        learnedSuppressions = await generateSuppressions(rejected, {
+          apiKey,
+          baseUrl: anthropicBaseUrl,
+        });
+        if (learnedSuppressions.length > 0) {
+          console.log(
+            `Generated ${learnedSuppressions.length} suppression${learnedSuppressions.length === 1 ? "" : "s"} from developer feedback`,
+          );
+        }
+      }
+    } catch (err) {
+      console.warn(`Reaction learning failed: ${err.message}`);
+    }
   }
 
   // Resolve previous Review Hero comments so they don't clutter the PR
@@ -545,8 +586,36 @@ async function main() {
     apiKey,
     baseUrl: anthropicBaseUrl,
   });
-  const findings = consensus.kept;
+  let findings = consensus.kept;
   const consensusDropped = consensus.dropped;
+
+  // ── Apply suppression filter ──────────────────────────────────────────
+  const staticSuppressions = loadSuppressions(suppressionsPath);
+  const allSuppressions = [...staticSuppressions, ...learnedSuppressions];
+  let suppressedCount = 0;
+
+  if (allSuppressions.length > 0 && apiKey && findings.length > 0) {
+    console.log(
+      `Filtering against ${allSuppressions.length} suppression rule${allSuppressions.length === 1 ? "" : "s"} (${staticSuppressions.length} static, ${learnedSuppressions.length} learned)`,
+    );
+    try {
+      const { kept, suppressed } = await filterWithSuppressions(
+        findings,
+        allSuppressions,
+        { apiKey, baseUrl: anthropicBaseUrl },
+      );
+      suppressedCount = suppressed.length;
+      if (suppressedCount > 0) {
+        console.log(`Suppressed ${suppressedCount} finding(s)`);
+        for (const f of suppressed) {
+          console.log(`  suppressed: ${f.file}:${f.line} — ${f.comment.slice(0, 80)}`);
+        }
+      }
+      findings = kept;
+    } catch (err) {
+      console.warn(`Suppression filter failed: ${err.message}`);
+    }
+  }
 
   // ── Deduplicate ───────────────────────────────────────────────────────
   const groups = deduplicateFindings(findings);
@@ -612,6 +681,9 @@ async function main() {
   }
   if (consensusDropped > 0) {
     filterStats.push(`${consensusDropped} below threshold`);
+  }
+  if (suppressedCount > 0) {
+    filterStats.push(`${suppressedCount} suppressed`);
   }
   if (filterStats.length > 0) {
     summaryParts.push(` | Filtering: ${filterStats.join(", ")}`);
