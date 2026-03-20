@@ -365,7 +365,14 @@ for (const a of allAgents) {
 }
 
 // Build matrix for the review-agent job
-const voters = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
+const MAX_VOTERS = 10;
+const rawVoters = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
+if (rawVoters > MAX_VOTERS) {
+  console.warn(
+    `Voters capped at ${MAX_VOTERS} (requested ${rawVoters}) to stay within GitHub Actions matrix limits and control API cost`,
+  );
+}
+const voters = Math.min(rawVoters, MAX_VOTERS);
 
 const matrix = {
   agents:
