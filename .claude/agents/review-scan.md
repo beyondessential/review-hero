@@ -18,9 +18,7 @@ Your launch prompt will specify:
 
 1. **Load context**: Read any AI rules files that exist (`.cursorrules`, `CLAUDE.md`, `.clinerules`, etc.). If a custom agent prompt was provided and it references other files (e.g. project rules, coding guidelines), read those too.
 
-2. **Check suppressions**: Read `.github/review-hero/suppressions.yml` if it exists. Skip findings that match suppression patterns.
-
-3. **Review**: For each changed file, read the diff (`git diff main -- path/to/file`) and surrounding context. Focus ONLY on your assigned specialisation — ignore everything else.
+2. **Review**: For each changed file, read the diff (`git diff main -- path/to/file`) and surrounding context. Focus ONLY on your assigned specialisation — ignore everything else.
 
 ### Focus area guidelines
 
