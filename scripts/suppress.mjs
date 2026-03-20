@@ -12,7 +12,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 /**
  * Load suppressions from a YAML file.
@@ -21,7 +21,7 @@ import { execSync } from "node:child_process";
 export function loadSuppressions(filePath) {
   if (!filePath || !existsSync(filePath)) return [];
   try {
-    const json = execSync(`yq -o=json '.' "${filePath}"`, {
+    const json = execFileSync("yq", ["-o=json", ".", filePath], {
       encoding: "utf-8",
     });
     const parsed = JSON.parse(json);
