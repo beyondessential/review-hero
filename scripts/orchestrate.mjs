@@ -147,7 +147,7 @@ function applyConsensus(findings, voterCount) {
     return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
   }
 
-  const threshold = Math.ceil(voterCount / 2);
+  const threshold = Math.floor(voterCount / 2) + 1;
 
   // Group findings by (file, approximate line)
   const groups = [];
