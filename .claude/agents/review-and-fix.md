@@ -52,6 +52,10 @@ After all passes, compare findings across them. Issues found by 2+ passes (same 
 
 **Do NOT fix** single-pass `nitpick` findings unless they're clearly correct.
 
+### Step 2b: Suppression filter
+
+If `.github/review-hero/suppressions.yml` was found in step 0, check every finding that survived consensus against it **before fixing anything**. Each suppression has a `pattern` (natural language description of what not to flag) and optional `context`. Drop any finding that matches a suppression — it's a known false positive. Log each dropped finding so the report shows what was filtered.
+
 ### Step 3: Fix issues
 
 For each issue to fix:
