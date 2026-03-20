@@ -1,6 +1,6 @@
 ---
-name: parallel-review
-description: "Run a parallel multi-agent code review and fix cycle. Launches specialist review-scan agents concurrently, collects findings, then launches review-fix. Supports multiple cycles."
+name: run-review-and-fix
+description: "Run a parallel multi-agent code review and fix cycle. Launches specialist review-scan agents concurrently, collects findings, then launches review-fix. Supports multiple cycles (e.g. /run-review-and-fix 3)."
 user_invocable: true
 ---
 
@@ -10,7 +10,7 @@ You are orchestrating a parallel code review cycle. Follow these steps exactly.
 
 ## Parse arguments
 
-Check if the user specified a cycle count (e.g. "/parallel-review 3" or "for 3 cycles"). Default to 1 cycle if not specified. Maximum 5 cycles.
+Check if the user specified a cycle count (e.g. "/run-review-and-fix 3" or "for 3 cycles"). Default to 1 cycle if not specified. Maximum 5 cycles.
 
 ## Step 1: Discover what to review
 

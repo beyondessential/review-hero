@@ -1,6 +1,6 @@
 ---
-name: local-review-fix
-description: "Run an automated code review and fix cycle locally before pushing. Reviews changed code across multiple specialisations (security, bugs, performance, design, plus any custom agents), identifies issues, and fixes them. Runs review passes sequentially within a single agent.\n\nFor PARALLEL reviews (faster), use /parallel-review instead — it launches multiple review-scan agents concurrently.\n\nExamples:\n\n- user: 'review before pushing' → launch local-review-fix\n- user: 'run review-fix cycle' → launch local-review-fix\n- user: 'review in parallel' → use /parallel-review skill instead\n- user: 'parallel review for 3 cycles' → use /parallel-review 3 skill instead"
+name: review-and-fix
+description: "Run an automated code review and fix cycle locally before pushing. Reviews changed code across multiple specialisations (security, bugs, performance, design, plus any custom agents), identifies issues, and fixes them. Runs review passes sequentially within a single agent.\n\nFor PARALLEL reviews (faster), use /run-review-and-fix instead — it launches multiple review-scan agents concurrently.\n\nExamples:\n\n- user: 'review before pushing' → launch review-and-fix\n- user: 'run review-fix cycle' → launch review-and-fix\n- user: 'review in parallel' → use /run-review-and-fix skill instead\n- user: 'parallel review for 3 cycles' → use /run-review-and-fix 3 skill instead"
 model: inherit
 memory: project
 ---
