@@ -164,29 +164,8 @@ Only output the JSON array.`,
     const parsed = JSON.parse(match[0]);
     if (!Array.isArray(parsed)) return [];
 
-    // Validate generated suppressions to reject overly broad or
-    // instruction-like patterns that could result from prompt injection.
-    const REJECT_PATTERNS = [
-      /\bignore\b.*\ball\b/i,
-      /\bsuppress\b.*\ball\b/i,
-      /\bdisable\b.*\ball\b/i,
-      /\bskip\b.*\ball\b/i,
-      /\bnever\b.*\bflag\b/i,
-      /\bno\b.*\bfindings\b/i,
-    ];
-
     return parsed
-      .filter((s) => {
-        if (!s || typeof s.pattern !== "string") return false;
-        // Reject patterns that look like instruction overrides
-        if (REJECT_PATTERNS.some((re) => re.test(s.pattern))) {
-          console.warn(
-            `Rejected overly broad suppression: "${s.pattern}"`,
-          );
-          return false;
-        }
-        return true;
-      })
+      .filter((s) => s && typeof s.pattern === "string")
       .map((s) => ({
         pattern: s.pattern,
         context: s.context || "",
