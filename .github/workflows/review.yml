@@ -311,27 +311,18 @@ jobs:
             RESULT_NAME="${RESULT_NAME}-voter-${VOTER}"
           fi
 
-          # Voter-specific review lens — each voter approaches the review
-          # from a different angle to maximise diversity. When findings
-          # survive consensus across these different lenses, they're much
-          # more likely to be real issues.
-          VOTER_PROMPT=""
-          case "$VOTER" in
-            0) VOTER_PROMPT="## Review Approach\n\nFocus on the most impactful issues. Be selective — only flag things that a senior engineer would consider worth changing before merge. Prefer fewer, higher-confidence findings." ;;
-            1) VOTER_PROMPT="## Review Approach\n\nReview with fresh eyes. Consider edge cases, error paths, and assumptions in the code. Think about what could go wrong in production under unusual conditions." ;;
-            2) VOTER_PROMPT="## Review Approach\n\nThink about this code from a maintainer's perspective. Consider readability, correctness of the approach, and whether the code does what the PR title suggests. Flag anything misleading or subtly wrong." ;;
-            3) VOTER_PROMPT="## Review Approach\n\nFocus on security, data integrity, and trust boundaries. Consider how inputs flow through the system and whether any validation or sanitisation is missing." ;;
-            4) VOTER_PROMPT="## Review Approach\n\nConsider the testing and operational perspective. Think about whether the code is testable, observable, and whether failures would be easy to diagnose in production." ;;
-            *) VOTER_PROMPT="## Review Approach\n\nReview this code independently. Focus on correctness and anything that could surprise a future developer reading this code for the first time." ;;
-          esac
-
           # Build the prompt by concatenating:
           # 1. Project context (if any)
           # 2. Base agent prompt
-          # 3. Voter-specific review lens (if multi-voter)
-          # 4. Specialisation prompt
-          # 5. Repository AI rules (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
-          # 6. PR title + diff
+          # 3. Specialisation prompt
+          # 4. Repository AI rules (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
+          # 5. PR title + diff
+          #
+          # Each voter runs the same prompt — natural LLM stochasticity
+          # provides the diversity needed for consensus. Explicit jitter
+          # prompts were removed because they conflict with domain-specific
+          # agent prompts (e.g. telling a security agent to "focus on
+          # testing" pulls it off its actual job).
 
           {
             if [ -n "$PROJECT_CONTEXT" ]; then
@@ -339,10 +330,6 @@ jobs:
             fi
 
             cat .review-hero/prompts/agent-prompt.md
-
-            if [ -n "$VOTER_PROMPT" ]; then
-              printf '\n\n%b' "$VOTER_PROMPT"
-            fi
 
             printf '\n\n'
             if [ "${{ matrix.agent.source }}" = "base" ]; then

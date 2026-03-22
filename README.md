@@ -301,9 +301,7 @@ jobs:
     secrets: inherit
 ```
 
-The consensus threshold is `ceil(voters / 2)` — for 3 voters, a finding needs at least 2 voters to agree (same file, within 5 lines).
-
-Each voter gets a different review lens (e.g. "focus on impact", "think about edge cases", "maintainer's perspective") to maximise diversity. When findings survive consensus across these lenses, they're much more likely to be real.
+The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 voters, a finding needs at least 2 to agree (same file, within 5 lines). Each voter runs the same prompt — natural LLM stochasticity provides diversity, while real issues are found consistently.
 
 **Cost impact:** Voters multiply agent costs linearly. The default of 3 voters strikes a good balance between noise reduction and cost.
 
