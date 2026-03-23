@@ -129,60 +129,98 @@ function parseAgentResult(filePath, agentKey, voter) {
 // ── Voter consensus ──────────────────────────────────────────────────────────
 
 /**
- * Apply voter consensus: only keep findings that appear in >= threshold voters.
- * Two findings "match" if they target the exact same file and line.
+ * Apply voter consensus using Haiku to semantically determine whether
+ * findings from different voters are about the same issue.
  *
- * No grouping by proximity — each finding stands on its own so they can
- * be resolved individually in the PR review.
+ * Haiku receives all findings and returns which ones to keep — i.e. the
+ * deduplicated set of issues that a majority of voters agree on.
  *
- * Returns findings with voter tags stripped.
+ * Falls back to keeping all findings (stripped of voter tags) on error.
  */
-function applyConsensus(findings, voterCount) {
+async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
   if (voterCount <= 1) {
+    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
+  }
+
+  if (!apiKey) {
+    console.warn("No API key for consensus — keeping all findings");
     return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
   }
 
   const threshold = Math.floor(voterCount / 2) + 1;
 
-  // Count distinct voters per (file, line)
-  const voterSets = new Map(); // "file:line" → Set of voter IDs
-  for (const f of findings) {
-    const key = `${f.file}:${f.line}`;
-    if (!voterSets.has(key)) voterSets.set(key, new Set());
-    voterSets.get(key).add(f.voter);
-  }
+  const findingsList = findings
+    .map(
+      (f, i) =>
+        `${i}. [voter=${f.voter}] [${f.severity}] ${f.file}:${f.line} — ${f.comment.slice(0, 300)}`,
+    )
+    .join("\n");
 
-  // Keep findings where enough voters agree on that location, pick the
-  // best (highest severity, longest comment) per location
-  const bestByLocation = new Map();
-  let dropped = 0;
+  try {
+    const response = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 2000,
+        messages: [
+          {
+            role: "user",
+            content: `You are deduplicating code review findings from ${voterCount} independent voters. Each voter reviewed the same code independently. Findings from different voters about the SAME issue (even if worded differently or at slightly different lines) should be grouped together.
 
-  for (const f of findings) {
-    const key = `${f.file}:${f.line}`;
-    if (voterSets.get(key).size < threshold) {
-      dropped++;
-      continue;
+For each group of findings about the same issue, check if at least ${threshold} distinct voters flagged it. If yes, keep the single best-worded finding from that group. If fewer than ${threshold} voters flagged it, drop the entire group.
+
+## Findings
+${findingsList}
+
+Output a JSON array of the finding indices (0-based) to KEEP — one per distinct issue that meets the ${threshold}-voter threshold. Pick the best-worded finding from each group. Output \`[]\` if none meet the threshold.`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API ${response.status}: ${await response.text()}`);
     }
-    const existing = bestByLocation.get(key);
-    if (
-      !existing ||
-      SEVERITY_ORDER[f.severity] < SEVERITY_ORDER[existing.severity] ||
-      (SEVERITY_ORDER[f.severity] === SEVERITY_ORDER[existing.severity] &&
-        f.comment.length > existing.comment.length)
-    ) {
-      bestByLocation.set(key, f);
+
+    const result = await response.json();
+    const text = result.content?.[0]?.text ?? "";
+
+    const match = text.match(/\[[\s\S]*?\]/);
+    if (!match) {
+      console.warn("Consensus returned no parseable array — keeping all");
+      return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
     }
-  }
 
-  const kept = [...bestByLocation.values()].map(({ voter, ...rest }) => rest);
-
-  if (dropped > 0) {
-    console.log(
-      `Consensus: kept ${kept.length} findings, dropped ${dropped} (below ${threshold}/${voterCount} voter threshold)`,
+    const keptIndices = new Set(
+      JSON.parse(match[0])
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n >= 0 && n < findings.length),
     );
-  }
 
-  return { kept, dropped };
+    const kept = [];
+    let dropped = 0;
+    for (let i = 0; i < findings.length; i++) {
+      if (keptIndices.has(i)) {
+        const { voter, ...rest } = findings[i];
+        kept.push(rest);
+      } else {
+        dropped++;
+      }
+    }
+
+    console.log(
+      `Consensus: kept ${kept.length} findings, dropped ${dropped} (${threshold}/${voterCount} voter threshold)`,
+    );
+    return { kept, dropped };
+  } catch (err) {
+    console.warn(`Consensus filter failed, keeping all: ${err.message}`);
+    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
+  }
 }
 
 // ── Deduplication ────────────────────────────────────────────────────────────
@@ -423,6 +461,9 @@ async function main() {
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
   const voterCount = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
+  const apiKey = process.env.ANTHROPIC_API_KEY || "";
+  const anthropicBaseUrl =
+    process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
   if (voterCount > 1) {
@@ -500,7 +541,10 @@ async function main() {
   }
 
   // ── Apply voter consensus ─────────────────────────────────────────────
-  const consensus = applyConsensus(allFindings, voterCount);
+  const consensus = await applyConsensus(allFindings, voterCount, {
+    apiKey,
+    baseUrl: anthropicBaseUrl,
+  });
   const findings = consensus.kept;
   const consensusDropped = consensus.dropped;
 
