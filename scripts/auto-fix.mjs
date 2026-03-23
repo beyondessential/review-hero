@@ -580,11 +580,15 @@ async function main() {
 
   if (apiKey) {
     try {
+      // The orchestrator resolves all bot threads after each review cycle,
+      // so by the time auto-fix runs the threads are already resolved.
+      // We need includeResolved to still find the thumbs-down reactions.
       const rejected = await findRejectedFindings(
         gh.graphql,
         repo,
         prNumber,
         botLogin,
+        { includeResolved: true },
       );
       if (rejected.length > 0) {
         console.log(
