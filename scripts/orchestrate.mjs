@@ -130,7 +130,10 @@ function parseAgentResult(filePath, agentKey, voter) {
 
 /**
  * Apply voter consensus: only keep findings that appear in >= threshold voters.
- * Two findings "match" if they target the same file within 5 lines.
+ * Two findings "match" if they target the exact same file and line.
+ *
+ * No grouping by proximity — each finding stands on its own so they can
+ * be resolved individually in the PR review.
  *
  * Returns findings with voter tags stripped.
  */
@@ -141,51 +144,37 @@ function applyConsensus(findings, voterCount) {
 
   const threshold = Math.floor(voterCount / 2) + 1;
 
-  // Sort by (file, line) so nearby findings are adjacent — O(n log n).
-  // Then a single linear pass groups consecutive findings within ±5 lines.
-  const sorted = [...findings].sort((a, b) => {
-    if (a.file !== b.file) return a.file.localeCompare(b.file);
-    return a.line - b.line;
-  });
-
-  const groups = [];
-  for (const finding of sorted) {
-    const prev = groups[groups.length - 1];
-    // Match against the group's line range (min..max), not just the anchor.
-    // This avoids splitting chains where voter 0 flags line 10, voter 1
-    // flags line 14, voter 2 flags line 18 — all within ±5 of a neighbour
-    // but >5 from the anchor.
-    if (
-      prev &&
-      prev[0].file === finding.file &&
-      finding.line - prev[prev.length - 1].line <= 5
-    ) {
-      prev.push(finding);
-    } else {
-      groups.push([finding]);
-    }
+  // Count distinct voters per (file, line)
+  const voterSets = new Map(); // "file:line" → Set of voter IDs
+  for (const f of findings) {
+    const key = `${f.file}:${f.line}`;
+    if (!voterSets.has(key)) voterSets.set(key, new Set());
+    voterSets.get(key).add(f.voter);
   }
 
-  // Keep groups where findings come from >= threshold distinct voters
-  const kept = [];
+  // Keep findings where enough voters agree on that location, pick the
+  // best (highest severity, longest comment) per location
+  const bestByLocation = new Map();
   let dropped = 0;
 
-  for (const group of groups) {
-    const distinctVoters = new Set(group.map((f) => f.voter));
-    if (distinctVoters.size >= threshold) {
-      // Pick the best finding (highest severity, most detailed comment)
-      const best = [...group].sort((a, b) => {
-        const sevDiff =
-          SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
-        if (sevDiff !== 0) return sevDiff;
-        return b.comment.length - a.comment.length;
-      })[0];
-      const { voter, ...finding } = best;
-      kept.push(finding);
-    } else {
-      dropped += group.length;
+  for (const f of findings) {
+    const key = `${f.file}:${f.line}`;
+    if (voterSets.get(key).size < threshold) {
+      dropped++;
+      continue;
+    }
+    const existing = bestByLocation.get(key);
+    if (
+      !existing ||
+      SEVERITY_ORDER[f.severity] < SEVERITY_ORDER[existing.severity] ||
+      (SEVERITY_ORDER[f.severity] === SEVERITY_ORDER[existing.severity] &&
+        f.comment.length > existing.comment.length)
+    ) {
+      bestByLocation.set(key, f);
     }
   }
+
+  const kept = [...bestByLocation.values()].map(({ voter, ...rest }) => rest);
 
   if (dropped > 0) {
     console.log(
