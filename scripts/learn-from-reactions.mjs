@@ -88,6 +88,17 @@ export async function findRejectedFindings(
 }
 
 /**
+ * Escape special XML characters to prevent injection via untrusted content.
+ */
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
  * Generate suppression entries from rejected findings using Haiku.
  *
  * @param {Array} rejectedThreads - Output from findRejectedFindings
@@ -105,11 +116,11 @@ export async function generateSuppressions(
   // injection risk.
   const descriptions = rejectedThreads
     .map((t, i) => {
-      const parts = [`<rejected-finding index="${i + 1}" file="${t.file}" line="${t.line}">`];
-      parts.push(`<reviewer-comment>${t.reviewComment}</reviewer-comment>`);
+      const parts = [`<rejected-finding index="${i + 1}" file="${escapeXml(t.file)}" line="${t.line}">`];
+      parts.push(`<reviewer-comment>${escapeXml(t.reviewComment)}</reviewer-comment>`);
       if (t.devReplies.length > 0) {
         for (const reply of t.devReplies) {
-          parts.push(`<developer-reply>${reply}</developer-reply>`);
+          parts.push(`<developer-reply>${escapeXml(reply)}</developer-reply>`);
         }
       }
       parts.push(`</rejected-finding>`);

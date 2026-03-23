@@ -473,6 +473,9 @@ async function main() {
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   const anthropicBaseUrl =
     process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+  if (!anthropicBaseUrl.startsWith("https://")) {
+    throw new Error(`Invalid ANTHROPIC_BASE_URL: must start with https://`);
+  }
   const repo = getEnvOrThrow("GITHUB_REPOSITORY");
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
