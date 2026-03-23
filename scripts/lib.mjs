@@ -231,6 +231,7 @@ export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
     "claude",
     [
       "-p",
+      "--dangerously-skip-permissions",
       "--output-format", "json",
       "--model", model,
       "--max-turns", String(maxTurns),
