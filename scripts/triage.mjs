@@ -26,6 +26,7 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { execSync } from "node:child_process";
+import { MAX_VOTERS } from "./lib.mjs";
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -368,7 +369,6 @@ for (const a of allAgents) {
 }
 
 // Build matrix for the review-agent job
-const MAX_VOTERS = 10;
 const rawVoters = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
 if (rawVoters > MAX_VOTERS) {
   console.warn(

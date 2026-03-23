@@ -20,6 +20,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 import { join } from "node:path";
+import { MAX_VOTERS } from "./lib.mjs";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
 const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -155,7 +156,12 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
         .slice(0, 300)
         .replace(/[\r\n]+/g, " ")
         .replace(/<\/?comment>/gi, "");
-      return `${i}. [voter=${f.voter}] [${f.severity}] ${f.file}:${f.line} — <comment>${safeComment}</comment>`;
+      const safeVoter = String(f.voter).replace(/[\r\n]+/g, " ");
+      const safeFile = String(f.file)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/<\/?comment>/gi, "");
+      const safeLine = String(f.line).replace(/[\r\n]+/g, " ");
+      return `${i}. [voter=${safeVoter}] [${f.severity}] ${safeFile}:${safeLine} — <comment>${safeComment}</comment>`;
     })
     .join("\n");
 
@@ -463,7 +469,6 @@ async function main() {
   const agentNames = loadAgentNames();
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
-  const MAX_VOTERS = 10;
   const voterCount = Math.max(
     1,
     Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS),
@@ -548,14 +553,10 @@ async function main() {
   }
 
   // ── Apply voter consensus ─────────────────────────────────────────────
-  // Voter IDs are globally unique (${agentKey}-${voterIndex}), so count
-  // distinct voter IDs across all findings for the correct threshold.
-  const uniqueVoterIds = new Set(
-    allFindings.filter((f) => f.voter !== undefined).map((f) => f.voter),
-  );
-  const effectiveVoterCount =
-    uniqueVoterIds.size > 0 ? uniqueVoterIds.size : voterCount;
-  const consensus = await applyConsensus(allFindings, effectiveVoterCount, {
+  // Each agent runs voterCount independent voters. The threshold should be
+  // based on voterCount, not the total unique voter IDs across all agents
+  // (which would be N×voterCount and make consensus impossible to reach).
+  const consensus = await applyConsensus(allFindings, voterCount, {
     apiKey,
     baseUrl: anthropicBaseUrl,
   });
