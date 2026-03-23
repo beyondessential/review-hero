@@ -22,8 +22,14 @@
  */
 
 import { execSync, execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import * as core from "@actions/core";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
+import {
+  findRejectedFindings,
+  generateSuppressions,
+  formatSuppressionsYaml,
+} from "./learn-from-reactions.mjs";
 import {
   getEnvOrThrow,
   createGitHubApi,
@@ -562,6 +568,75 @@ async function main() {
 
   await gh.postComment(prNumber, summaryParts.join(""));
   await uncheckCheckboxes();
+
+  // ── Learn from thumbs-down reactions ──────────────────────────────────
+  // If developers rejected Review Hero findings (thumbs-down), generate
+  // suppression rules and persist them to .github/review-hero/suppressions.yml
+  // so future reviews avoid the same false positives.
+  const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
+  const anthropicBaseUrl =
+    process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+  const botLogin = `${appSlug}[bot]`;
+
+  if (apiKey) {
+    try {
+      const rejected = await findRejectedFindings(
+        gh.graphql,
+        repo,
+        prNumber,
+        botLogin,
+      );
+      if (rejected.length > 0) {
+        console.log(
+          `Found ${rejected.length} thumbs-down reaction(s) — learning suppressions`,
+        );
+        const newSuppressions = await generateSuppressions(rejected, {
+          apiKey,
+          baseUrl: anthropicBaseUrl,
+        });
+        if (newSuppressions.length > 0) {
+          const suppressionsPath =
+            ".github/review-hero/suppressions.yml";
+          const yamlToAppend = formatSuppressionsYaml(newSuppressions);
+
+          if (existsSync(suppressionsPath)) {
+            const existing = readFileSync(suppressionsPath, "utf-8");
+            writeFileSync(
+              suppressionsPath,
+              existing.trimEnd() + "\n" + yamlToAppend + "\n",
+            );
+          } else {
+            execSync("mkdir -p .github/review-hero");
+            writeFileSync(suppressionsPath, yamlToAppend + "\n");
+          }
+
+          // Use the commit helper if available, otherwise direct git
+          if (hasChanges()) {
+            const commitHelperPath = copyCommitHelper(prNumber);
+            try {
+              execFileSync(commitHelperPath, [
+                "-m",
+                `chore: add ${newSuppressions.length} suppression(s) from developer feedback`,
+                suppressionsPath,
+              ]);
+            } catch {
+              // Fallback: commit directly
+              createCommit(
+                `chore: add ${newSuppressions.length} suppression(s) from developer feedback`,
+              );
+            }
+            pushChanges();
+            console.log(
+              `Committed ${newSuppressions.length} new suppression(s)`,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`Thumbs-down learning failed: ${err.message}`);
+    }
+  }
+
   console.log("Done");
 }
 
