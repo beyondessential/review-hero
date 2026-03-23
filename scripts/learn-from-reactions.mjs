@@ -19,7 +19,6 @@ export async function findRejectedFindings(
   repo,
   prNumber,
   botLogin,
-  { includeResolved = false } = {},
 ) {
   const [owner, name] = repo.split("/");
 
@@ -57,7 +56,7 @@ export async function findRejectedFindings(
   const rejected = [];
 
   for (const thread of threads) {
-    if (thread.isResolved && !includeResolved) continue;
+    if (thread.isResolved) continue;
 
     const comments = thread.comments?.nodes ?? [];
     const first = comments[0];
