@@ -336,6 +336,7 @@ Review Hero automatically learns from developer feedback:
 
 To reject a Review Hero finding: add a 👎 reaction to the comment. Optionally reply in the thread explaining why — this helps generate better suppression rules.
 
+
 ## Workflow inputs
 
 The caller workflow can pass these optional inputs:

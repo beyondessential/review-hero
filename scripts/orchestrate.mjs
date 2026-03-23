@@ -28,6 +28,7 @@ import {
   generateSuppressions,
 } from "./learn-from-reactions.mjs";
 import { join } from "node:path";
+import { MAX_VOTERS } from "./lib.mjs";
 
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
 const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -72,7 +73,7 @@ function validateFindings(findings, agentKey, voter) {
       severity: f.severity,
       comment: f.comment,
       agent: agentKey,
-      ...(voter !== undefined && { voter }),
+      ...(voter !== undefined && { voter: `${agentKey}-${voter}` }),
     }));
 }
 
@@ -158,10 +159,18 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
   const threshold = Math.floor(voterCount / 2) + 1;
 
   const findingsList = findings
-    .map(
-      (f, i) =>
-        `${i}. [voter=${f.voter}] [${f.severity}] ${f.file}:${f.line} — ${f.comment.slice(0, 300)}`,
-    )
+    .map((f, i) => {
+      const safeComment = f.comment
+        .slice(0, 300)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/<\/?comment>/gi, "");
+      const safeVoter = String(f.voter).replace(/[\r\n]+/g, " ");
+      const safeFile = String(f.file)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/<\/?comment>/gi, "");
+      const safeLine = String(f.line).replace(/[\r\n]+/g, " ");
+      return `${i}. [voter=${safeVoter}] [${f.severity}] ${safeFile}:${safeLine} — <comment>${safeComment}</comment>`;
+    })
     .join("\n");
 
   try {
@@ -198,7 +207,8 @@ Output a JSON array of the finding indices (0-based) to KEEP — one per distinc
     const result = await response.json();
     const text = result.content?.[0]?.text ?? "";
 
-    const match = text.match(/\[[\s\S]*?\]/);
+    const match = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
+
     if (!match) {
       console.warn("Consensus returned no parseable array — keeping all");
       return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
@@ -468,14 +478,14 @@ async function main() {
   const agentNames = loadAgentNames();
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
-  const voterCount = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
+  const voterCount = Math.max(
+    1,
+    Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS),
+  );
   const suppressionsPath = process.env.SUPPRESSIONS_PATH || "";
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   const anthropicBaseUrl =
     process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
-  if (!anthropicBaseUrl.startsWith("https://")) {
-    throw new Error(`Invalid ANTHROPIC_BASE_URL: must start with https://`);
-  }
   const repo = getEnvOrThrow("GITHUB_REPOSITORY");
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
@@ -585,6 +595,9 @@ async function main() {
   }
 
   // ── Apply voter consensus ─────────────────────────────────────────────
+  // Each agent runs voterCount independent voters. The threshold should be
+  // based on voterCount, not the total unique voter IDs across all agents
+  // (which would be N×voterCount and make consensus impossible to reach).
   const consensus = await applyConsensus(allFindings, voterCount, {
     apiKey,
     baseUrl: anthropicBaseUrl,
@@ -619,6 +632,7 @@ async function main() {
       console.warn(`Suppression filter failed: ${err.message}`);
     }
   }
+
 
   // ── Deduplicate ───────────────────────────────────────────────────────
   const groups = deduplicateFindings(findings);
