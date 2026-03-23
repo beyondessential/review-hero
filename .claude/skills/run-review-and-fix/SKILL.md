@@ -14,9 +14,10 @@ Check if the user specified a cycle count (e.g. "/run-review-and-fix 3" or "for 
 
 ## Step 1: Discover what to review
 
-1. Run `git diff main --name-only` (or appropriate base branch) to get changed files.
-2. Use Glob to check for `.github/review-hero/prompts/*.md`. Read each file found — these are custom review agents.
-3. Read `.github/review-hero/config.yml` if it exists for project context.
+1. Resolve the base branch: run `git rev-parse --abbrev-ref origin/HEAD | sed 's|origin/||'` to get the default branch name (e.g. "main", "master", "develop"). Store this as `{base_branch}` for all subsequent steps.
+2. Run `git diff {base_branch} --name-only` to get changed files.
+3. Use Glob to check for `.github/review-hero/prompts/*.md`. Read each file found — these are custom review agents.
+4. Read `.github/review-hero/config.yml` if it exists for project context.
 
 ## Step 2: Build the list of focus areas
 
@@ -34,12 +35,12 @@ Launch ALL review-scan agents in a SINGLE message (multiple Agent tool calls). T
 
 For each base focus area, launch:
 ```
-Agent(subagent_type: "review-scan", prompt: "Focus area: {area}\nChanged files: {file list}\nReview these files for {area} issues. Run `git diff main -- <file>` for each to see the changes.")
+Agent(subagent_type: "review-scan", prompt: "Focus area: {area}\nBase branch: {base_branch}\nChanged files: {file list}\nReview these files for {area} issues. Run `git diff {base_branch} -- <file>` for each to see the changes.")
 ```
 
 For each custom agent, include the full prompt contents:
 ```
-Agent(subagent_type: "review-scan", prompt: "Focus area: {name}\nChanged files: {file list}\nCustom review prompt:\n{contents of the .md file}\n\nReview these files following the custom prompt above. Read any files it references.")
+Agent(subagent_type: "review-scan", prompt: "Focus area: {name}\nBase branch: {base_branch}\nChanged files: {file list}\nCustom review prompt:\n{contents of the .md file}\n\nReview these files following the custom prompt above. Read any files it references. Use `git diff {base_branch} -- <file>` for diffs.")
 ```
 
 ## Step 4: Collect results
@@ -48,10 +49,34 @@ Wait for ALL review-scan agents to complete. Each returns a JSON array of findin
 
 ## Step 5: Launch review-fix
 
-Launch a single review-fix agent with all collected findings:
+Launch a single review-fix agent with all collected findings. Include a separate named section for each agent that returned findings:
+
 ```
-Agent(subagent_type: "review-fix", prompt: "Here are findings from parallel review scans:\n\n## Security\n{findings}\n\n## Bugs\n{findings}\n\n## Performance\n{findings}\n\n## Design\n{findings}\n\n## {custom}\n{findings}\n\nApply consensus filtering and fix confirmed issues.")
+Agent(subagent_type: "review-fix", prompt: "Here are findings from parallel review scans:
+
+## Security
+{security findings}
+
+## Bugs
+{bugs findings}
+
+## Performance
+{performance findings}
+
+## Design
+{design findings}
+
+## {Custom Agent Name 1}
+{custom agent 1 findings}
+
+## {Custom Agent Name 2}
+{custom agent 2 findings}
+
+Apply consensus filtering and fix confirmed issues.
+End your response with a line: FIXES_APPLIED: true or FIXES_APPLIED: false")
 ```
+
+Omit sections for agents that returned `[]` (no findings).
 
 ## Step 6: Report cycle results
 
@@ -59,15 +84,15 @@ After review-fix completes, report what was found and fixed.
 
 ## Step 7: Repeat if more cycles requested
 
-If cycles > 1 and review-fix reported fixes were applied, repeat steps 3-6 for the next cycle. Each cycle re-scans the updated code.
+Track the current cycle number (starting at 1). If `current_cycle < cycles` and review-fix reported `FIXES_APPLIED: true`, re-run `git diff {base_branch} --name-only` to get the updated file list, then repeat steps 3-6 for the next cycle. Each cycle re-scans the updated code.
 
-If review-fix reports nothing to fix, stop early: "No issues found in cycle N — stopping early."
+If review-fix reports `FIXES_APPLIED: false` or nothing to fix, stop early: "No issues found in cycle N — stopping early."
 
 Log between cycles: "Cycle N/M complete. Starting next cycle..."
 
 ## Important
 
 - ALL review-scan agents MUST be launched in a single message for parallelism
-- Do NOT skip custom agent prompts
+- Do NOT skip custom agent prompts — each gets its own named section
 - If a review-scan agent fails, continue with results from the others
 - Do NOT launch review-fix until all scans complete

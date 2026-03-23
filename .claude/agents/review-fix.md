@@ -48,6 +48,11 @@ If the project has a linter, run it on changed files and fix errors.
 Output a summary:
 - Issues found and fixed (with file and line references)
 - Which passes found each issue
+- Suppressed findings (if any were filtered by suppressions.yml)
+
+End your response with exactly one of these lines:
+- `FIXES_APPLIED: true` — if you made any code changes
+- `FIXES_APPLIED: false` — if no changes were needed
 
 ## Guidelines
 
