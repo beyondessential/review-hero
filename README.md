@@ -162,56 +162,6 @@ If your project has conventions the auto-fix agent should follow (spelling rules
 
 This file is appended to the auto-fix prompt automatically.
 
-### 4. (Optional) Enable Auto-Merge
-
-Auto-Merge lets Claude automatically merge the base branch into your PR branch and intelligently resolve any merge conflicts using AI. This is useful when your feature branch has fallen behind `main` and there are conflicts that need resolution.
-
-Create `.github/workflows/ai-auto-merge.yml`:
-
-```yaml
-name: Review Hero Auto-Merge
-on:
-  pull_request:
-    types: [opened, reopened, edited]
-
-permissions:
-  contents: write
-  pull-requests: write
-
-jobs:
-  auto-merge:
-    uses: beyondessential/review-hero/.github/workflows/auto-merge.yml@v1
-    secrets: inherit
-```
-
-Then add the checkbox to your PR template:
-
-```markdown
-- [ ] **Auto-merge upstream** <!-- #auto-merge -->
-```
-
-When checked, Review Hero will:
-1. Attempt to merge the base branch into the PR branch
-2. If the merge is clean, push and report success
-3. If there are conflicts, run Claude to intelligently resolve them — understanding the intent of both sides — then commit and push the resolution
-
-Like the other checkboxes, it's automatically unchecked after completion.
-
-**Note:** Auto-Merge needs `contents: write` to push the merge commit. The repo must be checked out with `fetch-depth: 0` (full history) for the merge to work, which the workflow handles automatically.
-
-#### Custom auto-merge rules
-
-If your project has conventions the merge resolution agent should follow, create `.github/review-hero/auto-merge-rules.md`:
-
-```markdown
-## Merge Rules
-
-- When both sides add imports, sort them alphabetically
-- Prefer the feature branch's version of API contracts
-```
-
-This file is appended to the auto-merge prompt automatically.
-
 ## Configuration (optional)
 
 For repo-specific customisation, create `.github/review-hero/config.yml`:
@@ -351,23 +301,6 @@ jobs:
 | `runner`    | `ubuntu-slim`      | GitHub Actions runner for the trigger check and review-only fixes. |
 | `ci-runner` | `ubuntu-latest`    | GitHub Actions runner used when fixing CI failures (needs build tools, test runners, etc.). Automatically selected when the CI failures checkbox is checked. |
 
-### Auto-Merge inputs
-
-```yaml
-jobs:
-  auto-merge:
-    uses: beyondessential/review-hero/.github/workflows/auto-merge.yml@v1
-    with:
-      model: claude-sonnet-4-6
-      runner: ubuntu-slim
-    secrets: inherit
-```
-
-| Input    | Default            | Description |
-|----------|--------------------|-------------|
-| `model`  | `claude-sonnet-4-6`| The Claude model used for conflict resolution. |
-| `runner` | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
-
 ## Base agents
 
 | Agent        | Focus |
@@ -405,13 +338,6 @@ Max turns scale with the filtered diff size and are capped at 10:
 - Has `Read`, `Edit`, `Glob`, and `Grep` tools. If fixing CI failures, `Bash` is also enabled so it can run commands to verify fixes.
 - Cost depends on how many review comments / CI failures need fixing, but is typically comparable to a single review agent run.
 
-### Auto-Merge
-
-- One Sonnet session with up to 30 tool-use turns.
-- Has `Read`, `Edit`, `Glob`, and `Grep` tools.
-- If the merge is clean (no conflicts), no Claude session is needed — zero AI cost.
-- Cost depends on the number and complexity of conflicts, but is typically low since conflict resolution is more targeted than general code review.
-
 ## Versioning
 
 Review Hero follows [semantic versioning](https://semver.org/). Consumer workflows should pin to a **major version tag** (e.g. `@v1`), which automatically receives backwards-compatible updates:
@@ -440,7 +366,6 @@ Here's a complete block you can drop into `.github/pull_request_template.md`:
 - [ ] **Run Review Hero** <!-- #ai-review -->
 - [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
 - [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
-- [ ] **Auto-merge upstream** <!-- #auto-merge -->
 ```
 
-Omit the auto-fix or auto-merge lines if your repo doesn't use those workflows.
+Omit the auto-fix lines if your repo doesn't use that workflow.

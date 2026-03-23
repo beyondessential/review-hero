@@ -1,7 +1,7 @@
 /**
  * Review Hero — Shared utilities
  *
- * Common helpers used by auto-fix, auto-merge, and other action scripts.
+ * Common helpers used by auto-fix and other action scripts.
  */
 
 import { readFileSync, writeFileSync, existsSync, copyFileSync, chmodSync } from "node:fs";
