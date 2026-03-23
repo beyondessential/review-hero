@@ -15,6 +15,10 @@ on:
         description: "GitHub Actions runner for all jobs"
         type: string
         default: ubuntu-slim
+      voters:
+        description: "Number of independent voters per agent (>=2 enables consensus filtering to reduce noise)"
+        type: number
+        default: 3
       ref:
         description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
         type: string
@@ -52,6 +56,7 @@ jobs:
       should_run: ${{ steps.check.outputs.should_run }}
       matrix: ${{ steps.triage.outputs.matrix }}
       max_turns: ${{ steps.triage.outputs.max_turns }}
+      agent_model: ${{ steps.triage.outputs.agent_model }}
       agent_names: ${{ steps.triage.outputs.agent_names }}
       project_context: ${{ steps.config.outputs.project_context }}
       trusted_ref: ${{ steps.resolve-trusted-ref.outputs.sha }}
@@ -204,6 +209,8 @@ jobs:
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           REVIEW_HERO_DIR: review-hero
           CALLER_REPO_DIR: caller
+          VOTERS: ${{ inputs.voters }}
+          DEFAULT_MODEL: ${{ inputs.model }}
         run: node review-hero/scripts/triage.mjs
 
       # ── Upload filtered diff for agent jobs ──────────────────────────
@@ -290,19 +297,34 @@ jobs:
         run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
 
       # ── Run agent ────────────────────────────────────────────────────
-      - name: Run ${{ matrix.agent.key }} agent
+      - name: Run ${{ matrix.agent.key }} agent${{ matrix.agent.voter && format(' (voter {0})', matrix.agent.voter) || '' }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
+          VOTER: ${{ matrix.agent.voter }}
+          AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
+        timeout-minutes: 20
         run: |
+          # Build result filename — include voter suffix when multi-voter
+          RESULT_NAME="${{ matrix.agent.key }}"
+          if [ -n "$VOTER" ]; then
+            RESULT_NAME="${RESULT_NAME}-voter-${VOTER}"
+          fi
+
           # Build the prompt by concatenating:
           # 1. Project context (if any)
           # 2. Base agent prompt
           # 3. Specialisation prompt
           # 4. Repository AI rules (non-CLAUDE.md — CLAUDE.md is read natively by Claude CLI)
           # 5. PR title + diff
+          #
+          # Each voter runs the same prompt — natural LLM stochasticity
+          # provides the diversity needed for consensus. Explicit jitter
+          # prompts were removed because they conflict with domain-specific
+          # agent prompts (e.g. telling a security agent to "focus on
+          # testing" pulls it off its actual job).
 
           {
             if [ -n "$PROJECT_CONTEXT" ]; then
@@ -330,17 +352,17 @@ jobs:
             echo '```'
           } | claude -p \
               --output-format json \
-              --model "${{ inputs.model }}" \
+              --model "$AGENT_MODEL" \
               --max-turns ${{ needs.triage.outputs.max_turns }} \
               --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
-            > /tmp/${{ matrix.agent.key }}-result.json
+            > "/tmp/${RESULT_NAME}-result.json"
 
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: review-${{ matrix.agent.key }}
-          path: /tmp/${{ matrix.agent.key }}-result.json
+          name: review-${{ matrix.agent.key }}${{ matrix.agent.voter && format('-voter-{0}', matrix.agent.voter) || '' }}
+          path: /tmp/${{ matrix.agent.key }}${{ matrix.agent.voter && format('-voter-{0}', matrix.agent.voter) || '' }}-result.json
           retention-days: 1
 
   orchestrate-review:
@@ -394,4 +416,7 @@ jobs:
           ARTIFACTS_DIR: /tmp/artifacts
           AGENT_NAMES: ${{ needs.triage.outputs.agent_names }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          VOTERS: ${{ inputs.voters }}
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
         run: node review-hero/scripts/orchestrate.mjs

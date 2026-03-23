@@ -10,21 +10,22 @@ Review Hero runs a set of specialised review agents in parallel (bugs, performan
 PR checkbox checked
         │
         ▼
-   ┌─────────┐   Haiku selects    ┌────────────────────┐
-   │ Triage  │──── agents ───────>│ Review agents (x N) │
-   │ (Haiku) │   filters diff     │ (Sonnet, parallel)  │
-   └─────────┘                    └─────────┬───────────┘
-                                            │ JSON findings
-                                            ▼
-                                   ┌─────────────────┐
-                                   │  Orchestrator   │
-                                   │  dedup + post   │
-                                   └─────────────────┘
+   ┌─────────┐   Haiku selects    ┌──────────────────────────────┐
+   │ Triage  │──── agents ───────>│ Review agents (x N x voters) │
+   │ (Haiku) │   filters diff     │ (Sonnet, parallel)           │
+   └─────────┘                    └──────────────┬────────────────┘
+                                                 │ JSON findings
+                                                 ▼
+                                        ┌─────────────────┐
+                                        │  Orchestrator   │
+                                        │  consensus      │
+                                        │  dedup + post   │
+                                        └─────────────────┘
 ```
 
 1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, and scales the agent turn budget by diff size.
-2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. Agents have read-only access to the repo so they can explore surrounding code for context.
-3. **Orchestrator** — collects all agent outputs, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
+2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. When `voters > 1`, each agent runs multiple times independently for consensus. Agents have read-only access to the repo so they can explore surrounding code for context.
+3. **Orchestrator** — collects all agent outputs, applies voter consensus (when enabled), deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
 ## Prerequisites (once per owner — user or org)
 
@@ -283,6 +284,31 @@ These files are always stripped from the diff before triage and agent input:
 
 Extend this list with `ignore_patterns` in your config.
 
+## Noise reduction
+
+Review Hero includes mechanisms to improve signal-to-noise ratio.
+
+### Voter consensus
+
+When `voters` is set to 2 or more, each review agent runs N independent times and only findings that a majority of voters agree on are kept. This significantly reduces false positives — noise tends to vary between runs while real issues are consistently found.
+
+```yaml
+jobs:
+  review:
+    uses: beyondessential/review-hero/.github/workflows/review.yml@v1
+    with:
+      voters: 3  # Run each agent 3 times, keep findings with ≥2/3 agreement
+    secrets: inherit
+```
+
+The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 voters, a finding needs at least 2 to agree (same file, within 5 lines). Each voter runs the same prompt — natural LLM stochasticity provides diversity, while real issues are found consistently.
+
+**Cost impact:** Voters multiply agent costs linearly. The default of 3 voters strikes a good balance between noise reduction and cost.
+
+### Automatic Opus upgrade for large PRs
+
+For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. Max turns are reduced (6 instead of 10) to stay within timeout budgets — Opus uses fewer but deeper reasoning turns. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
+
 ## Workflow inputs
 
 The caller workflow can pass these optional inputs:
@@ -293,16 +319,18 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
-      model: claude-sonnet-4-6  # Claude model for agents
+      model: claude-sonnet-4-6  # Default model (auto-upgrades to Opus for large PRs)
       runner: ubuntu-slim      # Runner for all jobs
+      voters: 3                # Voters per agent (1 to disable consensus)
     secrets: inherit
 ```
 
 | Input     | Default            | Description |
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
-| `model`   | `claude-sonnet-4-6`| The Claude model used by review agents. |
+| `model`   | `claude-sonnet-4-6`| Default Claude model for review agents. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
+| `voters`  | `3`                | Independent voters per agent. `>=2` enables consensus filtering. Set to `1` to disable. |
 
 ### Auto-Fix inputs
 

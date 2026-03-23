@@ -8,6 +8,11 @@ import { readFileSync, writeFileSync, existsSync, copyFileSync, chmodSync } from
 import { execSync, execFileSync } from "node:child_process";
 import * as core from "@actions/core";
 
+// ── Constants ────────────────────────────────────────────────────────────────
+
+/** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
+export const MAX_VOTERS = 10;
+
 // ── Environment ──────────────────────────────────────────────────────────────
 
 export function getEnvOrThrow(name) {
