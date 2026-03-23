@@ -64,7 +64,7 @@ function validateFindings(findings, agentKey, voter) {
       severity: f.severity,
       comment: f.comment,
       agent: agentKey,
-      ...(voter !== undefined && { voter }),
+      ...(voter !== undefined && { voter: `${agentKey}-${voter}` }),
     }));
 }
 
@@ -150,10 +150,13 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
   const threshold = Math.floor(voterCount / 2) + 1;
 
   const findingsList = findings
-    .map(
-      (f, i) =>
-        `${i}. [voter=${f.voter}] [${f.severity}] ${f.file}:${f.line} — ${f.comment.slice(0, 300)}`,
-    )
+    .map((f, i) => {
+      const safeComment = f.comment
+        .slice(0, 300)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/<\/?comment>/gi, "");
+      return `${i}. [voter=${f.voter}] [${f.severity}] ${f.file}:${f.line} — <comment>${safeComment}</comment>`;
+    })
     .join("\n");
 
   try {
@@ -190,7 +193,7 @@ Output a JSON array of the finding indices (0-based) to KEEP — one per distinc
     const result = await response.json();
     const text = result.content?.[0]?.text ?? "";
 
-    const match = text.match(/\[[\s\S]*?\]/);
+    const match = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
     if (!match) {
       console.warn("Consensus returned no parseable array — keeping all");
       return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
@@ -460,7 +463,11 @@ async function main() {
   const agentNames = loadAgentNames();
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
-  const voterCount = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
+  const MAX_VOTERS = 10;
+  const voterCount = Math.max(
+    1,
+    Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS),
+  );
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   const anthropicBaseUrl =
     process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
@@ -541,7 +548,14 @@ async function main() {
   }
 
   // ── Apply voter consensus ─────────────────────────────────────────────
-  const consensus = await applyConsensus(allFindings, voterCount, {
+  // Voter IDs are globally unique (${agentKey}-${voterIndex}), so count
+  // distinct voter IDs across all findings for the correct threshold.
+  const uniqueVoterIds = new Set(
+    allFindings.filter((f) => f.voter !== undefined).map((f) => f.voter),
+  );
+  const effectiveVoterCount =
+    uniqueVoterIds.size > 0 ? uniqueVoterIds.size : voterCount;
+  const consensus = await applyConsensus(allFindings, effectiveVoterCount, {
     apiKey,
     baseUrl: anthropicBaseUrl,
   });
