@@ -620,9 +620,10 @@ async function main() {
                 suppressionsPath,
               ]);
             } catch {
-              // Fallback: commit directly
-              createCommit(
-                `chore: add ${newSuppressions.length} suppression(s) from developer feedback`,
+              // Fallback: stage only the suppressions file and commit directly
+              execSync(`git add ${suppressionsPath}`);
+              execSync(
+                `git commit -m "chore: add ${newSuppressions.length} suppression(s) from developer feedback"`,
               );
             }
             pushChanges();

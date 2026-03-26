@@ -91,13 +91,14 @@ Output ONLY a JSON array of finding indices (0-based) to SUPPRESS. Output \`[]\`
     const result = await response.json();
     const text = result.content?.[0]?.text ?? "";
 
-    const match = text.match(/\[[\s\S]*\]/);
-    if (!match) {
+    const lastOpen = text.lastIndexOf("[");
+    const lastClose = text.lastIndexOf("]");
+    if (lastOpen === -1 || lastClose <= lastOpen) {
       // No parseable response — keep all findings in this batch
       return { kept: batch, suppressed: [] };
     }
 
-    const rawIndices = JSON.parse(match[0]);
+    const rawIndices = JSON.parse(text.slice(lastOpen, lastClose + 1));
     const suppressedIndices = new Set(
       Array.isArray(rawIndices)
         ? rawIndices.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < batch.length)
