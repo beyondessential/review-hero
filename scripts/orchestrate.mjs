@@ -15,7 +15,8 @@
  *   AGENT_NAMES         — JSON map of agent key → display name
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
  *   VOTERS              — Number of voters per agent (default: 1)
- *   SUPPRESSIONS_PATH   — Path to suppressions YAML file (optional)
+ *   SUPPRESSIONS_PATH   — Path to local suppressions YAML file (optional)
+ *   GLOBAL_SUPPRESSIONS_PATH — Path to global suppressions YAML file (optional)
  *   ANTHROPIC_API_KEY   — API key for Haiku-based filtering (optional)
  *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
  */
@@ -606,13 +607,15 @@ async function main() {
   const consensusDropped = consensus.dropped;
 
   // ── Apply suppression filter ──────────────────────────────────────────
-  const staticSuppressions = loadSuppressions(suppressionsPath);
-  const allSuppressions = [...staticSuppressions, ...learnedSuppressions];
+  const globalSuppressionsPath = process.env.GLOBAL_SUPPRESSIONS_PATH || "";
+  const localSuppressions = loadSuppressions(suppressionsPath);
+  const globalSuppressions = loadSuppressions(globalSuppressionsPath);
+  const allSuppressions = [...globalSuppressions, ...localSuppressions, ...learnedSuppressions];
   let suppressedCount = 0;
 
   if (allSuppressions.length > 0 && apiKey && findings.length > 0) {
     console.log(
-      `Filtering against ${allSuppressions.length} suppression rule${allSuppressions.length === 1 ? "" : "s"} (${staticSuppressions.length} static, ${learnedSuppressions.length} learned)`,
+      `Filtering against ${allSuppressions.length} suppression rule${allSuppressions.length === 1 ? "" : "s"} (${globalSuppressions.length} global, ${localSuppressions.length} local, ${learnedSuppressions.length} learned)`,
     );
     try {
       const { kept, suppressed } = await filterWithSuppressions(

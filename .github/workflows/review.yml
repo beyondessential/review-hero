@@ -446,6 +446,7 @@ jobs:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           VOTERS: ${{ inputs.voters }}
           SUPPRESSIONS_PATH: /tmp/suppressions.yml
+          GLOBAL_SUPPRESSIONS_PATH: review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
         run: node review-hero/scripts/orchestrate.mjs
