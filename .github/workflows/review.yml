@@ -164,6 +164,10 @@ jobs:
         with:
           node-version-file: ".node-version"
 
+      - name: Install review-hero dependencies
+        if: steps.check.outputs.should_run == 'true'
+        run: npm ci --prefix review-hero
+
       # ── Read project context from caller config ──────────────────────
       - name: Read caller config
         if: steps.check.outputs.should_run == 'true'
@@ -416,6 +420,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: latest
+
+      - name: Install review-hero dependencies
+        run: npm ci --prefix review-hero
 
       # ── Download agent artifacts ─────────────────────────────────────
       # Use merge-multiple so all agent results land as flat files in
