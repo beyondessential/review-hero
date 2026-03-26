@@ -213,13 +213,34 @@ jobs:
           DEFAULT_MODEL: ${{ inputs.model }}
         run: node review-hero/scripts/triage.mjs
 
+      # ── Prepare suppressions for downstream jobs ─────────────────────
+      - name: Prepare suppressions
+        if: steps.check.outputs.should_run == 'true'
+        run: |
+          SUPP="caller/.github/review-hero/suppressions.yml"
+          if [ -f "$SUPP" ]; then
+            cp "$SUPP" /tmp/suppressions.yml
+            echo "Suppressions file found"
+          else
+            echo "[]" > /tmp/suppressions.yml
+            echo "No suppressions file"
+          fi
+
       # ── Upload filtered diff for agent jobs ──────────────────────────
       - name: Upload filtered diff
         if: steps.check.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: filtered-diff
           path: /tmp/pr-filtered.diff
+          retention-days: 1
+
+      - name: Upload suppressions
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v8
+        with:
+          name: suppressions
+          path: /tmp/suppressions.yml
           retention-days: 1
 
   review-agent:
@@ -359,7 +380,7 @@ jobs:
 
       - name: Upload result
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: review-${{ matrix.agent.key }}${{ matrix.agent.voter && format('-voter-{0}', matrix.agent.voter) || '' }}
           path: /tmp/${{ matrix.agent.key }}${{ matrix.agent.voter && format('-voter-{0}', matrix.agent.voter) || '' }}-result.json
@@ -406,6 +427,13 @@ jobs:
           pattern: review-*
           merge-multiple: true
 
+      - name: Download suppressions
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: suppressions
+          path: /tmp
+
       # ── Orchestrate ──────────────────────────────────────────────────
       - name: Run orchestrator
         env:
@@ -417,6 +445,8 @@ jobs:
           AGENT_NAMES: ${{ needs.triage.outputs.agent_names }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           VOTERS: ${{ inputs.voters }}
+          SUPPRESSIONS_PATH: /tmp/suppressions.yml
+          GLOBAL_SUPPRESSIONS_PATH: review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
         run: node review-hero/scripts/orchestrate.mjs
