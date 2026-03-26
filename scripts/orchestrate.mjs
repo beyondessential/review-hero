@@ -300,6 +300,62 @@ function buildSummaryTable(nitpicks, agentNames) {
   return `### Nitpicks\n\n| File | Line | Agent | Comment |\n|------|------|-------|---------|\n${rows}`;
 }
 
+// ── Diff parsing ─────────────────────────────────────────────────────────
+
+/**
+ * Parse a unified diff to extract the set of commentable lines (RIGHT side)
+ * for each file. Returns a Map of path → Set<line number>.
+ */
+function parseDiffLines(diffText) {
+  const commentableLines = new Map();
+  let currentFile = null;
+  let rightLine = 0;
+
+  for (const line of diffText.split("\n")) {
+    // Reset on new file boundary
+    if (line.startsWith("diff --git ")) {
+      currentFile = null;
+      rightLine = 0;
+      continue;
+    }
+
+    const fileMatch = line.match(/^\+\+\+ b\/(.+)$/);
+    if (fileMatch) {
+      currentFile = fileMatch[1];
+      if (!commentableLines.has(currentFile)) {
+        commentableLines.set(currentFile, new Set());
+      }
+      continue;
+    }
+
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+    if (hunkMatch) {
+      rightLine = parseInt(hunkMatch[1]);
+      if (!currentFile) continue;
+      // Context and added lines in this hunk are commentable
+      continue;
+    }
+
+    if (!currentFile || rightLine === 0) continue;
+
+    if (line.startsWith("+")) {
+      // Added line — commentable on RIGHT side
+      commentableLines.get(currentFile).add(rightLine);
+      rightLine++;
+    } else if (line.startsWith("-")) {
+      // Removed line — doesn't increment right line counter
+    } else if (line.startsWith("\\")) {
+      // "No newline at end of file" — skip
+    } else {
+      // Context line — commentable on RIGHT side
+      commentableLines.get(currentFile).add(rightLine);
+      rightLine++;
+    }
+  }
+
+  return commentableLines;
+}
+
 // ── GitHub API ───────────────────────────────────────────────────────────────
 
 async function githubApi(endpoint, options = {}, { token } = {}) {
@@ -407,6 +463,25 @@ async function resolvePreviousReviewHeroThreads(prNumber, botLogin) {
 async function getLatestCommit(prNumber) {
   const pr = await githubApi(`/pulls/${prNumber}`);
   return pr.head.sha;
+}
+
+async function getPRDiff(prNumber) {
+  const repo = getEnvOrThrow("GITHUB_REPOSITORY");
+  const token = getEnvOrThrow("GITHUB_TOKEN");
+  const response = await fetch(
+    `https://api.github.com/repos/${repo}/pulls/${prNumber}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github.v3.diff",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to fetch PR diff: ${response.status}`);
+  }
+  return response.text();
 }
 
 async function postReview(prNumber, commitSha, inlineComments) {
@@ -593,21 +668,57 @@ async function main() {
     }
   }
 
-  // Post inline review comments
+  // Post inline review comments — filter to lines in the diff
   if (inlineComments.length > 0) {
-    const commitSha = await getLatestCommit(prNumber);
+    let diffCommentableLines;
     try {
-      await postReview(prNumber, commitSha, inlineComments);
-      console.log(`Posted ${inlineComments.length} inline review comments`);
+      const diffText = await getPRDiff(prNumber);
+      diffCommentableLines = parseDiffLines(diffText);
     } catch (err) {
-      console.error(`Failed to post inline review: ${err.message}`);
-      // Fall back to posting inline comments in the summary
-      const fallbackLines = inlineComments
+      console.warn(`Failed to fetch PR diff for filtering: ${err.message}`);
+      diffCommentableLines = null;
+    }
+
+    let validComments = inlineComments;
+    let droppedComments = [];
+    if (diffCommentableLines) {
+      validComments = [];
+      for (const c of inlineComments) {
+        const fileLines = diffCommentableLines.get(c.path);
+        if (fileLines && fileLines.has(c.line)) {
+          validComments.push(c);
+        } else {
+          droppedComments.push(c);
+        }
+      }
+      if (droppedComments.length > 0) {
+        console.log(
+          `Filtered ${droppedComments.length} comment(s) on lines outside the diff`,
+        );
+      }
+    }
+
+    const commitSha = await getLatestCommit(prNumber);
+
+    if (validComments.length > 0) {
+      try {
+        await postReview(prNumber, commitSha, validComments);
+        console.log(`Posted ${validComments.length} inline review comments`);
+      } catch (err) {
+        console.error(`Failed to post inline review: ${err.message}`);
+        // Move all to fallback
+        droppedComments = [...validComments, ...droppedComments];
+      }
+    }
+
+    // Post any comments that couldn't be inlined as a regular comment
+    if (droppedComments.length > 0) {
+      const fallbackLines = droppedComments
         .map((c) => `**\`${c.path}:${c.line}\`**\n\n${c.body}`)
         .join("\n\n---\n\n");
       await postComment(
         prNumber,
-        `🦸 **Review Hero** (could not post inline comments — showing here instead)\n\n${fallbackLines}`,
+        `🦸 **Review Hero** (${droppedComments.length} comment${droppedComments.length === 1 ? "" : "s"} on lines outside the diff)\n\n${fallbackLines}`,
       );
     }
   }
