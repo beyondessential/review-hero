@@ -294,6 +294,9 @@ jobs:
           ref: ${{ inputs.ref }}
           path: .review-hero
 
+      - name: Install review-hero dependencies
+        run: npm ci --prefix .review-hero
+
       # ── Setup ────────────────────────────────────────────────────────
       - name: Ensure Node.js version file
         run: "[ -f .node-version ] || echo latest > .node-version"
