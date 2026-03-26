@@ -22,6 +22,15 @@ Group findings by (file, line within ±5). Findings confirmed by 2+ review passe
 3. `suggestion` from a single pass — fix only if clearly correct
 4. Skip single-pass `nitpick` findings
 
+### 1b. Suppression filter
+
+After consensus filtering, check for suppression rules that should remove known false positives:
+
+1. Read `.github/review-hero/suppressions.yml` if it exists (project-specific suppressions)
+2. Read `.review-hero/suppressions.yml` if it exists (global suppressions from Review Hero)
+
+Each entry has a `pattern` (natural language description of what to suppress) and optional `context`. Drop any finding that matches a suppression. Log what was filtered in the report.
+
 ### 2. Fix issues
 
 For each confirmed issue:
@@ -44,6 +53,7 @@ If the project has a linter, run it on changed files and fix errors.
 Output a summary:
 - Issues found and fixed (with file and line references)
 - Which passes found each issue
+- Suppressed findings (if any were filtered)
 
 End your response with exactly one of these lines:
 - `FIXES_APPLIED: true` — if you made any code changes

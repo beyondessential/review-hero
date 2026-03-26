@@ -1,0 +1,9 @@
+# Global suppression rules — applied to all repos using Review Hero.
+# These filter out common false positives that aren't project-specific.
+#
+# Project-specific suppressions go in .github/review-hero/suppressions.yml
+# in the client repo.
+
+- pattern: "nitpick about clarifying comments or documentation in LLM prompts"
+  context: "suggestions to add explanatory comments to prompt/agent markdown files about behavior that is correct and intentional"
+  reason: "adding clarifying prose to LLM prompts for edge cases that are working as designed is noise, not a bug"
