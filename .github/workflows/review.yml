@@ -229,7 +229,7 @@ jobs:
       # ── Upload filtered diff for agent jobs ──────────────────────────
       - name: Upload filtered diff
         if: steps.check.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: filtered-diff
           path: /tmp/pr-filtered.diff
@@ -237,7 +237,7 @@ jobs:
 
       - name: Upload suppressions
         if: steps.check.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: suppressions
           path: /tmp/suppressions.yml
@@ -380,7 +380,7 @@ jobs:
 
       - name: Upload result
         if: always()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: review-${{ matrix.agent.key }}${{ matrix.agent.voter && format('-voter-{0}', matrix.agent.voter) || '' }}
           path: /tmp/${{ matrix.agent.key }}${{ matrix.agent.voter && format('-voter-{0}', matrix.agent.voter) || '' }}-result.json
