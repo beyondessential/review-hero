@@ -62,12 +62,10 @@ export async function findRejectedFindings(
     const first = comments[0];
     if (!first || first.author?.login !== botLogin) continue;
 
-    // Check for thumbs-down from non-bot users
-    const hasThumbsDown = comments.some((c) =>
-      (c.reactions?.nodes ?? []).some(
-        (r) =>
-          r.content === "THUMBS_DOWN" && r.user?.login !== botLogin,
-      ),
+    // Check for thumbs-down on the bot's opening comment only
+    const hasThumbsDown = (first.reactions?.nodes ?? []).some(
+      (r) =>
+        r.content === "THUMBS_DOWN" && r.user?.login !== botLogin,
     );
     if (!hasThumbsDown) continue;
 
@@ -169,7 +167,13 @@ Only output the JSON array.`,
   const lastClose = text.lastIndexOf("]");
   if (lastOpen === -1 || lastClose <= lastOpen) return [];
 
-  const parsed = JSON.parse(text.slice(lastOpen, lastClose + 1));
+  let parsed;
+  try {
+    parsed = JSON.parse(text.slice(lastOpen, lastClose + 1));
+  } catch {
+    console.warn("Failed to parse suppression JSON from Haiku response");
+    return [];
+  }
   if (!Array.isArray(parsed)) return [];
 
   return parsed
