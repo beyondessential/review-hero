@@ -1,0 +1,3 @@
+- pattern: "Missing try/catch around JSON.parse() in functions that load application state files"
+  context: "When the developer has explicitly stated that the file source is guaranteed to be safe (e.g., internally generated, validated on write, or protected by application guarantees)"
+  reason: "Developer indicated defensive error handling is unnecessary when the file integrity is guaranteed by application design or constraints, making the suggestion a false positive for their use case"
