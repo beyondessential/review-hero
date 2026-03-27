@@ -60,11 +60,12 @@ export async function findRejectedFindings(
 
     const comments = thread.comments?.nodes ?? [];
     const first = comments[0];
+    if (!first) continue;
     // GraphQL returns login without "[bot]" suffix, REST includes it.
     // Match either form.
     const authorLogin = first.author?.login ?? "";
     const botBase = botLogin.replace(/\[bot\]$/, "");
-    if (!first || (authorLogin !== botLogin && authorLogin !== botBase)) continue;
+    if (authorLogin !== botLogin && authorLogin !== botBase) continue;
 
     // Check for thumbs-down on the bot's opening comment only
     const hasThumbsDown = (first.reactions?.nodes ?? []).some(
