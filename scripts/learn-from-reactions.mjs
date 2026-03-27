@@ -82,6 +82,7 @@ export async function findRejectedFindings(
       .map((c) => c.body);
 
     rejected.push({
+      threadId: thread.id,
       file: first.path,
       line: first.line,
       reviewComment: first.body,
