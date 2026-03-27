@@ -720,13 +720,15 @@ async function main() {
       findingsByAgent.get(agentKey).push(f);
     }
 
-    for (const [agentKey, agentFindings] of findingsByAgent) {
-      const consensus = await applyConsensus(agentFindings, voterCount, {
-        apiKey,
-        baseUrl: anthropicBaseUrl,
-      });
-      findings.push(...consensus.kept);
-      allDroppedFindings.push(...consensus.droppedFindings);
+    const entries = [...findingsByAgent.entries()];
+    const results = await Promise.all(
+      entries.map(([, agentFindings]) =>
+        applyConsensus(agentFindings, voterCount, { apiKey, baseUrl: anthropicBaseUrl })
+      )
+    );
+    for (const c of results) {
+      findings.push(...c.kept);
+      allDroppedFindings.push(...c.droppedFindings);
     }
   } else {
     findings = allFindings.map(({ voter, ...rest }) => rest);
