@@ -91,6 +91,12 @@ async function fetchUnresolvedComments() {
                   author {
                     login
                   }
+                  reactions(first: 20) {
+                    nodes {
+                      content
+                      user { login }
+                    }
+                  }
                 }
               }
             }
@@ -103,6 +109,8 @@ async function fetchUnresolvedComments() {
 
   const threads = data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
   const comments = [];
+  const botBase = appSlug;
+  const botFull = `${appSlug}[bot]`;
 
   for (const thread of threads) {
     if (thread.isResolved) continue;
@@ -113,6 +121,25 @@ async function fetchUnresolvedComments() {
 
     const firstComment = thread.comments?.nodes?.[0];
     if (!firstComment?.path) continue;
+
+    // Skip threads where the bot's comment received a thumbs-down — the
+    // developer has explicitly rejected this suggestion.
+    const authorLogin = firstComment.author?.login ?? "";
+    const isBotComment = authorLogin === botFull || authorLogin === botBase;
+    if (isBotComment) {
+      const hasThumbsDown = (firstComment.reactions?.nodes ?? []).some(
+        (r) =>
+          r.content === "THUMBS_DOWN" &&
+          r.user?.login !== botFull &&
+          r.user?.login !== botBase,
+      );
+      if (hasThumbsDown) {
+        console.log(
+          `Skipping thumbs-downed comment on ${firstComment.path}:${firstComment.line}`,
+        );
+        continue;
+      }
+    }
 
     const bodies = (thread.comments?.nodes ?? [])
       .map((c) => `${c.author?.login ?? "unknown"}: ${c.body ?? ""}`)
@@ -586,10 +613,10 @@ async function main() {
         prNumber,
         botLogin,
       );
+      console.log(
+        `Thumbs-down learning: found ${rejected.length} rejected finding(s) (bot: ${botLogin})`,
+      );
       if (rejected.length > 0) {
-        console.log(
-          `Found ${rejected.length} thumbs-down reaction(s) — learning suppressions`,
-        );
         const newSuppressions = await generateSuppressions(rejected, {
           apiKey,
           baseUrl: anthropicBaseUrl,
@@ -632,6 +659,15 @@ async function main() {
             );
           }
         }
+
+        // Resolve thumbs-downed threads so they aren't re-processed on
+        // subsequent runs.
+        for (const r of rejected) {
+          if (r.threadId) await resolveThread(r.threadId);
+        }
+        console.log(
+          `Resolved ${rejected.length} thumbs-downed thread(s)`,
+        );
       }
     } catch (err) {
       console.warn(`Thumbs-down learning failed: ${err.message}`);

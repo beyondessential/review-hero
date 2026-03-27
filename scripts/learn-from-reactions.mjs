@@ -60,12 +60,19 @@ export async function findRejectedFindings(
 
     const comments = thread.comments?.nodes ?? [];
     const first = comments[0];
-    if (!first || first.author?.login !== botLogin) continue;
+    if (!first) continue;
+    // GraphQL returns login without "[bot]" suffix, REST includes it.
+    // Match either form.
+    const authorLogin = first.author?.login ?? "";
+    const botBase = botLogin.replace(/\[bot\]$/, "");
+    if (authorLogin !== botLogin && authorLogin !== botBase) continue;
 
     // Check for thumbs-down on the bot's opening comment only
     const hasThumbsDown = (first.reactions?.nodes ?? []).some(
       (r) =>
-        r.content === "THUMBS_DOWN" && r.user?.login !== botLogin,
+        r.content === "THUMBS_DOWN" &&
+        r.user?.login !== botLogin &&
+        r.user?.login !== botBase,
     );
     if (!hasThumbsDown) continue;
 
@@ -75,6 +82,7 @@ export async function findRejectedFindings(
       .map((c) => c.body);
 
     rejected.push({
+      threadId: thread.id,
       file: first.path,
       line: first.line,
       reviewComment: first.body,
