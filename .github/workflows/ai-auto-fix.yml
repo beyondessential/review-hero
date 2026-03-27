@@ -12,5 +12,5 @@ jobs:
   auto-fix:
     uses: ./.github/workflows/auto-fix.yml
     with:
-      ref: ${{ github.head_ref }}
+      ref: ${{ github.event.pull_request.head.ref }}
     secrets: inherit
