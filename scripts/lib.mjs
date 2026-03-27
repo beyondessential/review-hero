@@ -11,7 +11,7 @@ import * as core from "@actions/core";
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
-export const MAX_VOTERS = 10;
+export const MAX_VOTERS = 12;
 
 // ── Environment ──────────────────────────────────────────────────────────────
 
