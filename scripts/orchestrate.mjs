@@ -255,14 +255,10 @@ Example: {"kept": [0, 3], "dropped": [5]}`,
       .map(({ voter, ...rest }) => rest);
     const droppedCount = findings.length - kept.length;
 
-    // If Haiku didn't return dropped representatives, build them from
-    // non-kept findings that aren't in kept indices (one per unique issue
-    // is already handled by the prompt, so just take all non-kept)
-    if (droppedRepresentatives.length === 0 && droppedCount > 0) {
-      droppedRepresentatives = findings
-        .filter((_, i) => !keptIndices.has(i))
-        .map(({ voter, ...rest }) => rest);
-    }
+    // If Haiku returned only a plain array (old format), we don't have
+    // grouped dropped representatives — leave empty rather than dumping
+    // all non-kept findings (which includes redundant voter copies of
+    // issues that *were* kept).
 
     console.log(
       `Consensus: kept ${kept.length}, dropped ${droppedCount} (${droppedRepresentatives.length} distinct) (${threshold}/${voterCount} voter threshold)`,
