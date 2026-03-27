@@ -586,10 +586,10 @@ async function main() {
         prNumber,
         botLogin,
       );
+      console.log(
+        `Thumbs-down learning: found ${rejected.length} rejected finding(s) (bot: ${botLogin})`,
+      );
       if (rejected.length > 0) {
-        console.log(
-          `Found ${rejected.length} thumbs-down reaction(s) — learning suppressions`,
-        );
         const newSuppressions = await generateSuppressions(rejected, {
           apiKey,
           baseUrl: anthropicBaseUrl,

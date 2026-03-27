@@ -390,7 +390,9 @@ async function resolvePreviousReviewHeroThreads(prNumber, botLogin) {
   for (const thread of threads) {
     if (thread.isResolved) continue;
     const author = thread.comments.nodes[0]?.author?.login;
-    if (author !== botLogin) continue;
+    // GraphQL returns login without "[bot]" suffix, REST includes it
+    const botBase = botLogin.replace(/\[bot\]$/, "");
+    if (author !== botLogin && author !== botBase) continue;
 
     try {
       await githubGraphQL(
@@ -596,15 +598,32 @@ async function main() {
   }
 
   // ── Apply voter consensus ─────────────────────────────────────────────
-  // Each agent runs voterCount independent voters. The threshold should be
-  // based on voterCount, not the total unique voter IDs across all agents
-  // (which would be N×voterCount and make consensus impossible to reach).
-  const consensus = await applyConsensus(allFindings, voterCount, {
-    apiKey,
-    baseUrl: anthropicBaseUrl,
-  });
-  let findings = consensus.kept;
-  const consensusDropped = consensus.dropped;
+  // Apply consensus per agent so that cross-agent findings about the same
+  // line aren't incorrectly grouped and dropped. Each agent's voters are
+  // independent — a bugs voter and a performance voter flagging the same
+  // line are distinct findings, not duplicates.
+  let findings = [];
+  let consensusDropped = 0;
+
+  if (voterCount > 1) {
+    const findingsByAgent = new Map();
+    for (const f of allFindings) {
+      const agentKey = f.agent;
+      if (!findingsByAgent.has(agentKey)) findingsByAgent.set(agentKey, []);
+      findingsByAgent.get(agentKey).push(f);
+    }
+
+    for (const [agentKey, agentFindings] of findingsByAgent) {
+      const consensus = await applyConsensus(agentFindings, voterCount, {
+        apiKey,
+        baseUrl: anthropicBaseUrl,
+      });
+      findings.push(...consensus.kept);
+      consensusDropped += consensus.dropped;
+    }
+  } else {
+    findings = allFindings.map(({ voter, ...rest }) => rest);
+  }
 
   // ── Apply suppression filter ──────────────────────────────────────────
   const globalSuppressionsPath = process.env.GLOBAL_SUPPRESSIONS_PATH || "";
