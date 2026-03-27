@@ -65,6 +65,8 @@ export function saveStats(stats) {
 export async function generateReport(repo, prNumber, token, history = loadHistory()) {
   const recent = history.slice(-50);
 
+  if (recent.length === 0) return { avgCost: 0, avgFindings: 0, totalRuns: 0 };
+
   let totalCost = 0;
   let totalFindings = 0;
   for (let i = 0; i < recent.length; i++) {
@@ -76,6 +78,10 @@ export async function generateReport(repo, prNumber, token, history = loadHistor
 
   const avgCost = totalCost / recent.length;
   const avgFindings = totalFindings / recent.length;
+
+  // Validate repo and prNumber before constructing URL
+  if (!/^\d+$/.test(prNumber)) throw new Error(`Invalid PR number: ${prNumber}`);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`Invalid repository: ${repo}`);
 
   // Post stats comment to PR
   const body = `## Review Hero Stats\n\nAvg cost: $${avgCost.toFixed(4)}\nAvg findings: ${avgFindings.toFixed(1)}\nTotal runs: ${recent.length}`;
@@ -122,7 +128,7 @@ if (process.argv[1] === import.meta.filename) {
   writeFileSync(STATS_DB_PATH, JSON.stringify(capped));
 
   if (pr) {
-    const report = generateReport(repo, pr, token, capped);
+    const report = await generateReport(repo, pr, token, capped);
     console.log(`Posted stats: avg $${report.avgCost.toFixed(4)}/run, ${report.avgFindings.toFixed(1)} findings/run`);
   }
 }
