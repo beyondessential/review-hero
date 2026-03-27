@@ -139,10 +139,10 @@ function parseAgentResult(filePath, agentKey, voter) {
 // ── Voter consensus ──────────────────────────────────────────────────────────
 
 /**
- * Apply voter consensus using Haiku to semantically determine whether
+ * Apply voter consensus using Sonnet to semantically determine whether
  * findings from different voters are about the same issue.
  *
- * Haiku receives all findings and returns which ones to keep — i.e. the
+ * Sonnet receives all findings and returns which ones to keep — i.e. the
  * deduplicated set of issues that a majority of voters agree on.
  *
  * Falls back to keeping all findings (stripped of voter tags) on error.
@@ -183,22 +183,27 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-sonnet-4-6-20250514",
         max_tokens: 2000,
         messages: [
           {
             role: "user",
             content: `You are deduplicating code review findings from ${voterCount} independent voters. Each voter reviewed the same code independently.
 
-IMPORTANT: Group findings about the SAME underlying issue together, even if they:
-- Are worded completely differently
-- Point to different but nearby lines (e.g. line 48 vs 55 in the same file)
-- Use different severity levels
-- Describe the same bug from different angles (e.g. "missing try/catch" vs "JSON.parse can throw")
+## Grouping rules
 
-The key question is: are two findings about the same root problem? If yes, they're the same group regardless of line number or wording.
+Two findings belong in the SAME group if they describe the same root problem, even if they:
+- Use completely different wording or framing
+- Reference different but nearby lines in the same file (e.g. line 48 vs 55)
+- Have different severity levels
+- Approach the issue from different angles (e.g. "missing try/catch" vs "JSON.parse can throw" vs "no error handling")
+- One is more specific than the other (e.g. "no validation" vs "no validation on JSON.parse input")
 
-For each group, check if at least ${threshold} distinct voters flagged it. Pick the single best-worded finding from each group as the representative.
+Two findings belong in DIFFERENT groups only if fixing one would NOT fix the other.
+
+## Threshold
+
+For each group, count the number of distinct voters (use the voter= tag). If >= ${threshold} distinct voters flagged it, keep the single best-worded finding as the representative.
 
 ## Findings
 ${findingsList}
