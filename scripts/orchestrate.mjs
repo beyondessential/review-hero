@@ -149,12 +149,12 @@ function parseAgentResult(filePath, agentKey, voter) {
  */
 async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
   if (voterCount <= 1) {
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
+    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
   }
 
   if (!apiKey) {
     console.warn("No API key for consensus — keeping all findings");
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
+    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
   }
 
   const threshold = Math.floor(voterCount / 2) + 1;
@@ -190,12 +190,16 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
             role: "user",
             content: `You are deduplicating code review findings from ${voterCount} independent voters. Each voter reviewed the same code independently. Findings from different voters about the SAME issue (even if worded differently or at slightly different lines) should be grouped together.
 
-For each group of findings about the same issue, check if at least ${threshold} distinct voters flagged it. If yes, keep the single best-worded finding from that group. If fewer than ${threshold} voters flagged it, drop the entire group.
+For each group of findings about the same issue, check if at least ${threshold} distinct voters flagged it. Pick the single best-worded finding from each group as the representative.
 
 ## Findings
 ${findingsList}
 
-Output a JSON array of the finding indices (0-based) to KEEP — one per distinct issue that meets the ${threshold}-voter threshold. Pick the best-worded finding from each group. Output \`[]\` if none meet the threshold.`,
+Output a JSON object with two arrays of finding indices (0-based):
+- "kept": indices of the best-worded finding from each group that meets the ${threshold}-voter threshold
+- "dropped": indices of the best-worded finding from each group that does NOT meet the threshold
+
+Example: {"kept": [0, 3], "dropped": [5]}`,
           },
         ],
       }),
@@ -208,37 +212,57 @@ Output a JSON array of the finding indices (0-based) to KEEP — one per distinc
     const result = await response.json();
     const text = result.content?.[0]?.text ?? "";
 
-    const match = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
+    // Parse response — try JSON object with kept/dropped arrays first,
+    // fall back to plain array (kept only) for backwards compat
+    let keptIndices;
+    let droppedRepresentatives = [];
 
-    if (!match) {
-      console.warn("Consensus returned no parseable array — keeping all");
-      return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
-    }
+    const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < findings.length;
 
-    const keptIndices = new Set(
-      JSON.parse(match[0])
-        .map(Number)
-        .filter((n) => Number.isInteger(n) && n >= 0 && n < findings.length),
-    );
-
-    const kept = [];
-    let dropped = 0;
-    for (let i = 0; i < findings.length; i++) {
-      if (keptIndices.has(i)) {
-        const { voter, ...rest } = findings[i];
-        kept.push(rest);
-      } else {
-        dropped++;
+    const objMatch = text.match(/\{[^}]*"kept"\s*:\s*\[[\s\S]*?\][\s\S]*?\}/);
+    if (objMatch) {
+      try {
+        const parsed = JSON.parse(objMatch[0]);
+        keptIndices = new Set((parsed.kept ?? []).map(Number).filter(validIndex));
+        const droppedIndices = new Set((parsed.dropped ?? []).map(Number).filter(validIndex));
+        droppedRepresentatives = findings
+          .filter((_, i) => droppedIndices.has(i))
+          .map(({ voter, ...rest }) => rest);
+      } catch {
+        // Fall through to array match
       }
     }
 
+    if (!keptIndices) {
+      const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
+      if (!arrMatch) {
+        console.warn("Consensus returned no parseable output — keeping all");
+        return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
+      }
+      keptIndices = new Set(JSON.parse(arrMatch[0]).map(Number).filter(validIndex));
+    }
+
+    const kept = findings
+      .filter((_, i) => keptIndices.has(i))
+      .map(({ voter, ...rest }) => rest);
+    const droppedCount = findings.length - kept.length;
+
+    // If Haiku didn't return dropped representatives, build them from
+    // non-kept findings that aren't in kept indices (one per unique issue
+    // is already handled by the prompt, so just take all non-kept)
+    if (droppedRepresentatives.length === 0 && droppedCount > 0) {
+      droppedRepresentatives = findings
+        .filter((_, i) => !keptIndices.has(i))
+        .map(({ voter, ...rest }) => rest);
+    }
+
     console.log(
-      `Consensus: kept ${kept.length} findings, dropped ${dropped} (${threshold}/${voterCount} voter threshold)`,
+      `Consensus: kept ${kept.length}, dropped ${droppedCount} (${droppedRepresentatives.length} distinct) (${threshold}/${voterCount} voter threshold)`,
     );
-    return { kept, dropped };
+    return { kept, dropped: droppedCount, droppedFindings: droppedRepresentatives };
   } catch (err) {
     console.warn(`Consensus filter failed, keeping all: ${err.message}`);
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0 };
+    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
   }
 }
 
@@ -604,6 +628,7 @@ async function main() {
   // line are distinct findings, not duplicates.
   let findings = [];
   let consensusDropped = 0;
+  let allDroppedFindings = [];
 
   if (voterCount > 1) {
     const findingsByAgent = new Map();
@@ -620,6 +645,7 @@ async function main() {
       });
       findings.push(...consensus.kept);
       consensusDropped += consensus.dropped;
+      allDroppedFindings.push(...consensus.droppedFindings);
     }
   } else {
     findings = allFindings.map(({ voter, ...rest }) => rest);
@@ -729,7 +755,32 @@ async function main() {
   }
 
   if (findings.length === 0) {
-    summaryParts.push("\n\nNo issues found. Looks good! ✅");
+    summaryParts.push("\n\nNo issues found. Looks good!");
+  }
+
+  // Show dropped findings in a collapsed section — these are already
+  // deduplicated by the consensus step (one representative per group)
+  if (allDroppedFindings.length > 0) {
+    const sorted = [...allDroppedFindings].sort((a, b) => {
+      if (a.file !== b.file) return a.file.localeCompare(b.file);
+      return a.line - b.line;
+    });
+
+    const droppedRows = sorted.map((f) => {
+      const agentName = agentNames[f.agent] ?? f.agent;
+      const shortComment =
+        f.comment.length > 200 ? `${f.comment.slice(0, 197)}...` : f.comment;
+      const escaped = shortComment
+        .replace(/\\/g, "\\\\")
+        .replace(/\|/g, "\\|")
+        .replace(/\n/g, " ");
+      return `| \`${f.file}:${f.line}\` | ${agentName} | \`${f.severity}\` | ${escaped} |`;
+    }).join("\n");
+
+    summaryParts.push(
+      `\n\n<details>\n<summary>Below consensus threshold (${sorted.length} finding${sorted.length === 1 ? "" : "s"} from individual voters, not confirmed by majority)</summary>\n\n` +
+      `| Location | Agent | Severity | Comment |\n|----------|-------|----------|---------|\n${droppedRows}\n\n</details>`,
+    );
   }
 
   const nitpickTable = buildSummaryTable(nitpicks, agentNames);
