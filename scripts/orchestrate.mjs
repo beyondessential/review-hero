@@ -249,31 +249,39 @@ Example: [0, 3]`,
   }
 }
 
+// ── Cross-agent grouping (Phase 2) ──────────────────────────────────────────
+
 /**
- * Phase 2: Cross-agent dedup — remove dropped findings that are substantively
- * the same as a kept finding from any agent.
- *
- * After per-agent consensus, a finding might be dropped by one agent (e.g.
- * Security flagged "JSON.parse no try/catch" but only 1 voter) while the same
- * underlying issue was kept by another agent (e.g. Bugs). These shouldn't
- * appear in the "below threshold" list since the issue IS being reported.
+ * Group ALL findings (kept + dropped) across all agents using Sonnet.
+ * Picks the best-worded comment per group. Returns grouped findings split
+ * into kept groups (any member passed consensus) and dropped groups (none did).
  */
-async function crossAgentDedup(kept, dropped, { apiKey, baseUrl }) {
-  if (dropped.length === 0 || kept.length === 0 || !apiKey) return dropped;
+async function groupAllFindings(kept, dropped, { apiKey, baseUrl }) {
+  const all = [
+    ...kept.map((f) => ({ ...f, _status: "kept" })),
+    ...dropped.map((f) => ({ ...f, _status: "dropped" })),
+  ];
 
-  const formatFinding = (f, i, tag) => {
-    const safeComment = f.comment
-      .slice(0, 300)
-      .replace(/[\r\n]+/g, " ")
-      .replace(/<\/?comment>/gi, "");
-    const safeFile = String(f.file)
-      .replace(/[\r\n]+/g, " ")
-      .replace(/<\/?comment>/gi, "");
-    return `${tag}${i}. [${f.severity}] ${safeFile}:${f.line} — <comment>${safeComment}</comment>`;
-  };
+  if (all.length <= 1 || !apiKey) {
+    return {
+      keptGroups: kept.map((f) => ({ representative: f, members: [f] })),
+      droppedGroups: dropped.map((f) => ({ representative: f, members: [f] })),
+    };
+  }
 
-  const keptList = kept.map((f, i) => formatFinding(f, i, "K")).join("\n");
-  const droppedList = dropped.map((f, i) => formatFinding(f, i, "D")).join("\n");
+  const findingsList = all
+    .map((f, i) => {
+      const safeComment = f.comment
+        .slice(0, 300)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/<\/?comment>/gi, "");
+      const safeFile = String(f.file)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/<\/?comment>/gi, "");
+      const tag = f._status === "kept" ? "KEPT" : "DROPPED";
+      return `${i}. [${tag}] [${f.agent}] [${f.severity}] ${safeFile}:${f.line} — <comment>${safeComment}</comment>`;
+    })
+    .join("\n");
 
   try {
     const response = await fetch(`${baseUrl}/v1/messages`, {
@@ -289,22 +297,26 @@ async function crossAgentDedup(kept, dropped, { apiKey, baseUrl }) {
         messages: [
           {
             role: "user",
-            content: `You are filtering a list of dropped code review findings. Some dropped findings describe the same underlying issue as a kept finding from a different review agent.
+            content: `You are grouping code review findings from multiple independent review agents. Some findings passed voter consensus (KEPT), others did not (DROPPED). Different agents may have flagged the same underlying issue.
 
-## Kept findings (already being reported)
-${keptList}
+## Grouping rules
 
-## Dropped findings (candidates for removal)
-${droppedList}
+Two findings belong in the SAME group if they describe the same root problem, even if they:
+- Come from different agents (bugs, security, performance, etc.)
+- Have different KEPT/DROPPED status
+- Use different wording, severity, or framing
+- Reference different but nearby lines in the same file
+- Approach the issue from different angles (e.g. "missing try/catch" vs "JSON.parse can throw")
 
-For each dropped finding (D0, D1, ...), determine if it describes the SAME root problem as any kept finding (K0, K1, ...). Two findings are about the same root problem if fixing one would fix the other, even if they:
-- Come from different review agents (bugs vs security vs performance)
-- Use different wording or severity
-- Reference nearby but different lines
+Two findings belong in DIFFERENT groups only if fixing one would NOT fix the other.
 
-Output a JSON array of dropped finding indices (0-based) that are NOT covered by any kept finding — i.e. genuinely unique issues that were below threshold.
+For each group, pick the single best-worded finding as the representative.
 
-Example: [1, 4] means D1 and D4 are unique; all others are covered by kept findings.`,
+## Findings
+${findingsList}
+
+Output a JSON object mapping representative index to array of group member indices.
+Example: {"0": [0, 3, 7], "2": [2], "5": [5, 8]}`,
           },
         ],
       }),
@@ -317,74 +329,73 @@ Example: [1, 4] means D1 and D4 are unique; all others are covered by kept findi
     const result = await response.json();
     const text = result.content?.[0]?.text ?? "";
 
-    const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
-    if (!arrMatch) {
-      console.warn("Cross-agent dedup returned no parseable output — keeping all dropped");
-      return dropped;
+    const objMatch = text.match(/\{[\s\S]*\}/);
+    if (!objMatch) {
+      throw new Error("No parseable JSON object in response");
     }
 
-    const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < dropped.length;
-    const uniqueIndices = new Set(JSON.parse(arrMatch[0]).map(Number).filter(validIndex));
-    const filtered = dropped.filter((_, i) => uniqueIndices.has(i));
-    const removed = dropped.length - filtered.length;
+    const parsed = JSON.parse(objMatch[0]);
+    const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < all.length;
+    const keptGroups = [];
+    const droppedGroups = [];
+    const assigned = new Set();
 
-    console.log(
-      `Cross-agent dedup: ${removed} dropped finding(s) covered by kept findings, ${filtered.length} genuinely unique`,
-    );
-    return filtered;
-  } catch (err) {
-    console.warn(`Cross-agent dedup failed, keeping all dropped: ${err.message}`);
-    return dropped;
-  }
-}
+    for (const [repStr, members] of Object.entries(parsed)) {
+      const rep = Number(repStr);
+      if (!validIndex(rep) || !Array.isArray(members)) continue;
+      const validMembers = members.map(Number).filter(validIndex);
+      if (validMembers.length === 0) continue;
 
-// ── Deduplication ────────────────────────────────────────────────────────────
+      const allMembers = [rep, ...validMembers.filter((m) => m !== rep)];
+      for (const m of allMembers) assigned.add(m);
 
-function deduplicateFindings(findings) {
-  const sortedFindings = [...findings].sort((a, b) => {
-    if (a.file !== b.file) return a.file.localeCompare(b.file);
-    return a.line - b.line;
-  });
+      const memberFindings = allMembers.map((m) => all[m]);
+      const hasKept = memberFindings.some((f) => f._status === "kept");
+      // Strip _status before returning
+      const clean = (f) => { const { _status, ...rest } = f; return rest; };
+      const group = {
+        representative: clean(all[rep]),
+        members: memberFindings.map(clean),
+      };
 
-  // Group findings by (file, approximate line) and merge overlapping ones
-  const groups = new Map();
-
-  for (const finding of sortedFindings) {
-    let merged = false;
-    for (const group of groups.values()) {
-      if (
-        group[0].file === finding.file &&
-        Math.abs(group[0].line - finding.line) <= 3
-      ) {
-        const isDuplicate = group.some(
-          (g) => g.agent === finding.agent && g.comment === finding.comment,
-        );
-        if (!isDuplicate) {
-          group.push(finding);
-        }
-        merged = true;
-        break;
+      if (hasKept) {
+        keptGroups.push(group);
+      } else {
+        droppedGroups.push(group);
       }
     }
-    if (!merged) {
-      const key = `${finding.file}:${finding.line}`;
-      groups.set(key, [finding]);
-    }
-  }
 
-  return groups;
+    // Add unassigned findings
+    for (let i = 0; i < all.length; i++) {
+      if (assigned.has(i)) continue;
+      const { _status, ...rest } = all[i];
+      const group = { representative: rest, members: [rest] };
+      if (_status === "kept") {
+        keptGroups.push(group);
+      } else {
+        droppedGroups.push(group);
+      }
+    }
+
+    console.log(
+      `Cross-agent grouping: ${all.length} findings → ${keptGroups.length} kept groups, ${droppedGroups.length} dropped groups`,
+    );
+    return { keptGroups, droppedGroups };
+  } catch (err) {
+    console.warn(`Cross-agent grouping failed: ${err.message}`);
+    const clean = (f) => { const { _status, ...rest } = f; return rest; };
+    return {
+      keptGroups: kept.map((f) => ({ representative: clean(f), members: [clean(f)] })),
+      droppedGroups: dropped.map((f) => ({ representative: clean(f), members: [clean(f)] })),
+    };
+  }
 }
 
 // ── Comment formatting ───────────────────────────────────────────────────────
 
-function buildInlineComment(group, agentNames) {
-  return group
-    .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity])
-    .map((f) => {
-      const agentName = agentNames[f.agent] ?? f.agent;
-      return `**[${agentName}]** \`${f.severity}\`\n\n${f.comment}`;
-    })
-    .join("\n\n---\n\n");
+function buildInlineComment(f, agentNames) {
+  const agentName = agentNames[f.agent] ?? f.agent;
+  return `**[${agentName}]** \`${f.severity}\`\n\n${f.comment}`;
 }
 
 function buildSummaryTable(nitpicks, agentNames) {
@@ -717,16 +728,6 @@ async function main() {
       findings.push(...consensus.kept);
       allDroppedFindings.push(...consensus.droppedFindings);
     }
-
-    // Phase 2: Remove dropped findings that are substantively the same as a
-    // kept finding from any agent. A Security finding about "JSON.parse no
-    // try/catch" shouldn't be in the dropped list if Bugs already kept it.
-    if (allDroppedFindings.length > 0 && findings.length > 0) {
-      allDroppedFindings = await crossAgentDedup(findings, allDroppedFindings, {
-        apiKey,
-        baseUrl: anthropicBaseUrl,
-      });
-    }
   } else {
     findings = allFindings.map(({ voter, ...rest }) => rest);
   }
@@ -762,32 +763,32 @@ async function main() {
   }
 
 
-  // ── Deduplicate ───────────────────────────────────────────────────────
-  const groups = deduplicateFindings(findings);
+  // ── Phase 2: Cross-agent grouping ────────────────────────────────────
+  // Group ALL findings (kept + dropped) across all agents using Sonnet.
+  // Groups where any member passed consensus → post inline.
+  // Groups where no member passed → show in dropdown.
+  const { keptGroups, droppedGroups } = await groupAllFindings(
+    findings,
+    allDroppedFindings,
+    { apiKey, baseUrl: anthropicBaseUrl },
+  );
 
-  // Split by severity
+  // Split kept groups by severity
   const inlineComments = [];
   const nitpicks = [];
   const counts = { critical: 0, suggestion: 0, nitpick: 0 };
 
-  for (const [, group] of groups) {
-    const highestSeverity = group.reduce(
-      (min, f) =>
-        SEVERITY_ORDER[f.severity] < SEVERITY_ORDER[min] ? f.severity : min,
-      "nitpick",
-    );
+  for (const group of keptGroups) {
+    const f = group.representative;
+    counts[f.severity]++;
 
-    for (const f of group) {
-      counts[f.severity]++;
-    }
-
-    if (highestSeverity === "nitpick") {
-      nitpicks.push(...group);
+    if (f.severity === "nitpick") {
+      nitpicks.push(f);
     } else {
       inlineComments.push({
-        path: group[0].file,
-        line: group[0].line,
-        body: buildInlineComment(group, agentNames),
+        path: f.file,
+        line: f.line,
+        body: buildInlineComment(f, agentNames),
       });
     }
   }
@@ -800,7 +801,6 @@ async function main() {
       console.log(`Posted ${inlineComments.length} inline review comments`);
     } catch (err) {
       console.error(`Failed to post inline review: ${err.message}`);
-      // Fall back to posting inline comments in the summary
       const fallbackLines = inlineComments
         .map((c) => `**\`${c.path}:${c.line}\`**\n\n${c.body}`)
         .join("\n\n---\n\n");
@@ -824,8 +824,8 @@ async function main() {
   if (voterCount > 1) {
     filterStats.push(`consensus ${voterCount} voters`);
   }
-  if (allDroppedFindings.length > 0) {
-    filterStats.push(`${allDroppedFindings.length} below threshold`);
+  if (droppedGroups.length > 0) {
+    filterStats.push(`${droppedGroups.length} below threshold`);
   }
   if (suppressedCount > 0) {
     filterStats.push(`${suppressedCount} suppressed`);
@@ -834,19 +834,20 @@ async function main() {
     summaryParts.push(` | Filtering: ${filterStats.join(", ")}`);
   }
 
-  if (findings.length === 0) {
+  if (keptGroups.length === 0) {
     summaryParts.push("\n\nNo issues found. Looks good!");
   }
 
-  // Show dropped findings in a collapsed section — all individual voter
-  // findings that didn't meet the consensus threshold
-  if (allDroppedFindings.length > 0) {
-    const sorted = [...allDroppedFindings].sort((a, b) => {
-      if (a.file !== b.file) return a.file.localeCompare(b.file);
-      return a.line - b.line;
+  // Show dropped groups in a collapsed section
+  if (droppedGroups.length > 0) {
+    const sorted = [...droppedGroups].sort((a, b) => {
+      const fa = a.representative, fb = b.representative;
+      if (fa.file !== fb.file) return fa.file.localeCompare(fb.file);
+      return fa.line - fb.line;
     });
 
-    const droppedRows = sorted.map((f) => {
+    const droppedRows = sorted.map((group) => {
+      const f = group.representative;
       const agentName = agentNames[f.agent] ?? f.agent;
       const shortComment =
         f.comment.length > 200 ? `${f.comment.slice(0, 197)}...` : f.comment;
@@ -858,7 +859,7 @@ async function main() {
     }).join("\n");
 
     summaryParts.push(
-      `\n\n<details>\n<summary>Below consensus threshold (${sorted.length} finding${sorted.length === 1 ? "" : "s"} from individual voters, not confirmed by majority)</summary>\n\n` +
+      `\n\n<details>\n<summary>Below consensus threshold (${sorted.length} unique issue${sorted.length === 1 ? "" : "s"} not confirmed by majority)</summary>\n\n` +
       `| Location | Agent | Severity | Comment |\n|----------|-------|----------|---------|\n${droppedRows}\n\n</details>`,
     );
   }
@@ -868,14 +869,11 @@ async function main() {
     summaryParts.push(`\n\n${nitpickTable}`);
   }
 
-  // Collapse each dedup group into a single item so the local fix prompt
-  // doesn't contain near-duplicate entries that were already merged during
-  // deduplication.  Each group shares a (file, ~line) so we take the first
-  // finding's location and join the unique comments.
-  const dedupedFindings = [...groups.values()].map((group) => ({
-    file: group[0].file,
-    line: group[0].line,
-    comment: [...new Set(group.map((f) => f.comment))].join("\n\n"),
+  // Use representative comments for the local fix prompt
+  const dedupedFindings = keptGroups.map((g) => ({
+    file: g.representative.file,
+    line: g.representative.line,
+    comment: g.representative.comment,
   }));
 
   const localPrompt = buildLocalFixPrompt(dedupedFindings);
