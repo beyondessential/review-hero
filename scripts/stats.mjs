@@ -21,8 +21,13 @@ export function collectStats(artifactsDir, agentNames) {
 
   for (const key of Object.keys(agentNames)) {
     const resultPath = join(artifactsDir, `${key}-result.json`);
-    const raw = readFileSync(resultPath, "utf-8");
-    const parsed = JSON.parse(raw);
+    let parsed;
+    try {
+      const raw = readFileSync(resultPath, "utf-8");
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
     const findings = parsed.result || parsed;
 
     stats.agents[key] = {
@@ -47,16 +52,18 @@ export function loadHistory() {
   return JSON.parse(data);
 }
 
+const HISTORY_CAP = 1000;
+
 export function saveStats(stats) {
   const history = loadHistory();
   history.push(stats);
-  writeFileSync(STATS_DB_PATH, JSON.stringify(history));
+  const capped = history.slice(-HISTORY_CAP);
+  writeFileSync(STATS_DB_PATH, JSON.stringify(capped));
 }
 
 // ── Reporting ───────────────────────────────────────────────────────────────
 
-export function generateReport(repo, prNumber, token) {
-  const history = loadHistory();
+export function generateReport(repo, prNumber, token, history = loadHistory()) {
   const recent = history.slice(-50);
 
   let totalCost = 0;
@@ -104,10 +111,13 @@ if (process.argv[1] === import.meta.filename) {
   const agentNames = JSON.parse(process.env.AGENT_NAMES || "{}");
 
   const stats = collectStats(artifactsDir, agentNames);
-  saveStats(stats);
+  const history = loadHistory();
+  history.push(stats);
+  const capped = history.slice(-HISTORY_CAP);
+  writeFileSync(STATS_DB_PATH, JSON.stringify(capped));
 
   if (pr) {
-    const report = generateReport(repo, pr, token);
+    const report = generateReport(repo, pr, token, capped);
     console.log(`Posted stats: avg $${report.avgCost.toFixed(4)}/run, ${report.avgFindings.toFixed(1)} findings/run`);
   }
 }
