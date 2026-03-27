@@ -183,7 +183,7 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 2000,
         messages: [
           {
