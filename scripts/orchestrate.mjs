@@ -249,6 +249,95 @@ Example: [0, 3]`,
   }
 }
 
+/**
+ * Phase 2: Cross-agent dedup — remove dropped findings that are substantively
+ * the same as a kept finding from any agent.
+ *
+ * After per-agent consensus, a finding might be dropped by one agent (e.g.
+ * Security flagged "JSON.parse no try/catch" but only 1 voter) while the same
+ * underlying issue was kept by another agent (e.g. Bugs). These shouldn't
+ * appear in the "below threshold" list since the issue IS being reported.
+ */
+async function crossAgentDedup(kept, dropped, { apiKey, baseUrl }) {
+  if (dropped.length === 0 || kept.length === 0 || !apiKey) return dropped;
+
+  const formatFinding = (f, i, tag) => {
+    const safeComment = f.comment
+      .slice(0, 300)
+      .replace(/[\r\n]+/g, " ")
+      .replace(/<\/?comment>/gi, "");
+    const safeFile = String(f.file)
+      .replace(/[\r\n]+/g, " ")
+      .replace(/<\/?comment>/gi, "");
+    return `${tag}${i}. [${f.severity}] ${safeFile}:${f.line} — <comment>${safeComment}</comment>`;
+  };
+
+  const keptList = kept.map((f, i) => formatFinding(f, i, "K")).join("\n");
+  const droppedList = dropped.map((f, i) => formatFinding(f, i, "D")).join("\n");
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        messages: [
+          {
+            role: "user",
+            content: `You are filtering a list of dropped code review findings. Some dropped findings describe the same underlying issue as a kept finding from a different review agent.
+
+## Kept findings (already being reported)
+${keptList}
+
+## Dropped findings (candidates for removal)
+${droppedList}
+
+For each dropped finding (D0, D1, ...), determine if it describes the SAME root problem as any kept finding (K0, K1, ...). Two findings are about the same root problem if fixing one would fix the other, even if they:
+- Come from different review agents (bugs vs security vs performance)
+- Use different wording or severity
+- Reference nearby but different lines
+
+Output a JSON array of dropped finding indices (0-based) that are NOT covered by any kept finding — i.e. genuinely unique issues that were below threshold.
+
+Example: [1, 4] means D1 and D4 are unique; all others are covered by kept findings.`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API ${response.status}: ${await response.text()}`);
+    }
+
+    const result = await response.json();
+    const text = result.content?.[0]?.text ?? "";
+
+    const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
+    if (!arrMatch) {
+      console.warn("Cross-agent dedup returned no parseable output — keeping all dropped");
+      return dropped;
+    }
+
+    const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < dropped.length;
+    const uniqueIndices = new Set(JSON.parse(arrMatch[0]).map(Number).filter(validIndex));
+    const filtered = dropped.filter((_, i) => uniqueIndices.has(i));
+    const removed = dropped.length - filtered.length;
+
+    console.log(
+      `Cross-agent dedup: ${removed} dropped finding(s) covered by kept findings, ${filtered.length} genuinely unique`,
+    );
+    return filtered;
+  } catch (err) {
+    console.warn(`Cross-agent dedup failed, keeping all dropped: ${err.message}`);
+    return dropped;
+  }
+}
+
 // ── Deduplication ────────────────────────────────────────────────────────────
 
 function deduplicateFindings(findings) {
@@ -627,6 +716,16 @@ async function main() {
       });
       findings.push(...consensus.kept);
       allDroppedFindings.push(...consensus.droppedFindings);
+    }
+
+    // Phase 2: Remove dropped findings that are substantively the same as a
+    // kept finding from any agent. A Security finding about "JSON.parse no
+    // try/catch" shouldn't be in the dropped list if Bugs already kept it.
+    if (allDroppedFindings.length > 0 && findings.length > 0) {
+      allDroppedFindings = await crossAgentDedup(findings, allDroppedFindings, {
+        apiKey,
+        baseUrl: anthropicBaseUrl,
+      });
     }
   } else {
     findings = allFindings.map(({ voter, ...rest }) => rest);
