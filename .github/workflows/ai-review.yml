@@ -9,5 +9,5 @@ permissions:
 
 jobs:
   review:
-    uses: beyondessential/review-hero/.github/workflows/review.yml@v1
+    uses: ./.github/workflows/review.yml
     secrets: inherit
