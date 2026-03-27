@@ -11,4 +11,6 @@ permissions:
 jobs:
   auto-fix:
     uses: ./.github/workflows/auto-fix.yml
+    with:
+      ref: ${{ github.head_ref }}
     secrets: inherit
