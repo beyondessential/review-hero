@@ -6,7 +6,6 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { join } from "node:path";
 
 // ── Stats collection ────────────────────────────────────────────────────────
@@ -63,14 +62,14 @@ export function saveStats(stats) {
 
 // ── Reporting ───────────────────────────────────────────────────────────────
 
-export function generateReport(repo, prNumber, token, history = loadHistory()) {
+export async function generateReport(repo, prNumber, token, history = loadHistory()) {
   const recent = history.slice(-50);
 
   let totalCost = 0;
   let totalFindings = 0;
   for (let i = 0; i < recent.length; i++) {
     for (const agent of Object.values(recent[i].agents)) {
-      totalCost += agent.cost;
+      totalCost += agent.cost ?? 0;
       totalFindings += agent.findings;
     }
   }
@@ -81,8 +80,14 @@ export function generateReport(repo, prNumber, token, history = loadHistory()) {
   // Post stats comment to PR
   const body = `## Review Hero Stats\n\nAvg cost: $${avgCost.toFixed(4)}\nAvg findings: ${avgFindings.toFixed(1)}\nTotal runs: ${recent.length}`;
 
-  const cmd = `curl -X POST https://api.github.com/repos/${repo}/issues/${prNumber}/comments -H "Authorization: Bearer ${token}" -d '{"body": "${body}"}'`;
-  execSync(cmd);
+  await fetch(`https://api.github.com/repos/${repo}/issues/${prNumber}/comments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ body }),
+  });
 
   return { avgCost, avgFindings, totalRuns: recent.length };
 }
