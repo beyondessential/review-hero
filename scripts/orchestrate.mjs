@@ -329,12 +329,34 @@ Example: {"0": [0, 3, 7], "2": [2], "5": [5, 8]}`,
     const result = await response.json();
     const text = result.content?.[0]?.text ?? "";
 
-    const objMatch = text.match(/\{[\s\S]*\}/);
-    if (!objMatch) {
+    // Extract JSON object using bracket-pair scanning (not greedy regex,
+    // which would break if the LLM adds explanatory text with braces).
+    let parsed = null;
+    let searchFrom = 0;
+    while (searchFrom < text.length) {
+      const start = text.indexOf("{", searchFrom);
+      if (start === -1) break;
+      let searchEnd = text.length;
+      while (searchEnd > start) {
+        const end = text.lastIndexOf("}", searchEnd - 1);
+        if (end <= start) break;
+        try {
+          const candidate = JSON.parse(text.slice(start, end + 1));
+          if (typeof candidate === "object" && !Array.isArray(candidate)) {
+            parsed = candidate;
+            break;
+          }
+        } catch {
+          // Not valid JSON for this pair — try a shorter span
+        }
+        searchEnd = end;
+      }
+      if (parsed) break;
+      searchFrom = start + 1;
+    }
+    if (!parsed) {
       throw new Error("No parseable JSON object in response");
     }
-
-    const parsed = JSON.parse(objMatch[0]);
     const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < all.length;
     const keptGroups = [];
     const droppedGroups = [];
