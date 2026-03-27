@@ -188,9 +188,17 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
         messages: [
           {
             role: "user",
-            content: `You are deduplicating code review findings from ${voterCount} independent voters. Each voter reviewed the same code independently. Findings from different voters about the SAME issue (even if worded differently or at slightly different lines) should be grouped together.
+            content: `You are deduplicating code review findings from ${voterCount} independent voters. Each voter reviewed the same code independently.
 
-For each group of findings about the same issue, check if at least ${threshold} distinct voters flagged it. Pick the single best-worded finding from each group as the representative.
+IMPORTANT: Group findings about the SAME underlying issue together, even if they:
+- Are worded completely differently
+- Point to different but nearby lines (e.g. line 48 vs 55 in the same file)
+- Use different severity levels
+- Describe the same bug from different angles (e.g. "missing try/catch" vs "JSON.parse can throw")
+
+The key question is: are two findings about the same root problem? If yes, they're the same group regardless of line number or wording.
+
+For each group, check if at least ${threshold} distinct voters flagged it. Pick the single best-worded finding from each group as the representative.
 
 ## Findings
 ${findingsList}
