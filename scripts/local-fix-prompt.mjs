@@ -1,11 +1,5 @@
 import { format as prettify } from "prettier";
 
-const html = String.raw;
-
-async function formatHtml(str) {
-  return await prettify(str, { parser: "html" });
-}
-
 async function formatMarkdown(str) {
   return await prettify(str, { parser: "markdown", proseWrap: "always" });
 }
@@ -40,14 +34,17 @@ export async function buildLocalFixPrompt(comments) {
         `${openingFence}${await formatMarkdown(item)}${closingFence}`,
     ),
   );
-  const prompt =
-    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n***\n\n" +
-    codeBlocks.join("\n\n***\n\n");
 
-  return await formatHtml(html`
+  return await formatMarkdown(`
     <details>
       <summary>Local fix prompt (copy to your coding agent)</summary>
-      ${prompt}
+
+      Fix these issues identified on the pull request. One commit per issue
+      fixed.
+
+      ***
+
+      ${codeBlocks.join("\n\n***\n\n")}
     </details>
   `);
 }
