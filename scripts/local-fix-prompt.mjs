@@ -4,6 +4,12 @@ async function formatMarkdown(str) {
   return await prettify(str, { parser: "markdown", proseWrap: "always" });
 }
 
+function fence(str) {
+  const openingFence = "```md\n";
+  const closingFence = "\n```";
+  return `${openingFence}${str}${closingFence}`;
+}
+
 /**
  * Review Hero — Local fix prompt builder
  *
@@ -26,13 +32,18 @@ export async function buildLocalFixPrompt(comments) {
     items.push(`\`${loc}\`: ${sanitise(c.comment)}`);
   }
 
-  const openingFence = "```md\n";
-  const closingFence = "\n```";
-  const codeBlocks = items.map(
-    (item) => `${openingFence}${item}${closingFence}`,
+  const codeBlocks = await Promise.all(
+    items.map(async (item) => {
+      try {
+        return fence(await formatMarkdown(item));
+      } catch {
+        // Invalid Markdown (somehow) but let GitHub try syntax highlighting anyway
+        return fence(item);
+      }
+    }),
   );
 
-  return await formatMarkdown(`
+  return `
 <details>
   <summary>Local fix prompt (copy to your coding agent)</summary>
 
@@ -41,7 +52,7 @@ export async function buildLocalFixPrompt(comments) {
 
   ${codeBlocks.join("\n\n")}
 </details>
-`);
+`;
 }
 
 /**
