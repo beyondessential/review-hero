@@ -28,11 +28,8 @@ export async function buildLocalFixPrompt(comments) {
 
   const openingFence = "```md\n";
   const closingFence = "\n```";
-  const codeBlocks = await Promise.all(
-    items.map(
-      async (item) =>
-        `${openingFence}${await formatMarkdown(item)}${closingFence}`,
-    ),
+  const codeBlocks = items.map(
+    (item) => `${openingFence}${item}${closingFence}`,
   );
 
   return await formatMarkdown(`
