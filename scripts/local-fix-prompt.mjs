@@ -32,10 +32,12 @@ export function buildLocalFixPrompt(comments) {
     items.push(`\`${loc}\`: ${sanitise(c.comment)}`);
   }
 
+  const openingFence = "```md\n";
+  const closingFence = "\n```";
   const prompt =
     "Fix these issues identified on the pull request. One commit per issue fixed.\n\n***\n\n" +
     items
-      .map((item) => html` <pre><code>${formatMarkdown(item)}</code></pre>`)
+      .map((item) => `${openingFence}${formatMarkdown(item)}${closingFence}`)
       .join("\n\n***\n\n");
 
   return formatHtml(html`
