@@ -2,12 +2,12 @@ import { format as prettify } from "prettier";
 
 const html = String.raw;
 
-function formatHtml(str) {
-  return prettify(str, { parser: "html" });
+async function formatHtml(str) {
+  return await prettify(str, { parser: "html" });
 }
 
-function formatMarkdown(str) {
-  return prettify(str, { parser: "markdown", proseWrap: "always" });
+async function formatMarkdown(str) {
+  return await prettify(str, { parser: "markdown", proseWrap: "always" });
 }
 
 /**
@@ -19,10 +19,10 @@ function formatMarkdown(str) {
  *
  * @param {Array<{file: string, line?: number, comment: string}>} comments
  *   Outstanding review comments.
- * @returns {string} Markdown string to append to a summary comment, or "" if
+ * @returns {Promise<string>} Markdown string to append to a summary comment, or "" if
  *   there is nothing to report.
  */
-export function buildLocalFixPrompt(comments) {
+export async function buildLocalFixPrompt(comments) {
   if (!comments?.length) return "";
 
   const items = [];
@@ -34,13 +34,17 @@ export function buildLocalFixPrompt(comments) {
 
   const openingFence = "```md\n";
   const closingFence = "\n```";
+  const codeBlocks = await Promise.all(
+    items.map(
+      async (item) =>
+        `${openingFence}${await formatMarkdown(item)}${closingFence}`,
+    ),
+  );
   const prompt =
     "Fix these issues identified on the pull request. One commit per issue fixed.\n\n***\n\n" +
-    items
-      .map((item) => `${openingFence}${formatMarkdown(item)}${closingFence}`)
-      .join("\n\n***\n\n");
+    codeBlocks.join("\n\n***\n\n");
 
-  return formatHtml(html`
+  return await formatHtml(html`
     <details>
       <summary>Local fix prompt (copy to your coding agent)</summary>
       ${prompt}

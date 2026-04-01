@@ -900,7 +900,7 @@ async function main() {
     comment: g.representative.comment,
   }));
 
-  const localPrompt = buildLocalFixPrompt(dedupedFindings);
+  const localPrompt = await buildLocalFixPrompt(dedupedFindings);
   if (localPrompt) {
     summaryParts.push(localPrompt);
   }
