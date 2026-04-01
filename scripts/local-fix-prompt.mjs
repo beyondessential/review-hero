@@ -36,17 +36,17 @@ export async function buildLocalFixPrompt(comments) {
   );
 
   return await formatMarkdown(`
-    <details>
-      <summary>Local fix prompt (copy to your coding agent)</summary>
+<details>
+  <summary>Local fix prompt (copy to your coding agent)</summary>
 
-      Fix these issues identified on the pull request. One commit per issue
-      fixed.
+  Fix these issues identified on the pull request. One commit per issue
+  fixed.
 
-      ***
+  ***
 
-      ${codeBlocks.join("\n\n***\n\n")}
-    </details>
-  `);
+  ${codeBlocks.join("\n\n***\n\n")}
+</details>
+`);
 }
 
 /**
