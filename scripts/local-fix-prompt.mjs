@@ -42,9 +42,7 @@ export async function buildLocalFixPrompt(comments) {
   Fix these issues identified on the pull request. One commit per issue
   fixed.
 
-  ***
-
-  ${codeBlocks.join("\n\n***\n\n")}
+  ${codeBlocks.join("\n\n")}
 </details>
 `);
 }
