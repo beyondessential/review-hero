@@ -43,16 +43,15 @@ export async function buildLocalFixPrompt(comments) {
     }),
   );
 
-  return `
-<details>
-  <summary>Local fix prompt (copy to your coding agent)</summary>
-
-  Fix these issues identified on the pull request. One commit per issue
-  fixed.
-
-  ${codeBlocks.join("\n\n")}
-</details>
-`;
+  return [
+    "<details>",
+    "<summary>Local fix prompt (copy to your coding agent)</summary>",
+    "",
+    "Fix these issues identified on the pull request. One commit per issue fixed.",
+    "",
+    `${codeBlocks.join("\n\n")}`,
+    "</details>",
+  ].join("\n");
 }
 
 /**
