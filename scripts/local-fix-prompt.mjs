@@ -1,3 +1,15 @@
+import { format as prettify } from "prettier";
+
+const html = String.raw;
+
+function formatHtml(str) {
+  return prettify(str, { parser: "html" });
+}
+
+function formatMarkdown(str) {
+  return prettify(str, { parser: "markdown", proseWrap: "always" });
+}
+
 /**
  * Review Hero — Local fix prompt builder
  *
@@ -21,14 +33,17 @@ export function buildLocalFixPrompt(comments) {
   }
 
   const prompt =
-    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n-------\n\n" +
-    items.join("\n\n-------\n\n");
+    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n***\n\n" +
+    items
+      .map((item) => html` <pre><code>${formatMarkdown(item)}</code></pre>`)
+      .join("\n\n***\n\n");
 
-  return (
-    "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +
-    prompt +
-    "\n\n</details>"
-  );
+  return formatHtml(html`
+    <details>
+      <summary>Local fix prompt (copy to your coding agent)</summary>
+      ${prompt}
+    </details>
+  `);
 }
 
 /**
