@@ -65,6 +65,11 @@ const BASE_AGENTS = {
     description:
       "Injection, XSS, auth bypass, sensitive data exposure, input validation, path traversal, SSRF, hardcoded secrets",
   },
+  "endpoint-tests": {
+    name: "Endpoint Integration Tests",
+    description:
+      "New or updated API endpoints, route handlers, or GraphQL resolvers that are missing corresponding integration tests",
+  },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
