@@ -68,7 +68,7 @@ const BASE_AGENTS = {
   "endpoint-tests": {
     name: "Endpoint Integration Tests",
     description:
-      "New or updated API endpoints, route handlers, or GraphQL resolvers that are missing corresponding integration tests",
+      "New or updated API endpoints or route handlers that are missing corresponding integration tests",
   },
   "e2e-tests": {
     name: "E2E Happy-Path Tests",
