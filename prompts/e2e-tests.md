@@ -29,4 +29,4 @@ Focus: ensure new or updated user-facing features have corresponding end-to-end 
 
 Point to the feature implementation line as `file`/`line`. In the comment: describe the user-facing flow, explain what E2E test is missing, and if existing E2E tests were found, reference them as examples to follow.
 
-Severity: `critical` for a missing happy-path E2E test on any new or changed feature; `suggestion` for additional flows that would benefit from E2E coverage but are not the primary happy path (e.g. alternate entry points, optional steps, secondary confirmation screens).
+Severity: `suggestion` for a missing happy-path E2E test on a new or changed feature; `critical` only if the flow handles auth/permissions and has no test at all; `nitpick` for nice-to-have additional coverage (alternate entry points, optional steps).
