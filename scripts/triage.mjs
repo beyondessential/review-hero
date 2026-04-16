@@ -70,6 +70,11 @@ const BASE_AGENTS = {
     description:
       "New or updated API endpoints, route handlers, or GraphQL resolvers that are missing corresponding integration tests",
   },
+  "e2e-tests": {
+    name: "E2E Happy-Path Tests",
+    description:
+      "New or updated user-facing features, pages, or flows that are missing corresponding end-to-end tests covering the happy path",
+  },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
