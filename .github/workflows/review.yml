@@ -365,8 +365,9 @@ jobs:
           # agent prompts (e.g. telling a security agent to "focus on
           # testing" pulls it off its actual job).
 
-          # Temporarily disable `set -e` so we can read $? and print the tail
-          # of the JSON file (stdout is redirected there; stderr stays in the log).
+          # Temporarily disable `set -e` so we can read PIPESTATUS: index 0 is the
+          # brace-group (prompt build), index 1 is claude — $? alone can blame claude
+          # when the real failure is a missing file in the brace group.
           set +e
           {
             if [ -n "$PROJECT_CONTEXT" ]; then
@@ -398,13 +399,23 @@ jobs:
               --max-turns ${{ needs.triage.outputs.max_turns }} \
               --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
             > "/tmp/${RESULT_NAME}-result.json"
-          rc=$?
+          pipe_statuses=("${PIPESTATUS[@]}")
+          prompt_rc=${pipe_statuses[0]:-0}
+          claude_rc=${pipe_statuses[1]:-0}
           set -e
-          if [ "$rc" -ne 0 ]; then
-            echo "::error::claude (${RESULT_NAME}) exited with status $rc (see stderr above in this step)"
-            echo "---- Last 200 lines of stdout (JSON file; errors sometimes land here) ----"
+          if [ "$prompt_rc" -ne 0 ] || [ "$claude_rc" -ne 0 ]; then
+            if [ "$prompt_rc" -ne 0 ]; then
+              echo "::error::Prompt build (stdin to claude) failed with exit status ${prompt_rc} for ${RESULT_NAME} — e.g. missing agent-prompt.md, agent prompt file, or pr-filtered.diff"
+            fi
+            if [ "$claude_rc" -ne 0 ]; then
+              echo "::error::claude (${RESULT_NAME}) exited with status ${claude_rc} (see stderr above in this step)"
+            fi
+            echo "---- Last 200 lines of claude stdout (result JSON; errors sometimes land here) ----"
             tail -n 200 "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || echo "(no output file)"
-            exit "$rc"
+            if [ "$prompt_rc" -ne 0 ]; then
+              exit "$prompt_rc"
+            fi
+            exit "$claude_rc"
           fi
 
       - name: Upload result
