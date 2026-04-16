@@ -65,6 +65,16 @@ const BASE_AGENTS = {
     description:
       "Injection, XSS, auth bypass, sensitive data exposure, input validation, path traversal, SSRF, hardcoded secrets",
   },
+  endpointTests: {
+    name: "Endpoint Integration Tests",
+    description:
+      "New or updated API endpoints or route handlers that are missing corresponding integration tests",
+  },
+  e2eTests: {
+    name: "E2E Happy-Path Tests",
+    description:
+      "New or updated user-facing features, pages, or flows that are missing corresponding end-to-end tests covering the happy path",
+  },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
