@@ -24,4 +24,4 @@ Focus: ensure new or updated API endpoints have corresponding integration tests.
 
 Point to the endpoint definition line as `file`/`line`. In the comment: name the endpoint, explain what test is missing, and if conventions were found, reference the pattern to follow.
 
-Severity: `suggestion` for missing happy-path test on a new endpoint; `critical` only if an endpoint handles auth/permissions and has no test at all.
+Severity: `critical` for a missing happy-path integration test on any new or changed endpoint; `suggestion` for additional coverage that would be valuable but is not the primary happy path (e.g. error responses, edge-case parameters, secondary content types).
