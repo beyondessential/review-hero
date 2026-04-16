@@ -9,7 +9,7 @@ Focus: ensure new or updated user-facing features have corresponding end-to-end 
 2. **Check for E2E coverage**: for each new or significantly modified user-facing feature, look for a corresponding E2E test that:
    - Drives the feature through the real UI (browser, mobile emulator, or equivalent)
    - Covers the primary happy path from start to finish
-   - Uses the project's E2E framework (e.g. Playwright, Cypress, Selenium, Detox, Maestro) and follows existing conventions
+   - Uses the project's E2E framework (e.g. Playwright) and follows existing conventions
    - Lives in the expected test directory per the project's structure
 
 3. **Flag missing E2E tests** when a user-facing feature is added or its flow changes materially (new steps, changed navigation, new required fields) with no accompanying E2E test change.
