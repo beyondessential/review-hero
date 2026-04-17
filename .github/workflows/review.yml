@@ -215,7 +215,16 @@ jobs:
           CALLER_REPO_DIR: caller
           VOTERS: ${{ inputs.voters }}
           DEFAULT_MODEL: ${{ inputs.model }}
-        run: node review-hero/scripts/triage.mjs
+        run: |
+          set -euo pipefail
+          set +e
+          node review-hero/scripts/triage.mjs 2>&1 | tee /tmp/triage-run.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::triage.mjs exited with status $rc (stdout/stderr are duplicated above via tee)"
+            exit "$rc"
+          fi
 
       # ── Prepare suppressions for downstream jobs ─────────────────────
       - name: Prepare suppressions
@@ -335,6 +344,8 @@ jobs:
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
         timeout-minutes: 20
         run: |
+          set -euo pipefail
+
           # Build result filename — include voter suffix when multi-voter
           RESULT_NAME="${{ matrix.agent.key }}"
           if [ -n "$VOTER" ]; then
@@ -354,6 +365,10 @@ jobs:
           # agent prompts (e.g. telling a security agent to "focus on
           # testing" pulls it off its actual job).
 
+          # Temporarily disable `set -e` so we can read PIPESTATUS: index 0 is the
+          # brace-group (prompt build), index 1 is claude — $? alone can blame claude
+          # when the real failure is a missing file in the brace group.
+          set +e
           {
             if [ -n "$PROJECT_CONTEXT" ]; then
               printf '## Project Context\n\n%s\n\n' "$PROJECT_CONTEXT"
@@ -384,6 +399,24 @@ jobs:
               --max-turns ${{ needs.triage.outputs.max_turns }} \
               --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
             > "/tmp/${RESULT_NAME}-result.json"
+          pipe_statuses=("${PIPESTATUS[@]}")
+          prompt_rc=${pipe_statuses[0]:-0}
+          claude_rc=${pipe_statuses[1]:-0}
+          set -e
+          if [ "$prompt_rc" -ne 0 ] || [ "$claude_rc" -ne 0 ]; then
+            if [ "$prompt_rc" -ne 0 ]; then
+              echo "::error::Prompt build (stdin to claude) failed with exit status ${prompt_rc} for ${RESULT_NAME} — e.g. missing agent-prompt.md, agent prompt file, or pr-filtered.diff"
+            fi
+            if [ "$claude_rc" -ne 0 ]; then
+              echo "::error::claude (${RESULT_NAME}) exited with status ${claude_rc} (see stderr above in this step)"
+            fi
+            echo "---- Last 200 lines of claude stdout (result JSON; errors sometimes land here) ----"
+            tail -n 200 "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || echo "(no output file)"
+            if [ "$prompt_rc" -ne 0 ]; then
+              exit "$prompt_rc"
+            fi
+            exit "$claude_rc"
+          fi
 
       - name: Upload result
         if: always()
@@ -459,4 +492,13 @@ jobs:
           GLOBAL_SUPPRESSIONS_PATH: review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
-        run: node review-hero/scripts/orchestrate.mjs
+        run: |
+          set -euo pipefail
+          set +e
+          node review-hero/scripts/orchestrate.mjs 2>&1 | tee /tmp/orchestrate-run.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::orchestrate.mjs exited with status $rc (stdout/stderr are duplicated above via tee)"
+            exit "$rc"
+          fi
