@@ -390,6 +390,8 @@ jobs:
               cat /tmp/ai-rules.md
             fi
 
+            printf '\n\n## Turn budget\n\nYou have at most %s agent turns for this review, including every tool call. Sample files selectively rather than reading them end-to-end, prioritise the highest-risk changes, and emit your final JSON findings array while you still have turns left. Returning fewer high-confidence findings on time is better than being cut off mid-exploration with no output.\n' "${{ needs.triage.outputs.max_turns }}"
+
             printf '\n\n## PR Title\n\n%s\n\n## PR Diff\n\n```diff\n' "$PR_TITLE"
             cat /tmp/pr-filtered.diff
             echo '```'
@@ -403,6 +405,21 @@ jobs:
           prompt_rc=${pipe_statuses[0]:-0}
           claude_rc=${pipe_statuses[1]:-0}
           set -e
+
+          # Claude CLI exits non-zero when it hits --max-turns. That's an
+          # expected budget exhaustion, not a CI failure — the agent ran out
+          # of turns before producing a final findings array. Leave the result
+          # file intact (the orchestrator's parser tolerates missing findings
+          # and will count the agent as non-contributing without erroring).
+          if [ "$claude_rc" -ne 0 ] && [ -s "/tmp/${RESULT_NAME}-result.json" ]; then
+            subtype=$(jq -r '.subtype // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || echo "")
+            if [ "$subtype" = "error_max_turns" ]; then
+              num_turns=$(jq -r '.num_turns // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || echo "")
+              echo "::warning::Agent ${RESULT_NAME} hit max-turns cap (${{ needs.triage.outputs.max_turns }}, used ${num_turns}) — skipping this agent"
+              claude_rc=0
+            fi
+          fi
+
           if [ "$prompt_rc" -ne 0 ] || [ "$claude_rc" -ne 0 ]; then
             if [ "$prompt_rc" -ne 0 ]; then
               echo "::error::Prompt build (stdin to claude) failed with exit status ${prompt_rc} for ${RESULT_NAME} — e.g. missing agent-prompt.md, agent prompt file, or pr-filtered.diff"
