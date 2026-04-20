@@ -270,8 +270,7 @@ const OPUS_THRESHOLD = 500;
 const agentModel =
   diffLines >= OPUS_THRESHOLD ? "claude-opus-4-6" : defaultModel;
 
-// Scale max-turns with diff size. Opus gets fewer turns since it reasons
-// more deeply per turn and to keep within timeout budgets.
+// Scale max-turns with diff size.
 const isOpus = agentModel.includes("opus");
 let maxTurns;
 if (diffLines < 100) {
@@ -279,7 +278,7 @@ if (diffLines < 100) {
 } else if (diffLines < OPUS_THRESHOLD) {
   maxTurns = 5;
 } else {
-  maxTurns = isOpus ? 6 : 10;
+  maxTurns = 10;
 }
 
 // Discover all agents
