@@ -1,3 +1,15 @@
+import { format as prettify } from "prettier";
+
+async function formatMarkdown(str) {
+  return await prettify(str, { parser: "markdown", proseWrap: "always" });
+}
+
+function fence(str) {
+  const openingFence = "```md\n";
+  const closingFence = "\n```";
+  return `${openingFence}${str}${closingFence}`;
+}
+
 /**
  * Review Hero — Local fix prompt builder
  *
@@ -7,10 +19,10 @@
  *
  * @param {Array<{file: string, line?: number, comment: string}>} comments
  *   Outstanding review comments.
- * @returns {string} Markdown string to append to a summary comment, or "" if
+ * @returns {Promise<string>} Markdown string to append to a summary comment, or "" if
  *   there is nothing to report.
  */
-export function buildLocalFixPrompt(comments) {
+export async function buildLocalFixPrompt(comments) {
   if (!comments?.length) return "";
 
   const items = [];
@@ -20,15 +32,26 @@ export function buildLocalFixPrompt(comments) {
     items.push(`\`${loc}\`: ${sanitise(c.comment)}`);
   }
 
-  const prompt =
-    "Fix these issues identified on the pull request. One commit per issue fixed.\n\n-------\n\n" +
-    items.join("\n\n-------\n\n");
-
-  return (
-    "\n\n<details>\n<summary>Local fix prompt (copy to your coding agent)</summary>\n\n" +
-    prompt +
-    "\n\n</details>"
+  const codeBlocks = await Promise.all(
+    items.map(async (item) => {
+      try {
+        return fence(await formatMarkdown(item));
+      } catch {
+        // Invalid Markdown (somehow) but let GitHub try syntax highlighting anyway
+        return fence(item);
+      }
+    }),
   );
+
+  return [
+    "<details>",
+    "<summary>Local fix prompt (copy to your coding agent)</summary>",
+    "",
+    "Fix these issues identified on the pull request. One commit per issue fixed.",
+    "",
+    `${codeBlocks.join("\n\n")}`,
+    "</details>",
+  ].join("\n");
 }
 
 /**
