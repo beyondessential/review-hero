@@ -14,6 +14,7 @@
  *   MODEL               — Model to use (default: claude-sonnet-4-6)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
  *   FIX_CI              — 'true' to fix CI failures
+ *   SAVE_SUPPRESSIONS   — 'true' to save suppressions from thumbs-down feedback
  *   PROMPT_PATH         — Path to the base auto-fix prompt
  *   PROJECT_CONTEXT     — Optional project context string (e.g. "You are reviewing a PR for **Tamanu**, a healthcare management system.")
  *   CUSTOM_RULES_PATH   — Optional path to repo-specific rules to append to the prompt
@@ -61,6 +62,7 @@ const appSlug = process.env.APP_SLUG || "review-hero";
 const model = process.env.MODEL ?? "claude-sonnet-4-6";
 const fixReviews = process.env.FIX_REVIEWS === "true";
 const fixCI = process.env.FIX_CI === "true";
+const saveSuppressions = process.env.SAVE_SUPPRESSIONS === "true";
 const promptPath = getEnvOrThrow("PROMPT_PATH");
 const projectContext = process.env.PROJECT_CONTEXT ?? "";
 const customRulesPath = process.env.CUSTOM_RULES_PATH ?? "";
@@ -324,7 +326,83 @@ async function uncheckCheckboxes() {
   const checkboxes = [];
   if (fixReviews) checkboxes.push({ label: "Auto-fix review suggestions", anchor: "#auto-fix" });
   if (fixCI) checkboxes.push({ label: "Auto-fix CI failures", anchor: "#auto-fix-ci" });
+  if (saveSuppressions) checkboxes.push({ label: "Save suppressions", anchor: "#save-suppressions" });
   if (checkboxes.length > 0) await gh.uncheckCheckboxes(prNumber, checkboxes);
+}
+
+// ── Save suppressions ────────────────────────────────────────────────────────
+// Detect thumbs-down reactions on Review Hero findings, generate suppression
+// rules with Haiku, and commit them to .github/review-hero/suppressions.yml.
+// Returns the number of suppressions written (0 if none / disabled).
+
+async function runSaveSuppressions() {
+  const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
+  const anthropicBaseUrl =
+    process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+  const botLogin = `${appSlug}[bot]`;
+
+  if (!apiKey) {
+    console.warn("Save suppressions: no Anthropic API key — skipping");
+    return 0;
+  }
+
+  const rejected = await findRejectedFindings(
+    gh.graphql,
+    repo,
+    prNumber,
+    botLogin,
+  );
+  console.log(
+    `Save suppressions: found ${rejected.length} rejected finding(s) (bot: ${botLogin})`,
+  );
+  if (rejected.length === 0) return 0;
+
+  const newSuppressions = await generateSuppressions(rejected, {
+    apiKey,
+    baseUrl: anthropicBaseUrl,
+  });
+
+  if (newSuppressions.length > 0) {
+    const suppressionsPath = ".github/review-hero/suppressions.yml";
+    const yamlToAppend = formatSuppressionsYaml(newSuppressions);
+
+    if (existsSync(suppressionsPath)) {
+      const existing = readFileSync(suppressionsPath, "utf-8");
+      writeFileSync(
+        suppressionsPath,
+        existing.trimEnd() + "\n" + yamlToAppend + "\n",
+      );
+    } else {
+      execSync("mkdir -p .github/review-hero");
+      writeFileSync(suppressionsPath, yamlToAppend + "\n");
+    }
+
+    if (hasChanges()) {
+      const commitHelperPath = copyCommitHelper(prNumber);
+      try {
+        execFileSync(commitHelperPath, [
+          "-m",
+          `chore: add ${newSuppressions.length} suppression(s) from developer feedback`,
+          suppressionsPath,
+        ]);
+      } catch {
+        execSync(`git add ${suppressionsPath}`);
+        execSync(
+          `git commit -m "chore: add ${newSuppressions.length} suppression(s) from developer feedback"`,
+        );
+      }
+      pushChanges();
+      console.log(`Committed ${newSuppressions.length} new suppression(s)`);
+    }
+  }
+
+  // Resolve thumbs-downed threads so they aren't re-processed on subsequent runs.
+  for (const r of rejected) {
+    if (r.threadId) await resolveThread(r.threadId);
+  }
+  console.log(`Resolved ${rejected.length} thumbs-downed thread(s)`);
+
+  return newSuppressions.length;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -334,7 +412,7 @@ async function main() {
   configureGitIdentity(appId, appSlug);
 
   console.log(
-    `Auto-fixing PR #${prNumber} (reviews: ${fixReviews}, ci: ${fixCI})`,
+    `Auto-fixing PR #${prNumber} (reviews: ${fixReviews}, ci: ${fixCI}, save suppressions: ${saveSuppressions})`,
   );
 
   const comments = fixReviews ? await fetchUnresolvedComments() : [];
@@ -351,8 +429,33 @@ async function main() {
     );
   }
 
+  // No auto-fix work to do (either save-suppressions-only run, or auto-fix
+  // was requested but found nothing to fix). Run the suppressions step if
+  // requested, then exit before the Claude/auto-fix loop.
   if (comments.length === 0 && ciFailures.length === 0) {
-    await gh.postComment(prNumber, "🦸 **Review Hero Auto-Fix** — Nothing to fix.");
+    if (saveSuppressions) {
+      let saved = 0;
+      try {
+        saved = await runSaveSuppressions();
+      } catch (err) {
+        console.warn(`Save suppressions failed: ${err.message}`);
+        await gh.postComment(
+          prNumber,
+          `🦸 **Review Hero** — Save suppressions failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.`,
+        );
+        await uncheckCheckboxes();
+        process.exit(1);
+      }
+      const fixRequested = fixReviews || fixCI;
+      const fixPrefix = fixRequested ? "Nothing to fix. " : "";
+      const summary =
+        saved > 0
+          ? `🦸 **Review Hero** — ${fixPrefix}Saved ${saved} suppression${saved === 1 ? "" : "s"} from developer feedback.`
+          : `🦸 **Review Hero** — ${fixPrefix}No new suppressions to save.`;
+      await gh.postComment(prNumber, summary);
+    } else {
+      await gh.postComment(prNumber, "🦸 **Review Hero Auto-Fix** — Nothing to fix.");
+    }
     await uncheckCheckboxes();
     return;
   }
@@ -596,82 +699,14 @@ async function main() {
   await gh.postComment(prNumber, summaryParts.join(""));
   await uncheckCheckboxes();
 
-  // ── Learn from thumbs-down reactions ──────────────────────────────────
-  // If developers rejected Review Hero findings (thumbs-down), generate
-  // suppression rules and persist them to .github/review-hero/suppressions.yml
-  // so future reviews avoid the same false positives.
-  const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
-  const anthropicBaseUrl =
-    process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
-  const botLogin = `${appSlug}[bot]`;
-
-  if (apiKey) {
-    try {
-      const rejected = await findRejectedFindings(
-        gh.graphql,
-        repo,
-        prNumber,
-        botLogin,
-      );
-      console.log(
-        `Thumbs-down learning: found ${rejected.length} rejected finding(s) (bot: ${botLogin})`,
-      );
-      if (rejected.length > 0) {
-        const newSuppressions = await generateSuppressions(rejected, {
-          apiKey,
-          baseUrl: anthropicBaseUrl,
-        });
-        if (newSuppressions.length > 0) {
-          const suppressionsPath =
-            ".github/review-hero/suppressions.yml";
-          const yamlToAppend = formatSuppressionsYaml(newSuppressions);
-
-          if (existsSync(suppressionsPath)) {
-            const existing = readFileSync(suppressionsPath, "utf-8");
-            writeFileSync(
-              suppressionsPath,
-              existing.trimEnd() + "\n" + yamlToAppend + "\n",
-            );
-          } else {
-            execSync("mkdir -p .github/review-hero");
-            writeFileSync(suppressionsPath, yamlToAppend + "\n");
-          }
-
-          // Use the commit helper if available, otherwise direct git
-          if (hasChanges()) {
-            const commitHelperPath = copyCommitHelper(prNumber);
-            try {
-              execFileSync(commitHelperPath, [
-                "-m",
-                `chore: add ${newSuppressions.length} suppression(s) from developer feedback`,
-                suppressionsPath,
-              ]);
-            } catch {
-              // Fallback: stage only the suppressions file and commit directly
-              execSync(`git add ${suppressionsPath}`);
-              execSync(
-                `git commit -m "chore: add ${newSuppressions.length} suppression(s) from developer feedback"`,
-              );
-            }
-            pushChanges();
-            console.log(
-              `Committed ${newSuppressions.length} new suppression(s)`,
-            );
-          }
-        }
-
-        // Resolve thumbs-downed threads so they aren't re-processed on
-        // subsequent runs.
-        for (const r of rejected) {
-          if (r.threadId) await resolveThread(r.threadId);
-        }
-        console.log(
-          `Resolved ${rejected.length} thumbs-downed thread(s)`,
-        );
-      }
-    } catch (err) {
-      console.warn(`Thumbs-down learning failed: ${err.message}`);
-    }
+  // Always run the suppressions step at the end of an auto-fix run so that
+  // any 👎 reactions are captured even if the user didn't tick the
+  // `Save suppressions` checkbox. The checkbox only matters for triggering
+  // this step on its own (when there's nothing to auto-fix).
+  try {
+    await runSaveSuppressions();
+  } catch (err) {
+    console.warn(`Save suppressions failed: ${err.message}`);
   }
 
   console.log("Done");

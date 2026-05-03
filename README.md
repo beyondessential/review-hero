@@ -144,9 +144,10 @@ Then add the checkboxes to your PR template:
 ```markdown
 - [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
 - [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
+- [ ] **Save suppressions** <!-- #save-suppressions -->
 ```
 
-Each checkbox triggers independently — you can fix review comments, CI failures, or both. Like the review checkbox, they're automatically unchecked after completion.
+Each checkbox triggers independently — you can fix review comments, fix CI failures, run the suppressions-from-feedback step on its own, or any combination. Like the review checkbox, they're automatically unchecked after completion. The suppressions step also runs automatically at the end of any auto-fix run; the `Save suppressions` checkbox is only needed when you want to trigger it without auto-fix. See [Learning from feedback](#learning-from-feedback).
 
 **Note:** Auto-Fix needs broader permissions than review (`contents: write` to push commits, `actions: read` to fetch CI logs). Your GitHub App also needs write access to push on behalf of the bot.
 
@@ -284,6 +285,8 @@ Review Hero automatically learns from developer feedback:
 
 2. **During auto-fix** — When auto-fix runs and detects 👎 reactions on Review Hero comments, it reads any developer replies in the thread to understand why, generates suppression rules, and commits them to `.github/review-hero/suppressions.yml` on the PR branch. After the PR merges, those suppressions become permanent.
 
+3. **By ticking `Save suppressions`** — Runs the same step as #2 on demand without invoking auto-fix. Useful when there's nothing to auto-fix but you've added 👎 reactions you want captured, or when you want to re-run the step after replying with more context.
+
 To reject a Review Hero finding: add a 👎 reaction to the comment. Optionally reply in the thread explaining why — this helps generate better suppression rules.
 
 
@@ -394,6 +397,7 @@ Here's a complete block you can drop into `.github/pull_request_template.md`:
 - [ ] **Run Review Hero** <!-- #ai-review -->
 - [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
 - [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
+- [ ] **Save suppressions** <!-- #save-suppressions -->
 ```
 
 Omit the auto-fix lines if your repo doesn't use that workflow.
