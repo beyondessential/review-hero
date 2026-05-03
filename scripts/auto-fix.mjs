@@ -699,12 +699,14 @@ async function main() {
   await gh.postComment(prNumber, summaryParts.join(""));
   await uncheckCheckboxes();
 
-  if (saveSuppressions) {
-    try {
-      await runSaveSuppressions();
-    } catch (err) {
-      console.warn(`Save suppressions failed: ${err.message}`);
-    }
+  // Always run the suppressions step at the end of an auto-fix run so that
+  // any 👎 reactions are captured even if the user didn't tick the
+  // `Save suppressions` checkbox. The checkbox only matters for triggering
+  // this step on its own (when there's nothing to auto-fix).
+  try {
+    await runSaveSuppressions();
+  } catch (err) {
+    console.warn(`Save suppressions failed: ${err.message}`);
   }
 
   console.log("Done");
