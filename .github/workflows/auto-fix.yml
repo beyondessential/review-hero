@@ -51,6 +51,7 @@ jobs:
     outputs:
       fix_reviews: ${{ steps.check.outputs.fix_reviews }}
       fix_ci: ${{ steps.check.outputs.fix_ci }}
+      save_suppressions: ${{ steps.check.outputs.save_suppressions }}
     steps:
       - id: check
         uses: actions/github-script@v8
@@ -64,17 +65,20 @@ jobs:
             if (action !== 'edited' && action !== 'opened' && action !== 'reopened') {
               core.setOutput('fix_reviews', 'false');
               core.setOutput('fix_ci', 'false');
+              core.setOutput('save_suppressions', 'false');
               return;
             }
             const body = context.payload.pull_request?.body ?? '';
             const reviewMatch = body.match(/\[(?<checked>[ x])\]\s+\*\*Auto-fix review suggestions\*\* <!-- #auto-fix -->/);
             const ciMatch = body.match(/\[(?<checked>[ x])\]\s+\*\*Auto-fix CI failures\*\* <!-- #auto-fix-ci -->/);
+            const saveSuppMatch = body.match(/\[(?<checked>[ x])\]\s+\*\*Save suppressions\*\* <!-- #save-suppressions -->/);
             core.setOutput('fix_reviews', reviewMatch?.groups.checked === 'x' ? 'true' : 'false');
             core.setOutput('fix_ci', ciMatch?.groups.checked === 'x' ? 'true' : 'false');
+            core.setOutput('save_suppressions', saveSuppMatch?.groups.checked === 'x' ? 'true' : 'false');
 
   auto-fix:
     needs: check-trigger
-    if: needs.check-trigger.outputs.fix_reviews == 'true' || needs.check-trigger.outputs.fix_ci == 'true'
+    if: needs.check-trigger.outputs.fix_reviews == 'true' || needs.check-trigger.outputs.fix_ci == 'true' || needs.check-trigger.outputs.save_suppressions == 'true'
     runs-on: ${{ needs.check-trigger.outputs.fix_ci == 'true' && inputs.ci-runner || inputs.runner }}
     steps:
       # ── Generate app token ───────────────────────────────────────────
@@ -236,6 +240,7 @@ jobs:
           MODEL: ${{ inputs.model }}
           FIX_REVIEWS: ${{ needs.check-trigger.outputs.fix_reviews }}
           FIX_CI: ${{ needs.check-trigger.outputs.fix_ci }}
+          SAVE_SUPPRESSIONS: ${{ needs.check-trigger.outputs.save_suppressions }}
           PROMPT_PATH: .review-hero/prompts/auto-fix.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
