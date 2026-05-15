@@ -691,7 +691,7 @@ async function main() {
     summaryParts.push(`\n\n[View logs](${logsUrl})`);
   }
 
-  const localPrompt = buildLocalFixPrompt(skippedComments);
+  const localPrompt = await buildLocalFixPrompt(skippedComments);
   if (localPrompt) {
     summaryParts.push(localPrompt);
   }

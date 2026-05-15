@@ -837,10 +837,10 @@ async function main() {
 
   // Build and post summary
   const summaryParts = [
-    `🦸 **Review Hero Summary**\n`,
-    `**${agentsCompleted} agent${agentsCompleted === 1 ? "" : "s"}** reviewed this PR`,
-    agentsFailed > 0 ? ` | ${agentsFailed} failed` : "",
-    ` | ${counts.critical} critical | ${counts.suggestion} suggestion${counts.suggestion === 1 ? "" : "s"} | ${counts.nitpick} nitpick${counts.nitpick === 1 ? "" : "s"}`,
+    `## 🦸 Review Hero Summary\n\n`,
+    `**${agentsCompleted}&nbsp;agent${agentsCompleted === 1 ? "" : "s"}** reviewed this PR`,
+    agentsFailed > 0 ? ` | ${agentsFailed}&nbsp;failed` : "",
+    ` | ${counts.critical}&nbsp;critical | ${counts.suggestion}&nbsp;suggestion${counts.suggestion === 1 ? "" : "s"} | ${counts.nitpick}&nbsp;nitpick${counts.nitpick === 1 ? "" : "s"}`,
   ];
 
   // Show filtering stats when non-trivial filtering occurred
@@ -900,7 +900,7 @@ async function main() {
     comment: g.representative.comment,
   }));
 
-  const localPrompt = buildLocalFixPrompt(dedupedFindings);
+  const localPrompt = await buildLocalFixPrompt(dedupedFindings);
   if (localPrompt) {
     summaryParts.push(localPrompt);
   }
