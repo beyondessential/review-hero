@@ -11,7 +11,7 @@
  *   ANTHROPIC_API_KEY   — API key for Claude CLI
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
  *   APP_SLUG            — GitHub App slug (for git commit identity, default: review-hero)
- *   MODEL               — Model to use (default: claude-sonnet-4-6)
+ *   MODEL               — Model to use (default: claude-sonnet-5)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
  *   FIX_CI              — 'true' to fix CI failures
  *   SAVE_SUPPRESSIONS   — 'true' to save suppressions from thumbs-down feedback
@@ -59,7 +59,7 @@ if (!/^\d+$/.test(prNumber)) {
 
 const appId = process.env.REVIEW_HERO_APP_ID ?? "";
 const appSlug = process.env.APP_SLUG || "review-hero";
-const model = process.env.MODEL ?? "claude-sonnet-4-6";
+const model = process.env.MODEL ?? "claude-sonnet-5";
 const fixReviews = process.env.FIX_REVIEWS === "true";
 const fixCI = process.env.FIX_CI === "true";
 const saveSuppressions = process.env.SAVE_SUPPRESSIONS === "true";

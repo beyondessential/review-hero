@@ -10,7 +10,7 @@ on:
       model:
         description: "Claude model for review agents"
         type: string
-        default: claude-sonnet-4-6
+        default: claude-sonnet-5
       runner:
         description: "GitHub Actions runner for all jobs"
         type: string

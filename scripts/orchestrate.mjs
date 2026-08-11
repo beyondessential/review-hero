@@ -183,8 +183,11 @@ async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         max_tokens: 2000,
+        // Mechanical grouping — no reasoning needed, and thinking would eat
+        // into the token budget the JSON output needs.
+        thinking: { type: "disabled" },
         messages: [
           {
             role: "user",
@@ -292,8 +295,11 @@ async function groupAllFindings(kept, dropped, { apiKey, baseUrl }) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         max_tokens: 2000,
+        // Mechanical grouping — no reasoning needed, and thinking would eat
+        // into the token budget the JSON output needs.
+        thinking: { type: "disabled" },
         messages: [
           {
             role: "user",
