@@ -300,7 +300,7 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
-      model: claude-sonnet-4-6  # Default model (auto-upgrades to Opus for large PRs)
+      model: claude-sonnet-5   # Default model (auto-upgrades to Opus for large PRs)
       runner: ubuntu-slim      # Runner for all jobs
       voters: 3                # Voters per agent (1 to disable consensus)
     secrets: inherit
@@ -309,7 +309,7 @@ jobs:
 | Input     | Default            | Description |
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
-| `model`   | `claude-sonnet-4-6`| Default Claude model for review agents. Triage may upgrade to Opus for large PRs (500+ lines). |
+| `model`   | `claude-sonnet-5`  | Default Claude model for review agents. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
 | `voters`  | `3`                | Independent voters per agent. `>=2` enables consensus filtering. Set to `1` to disable. |
 
@@ -320,7 +320,7 @@ jobs:
   auto-fix:
     uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@v1
     with:
-      model: claude-sonnet-4-6
+      model: claude-sonnet-5
       runner: ubuntu-slim       # Runner for trigger check + review fixes
       ci-runner: ubuntu-latest  # Runner when fixing CI failures (may need build tools)
     secrets: inherit
@@ -328,7 +328,7 @@ jobs:
 
 | Input       | Default            | Description |
 |-------------|--------------------|-------------|
-| `model`     | `claude-sonnet-4-6`| The Claude model used for auto-fix. |
+| `model`     | `claude-sonnet-5`  | The Claude model used for auto-fix. |
 | `runner`    | `ubuntu-slim`      | GitHub Actions runner for the trigger check and review-only fixes. |
 | `ci-runner` | `ubuntu-latest`    | GitHub Actions runner used when fixing CI failures (needs build tools, test runners, etc.). Automatically selected when the CI failures checkbox is checked. |
 

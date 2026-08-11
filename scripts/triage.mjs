@@ -262,13 +262,13 @@ const diffLines = filteredDiff
 
 // Choose model based on diff size — Opus for large PRs where deeper
 // reasoning pays off, Sonnet for everything else.
-const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-4-6").replace(
+const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
   /[\r\n]/g,
   "",
 );
 const OPUS_THRESHOLD = 500;
 const agentModel =
-  diffLines >= OPUS_THRESHOLD ? "claude-opus-4-6" : defaultModel;
+  diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 
 // Scale max-turns with diff size.
 const isOpus = agentModel.includes("opus");
