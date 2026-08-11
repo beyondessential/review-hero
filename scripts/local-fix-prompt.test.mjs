@@ -51,6 +51,20 @@ test("grows the fence past backtick runs that would close it early", () => {
   assert.ok(body.includes(comment));
 });
 
+test("grows the fence for CRLF comment text too", () => {
+  const comment = "Nested example:\r\n\r\n````md\r\n```js\r\n1\r\n```\r\n````";
+  const { fence, body } = codeBlock(
+    buildLocalFixPrompt([{ file: "docs/readme.md", line: 1, comment }]),
+  );
+
+  assert.equal(fence, "`````");
+  const closer = new RegExp(`^ {0,3}\`{${fence.length},}[ \t]*$`);
+  assert.ok(
+    !body.split(/\r?\n/).some((line) => closer.test(line)),
+    "no line inside the block may close the fence early",
+  );
+});
+
 test("passes HTML tags through verbatim", () => {
   const { body } = codeBlock(
     buildLocalFixPrompt([

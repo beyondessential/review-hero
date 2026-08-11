@@ -13,6 +13,7 @@ Scenarios verifying that the copyable local fix prompt is emitted as a single fe
 
 - [x] A comment containing a three-backtick code block reaches the agent verbatim, and the fence stays at four backticks
 - [x] A comment containing a four-backtick block grows the outer fence to five backticks
+- [x] Backtick runs are detected in CRLF comment text as well as LF
 - [x] HTML tags in comment text pass through unescaped
 - [x] Horizontal rules in comment text are stripped so they cannot read as item separators
 

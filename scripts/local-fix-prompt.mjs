@@ -43,6 +43,9 @@ export function buildLocalFixPrompt(comments) {
  * backticks (indented up to three spaces, trailing whitespace allowed), so
  * only those lines constrain the fence. Four backticks is the floor: review
  * comments routinely contain ``` code blocks.
+ *
+ * CRLF input needs no special handling: under the `m` flag `$` asserts before
+ * any line terminator, and CR is one, so a `` ```\r\n `` line still matches.
  */
 function fenceLength(content) {
   let longest = 3;
