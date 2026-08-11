@@ -10,6 +10,14 @@ We also dog-food Review Hero on its own repo. This is done through the `ai-revie
 
 The `release.yml` workflow is for release management of this repo (described below).
 
+## Tests
+
+Unit tests live beside the code as `scripts/*.test.mjs` and use the built-in Node test runner:
+
+```sh
+npm test
+```
+
 ## Branch protection
 
 This repo requires PRs to merge to `main`. Direct pushes to `main` are not allowed.
