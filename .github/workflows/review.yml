@@ -415,6 +415,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Create the marker up front so the upload below always has a file to
+          # publish. If it were created only on success, a failed prime would
+          # publish nothing and every sibling voter would wait out the full
+          # timeout instead of proceeding immediately.
+          touch /tmp/cache-primed
+
           # Hitting the turn cap is the expected outcome here, so a non-zero
           # exit is not a failure. The cache write happens on the first API
           # request regardless of how the run terminates.
@@ -434,8 +440,6 @@ jobs:
           if [ "$written" = "0" ]; then
             echo "::warning::Prime run wrote no cache tokens — voters will not share a prefix"
           fi
-
-          touch /tmp/cache-primed
 
       # Publishing the marker is what releases the sibling voters, so it must
       # happen even if the prime run failed — otherwise they wait out the full
