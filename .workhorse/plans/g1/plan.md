@@ -88,7 +88,7 @@ Not done here: it moves the diff into the system prompt, which is a behavioural 
 every agent, and it should be judged against measured hit-rate data plus a review-quality
 comparison rather than adopted blind.
 
-## Open question: TTL vs runner startup
+## Decision: TTL vs runner startup
 
 The CLI sets `cache_control` itself, so the 1-hour TTL is not requestable, leaving a
 5-minute window.
