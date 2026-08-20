@@ -435,20 +435,26 @@ jobs:
             > /tmp/prime-result.json
           set -e
 
-          written=$(jq -r '.usage.cache_creation_input_tokens // 0' /tmp/prime-result.json 2>/dev/null || echo 0)
-          echo "Primed cache for ${{ matrix.agent.key }}: ${written} tokens written"
-          if [ "$written" = "0" ]; then
-            echo "::warning::Prime run wrote no cache tokens — voters will not share a prefix"
-          fi
+          node .review-hero/scripts/cache-stats.mjs /tmp/prime-result.json \
+            --label "prime ${{ matrix.agent.key }}" \
+            --require-write
 
       # Publishing the marker is what releases the sibling voters, so it must
       # happen even if the prime run failed — otherwise they wait out the full
       # timeout for nothing.
+      #
+      # The name carries the run attempt because artifacts are unique per run,
+      # not per attempt: on a full re-run an unscoped name would collide with
+      # the previous attempt's marker and fail this upload. The tradeoff is
+      # that re-running only the failed jobs leaves waiters looking for a
+      # marker no surviving primer will publish, so they wait out the timeout
+      # and proceed. That costs runner minutes, not API spend — a re-run's
+      # prefix is long expired either way.
       - name: Publish cache-prime marker
         if: always() && matrix.agent.primer == '1'
         uses: actions/upload-artifact@v7
         with:
-          name: cache-primed-${{ matrix.agent.key }}
+          name: cache-primed-${{ matrix.agent.key }}-${{ github.run_attempt }}
           path: /tmp/cache-primed
           retention-days: 1
           if-no-files-found: ignore
@@ -462,26 +468,8 @@ jobs:
         if: matrix.agent.voter != '' && matrix.agent.primer != '1'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          MARKER: cache-primed-${{ matrix.agent.key }}
-        run: |
-          set -euo pipefail
-
-          deadline=$(( $(date +%s) + 300 ))
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            if curl -sf \
-                 -H "Authorization: Bearer $GH_TOKEN" \
-                 -H "Accept: application/vnd.github+json" \
-                 "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
-               | jq -e --arg n "$MARKER" '[.artifacts[]?.name] | index($n)' > /dev/null 2>&1; then
-              echo "Cache primed for ${{ matrix.agent.key }} — proceeding"
-              exit 0
-            fi
-            sleep 5
-          done
-
-          # Proceeding regardless: a missed prefix costs money, a failed
-          # review costs the whole run.
-          echo "::warning::Timed out waiting for cache prime (${{ matrix.agent.key }}) — proceeding without a shared prefix"
+          MARKER_NAME: cache-primed-${{ matrix.agent.key }}-${{ github.run_attempt }}
+        run: node .review-hero/scripts/wait-for-cache-prime.mjs
 
       # ── Run agent ────────────────────────────────────────────────────
       - name: Run ${{ matrix.agent.key }} agent${{ matrix.agent.voter && format(' (voter {0})', matrix.agent.voter) || '' }}
@@ -514,10 +502,8 @@ jobs:
 
           # Report cache usage so a missed prefix is visible rather than just
           # showing up on the bill.
-          if [ -s "/tmp/${RESULT_NAME}-result.json" ]; then
-            jq -r '.usage // {} | "Cache read: \(.cache_read_input_tokens // 0) | Cache write: \(.cache_creation_input_tokens // 0) | Input: \(.input_tokens // 0)"' \
-              "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true
-          fi
+          node .review-hero/scripts/cache-stats.mjs \
+            "/tmp/${RESULT_NAME}-result.json" --label "$RESULT_NAME"
 
           # Claude CLI exits non-zero when it hits --max-turns. That's an
           # expected budget exhaustion, not a CI failure — the agent ran out

@@ -14,6 +14,8 @@ the CI logs, so most cases are manual checks against a real review run.
 - [x] A missing counter is treated as zero rather than suppressing the whole report.
 - [ ] The agent matrix prints cache read/write figures for each voter, including when the
       agent hit its max-turns cap.
+- [ ] A full workflow re-run publishes its marker without colliding with the previous
+      attempt's artifact name.
 - [ ] Cache figures appear for the auto-fix run via `runClaude`.
 
 ## Prompt determinism
@@ -33,6 +35,29 @@ the CI logs, so most cases are manual checks against a real review run.
       are waiters.
 - [x] With `voters = 1`, no primer is nominated and no job waits, so a single-voter run
       does not stall on a marker that never arrives.
+
+## Wait coordination
+
+- [x] An already-published marker returns immediately without sleeping first, since setup
+      times vary and the primer may already be done.
+- [x] Polling continues until the marker appears.
+- [x] A missing marker gives up at the deadline rather than blocking the review forever.
+- [x] A transient API failure is retried rather than abandoning the wait.
+- [x] Artifact listing paginates, so a marker beyond the first 100 artifacts is still found.
+- [x] Pagination stops at the page cap.
+- [x] A non-ok API response raises rather than being read as "no artifacts".
+- [x] Poll delay jitter stays within 20% of the base interval and is never negative.
+- [x] A misconfigured wait (missing env) warns and exits 0 rather than failing the job.
+- [x] An unreachable API warns and exits 0 rather than failing the job.
+
+## Cache reporting
+
+- [x] Usage is read from a well-formed result file.
+- [x] A missing file, unparseable output, or absent usage block returns null rather than
+      throwing.
+- [x] Absent cache-write counters are treated as zero.
+- [x] `--require-write` warns when a prime run wrote no cache tokens.
+- [x] Reporting exits 0 for a missing or unparseable file, so it can never fail a review.
 
 ## Stagger behaviour
 

@@ -57,6 +57,34 @@ byte-identical. That is the win this card delivers.
       The primer runs `--max-turns 1` (client-side loop control, so the request body and
       therefore the cache write are unaffected) and publishes a marker artifact; siblings
       poll the run's artifacts API for that marker before starting.
+- [x] Keep the coordination logic out of the workflow YAML. `wait-for-cache-prime.mjs`
+      owns the polling (paginated, per-request timeout, jittered 15s interval) and
+      `cache-stats.mjs` owns cache reporting, so both are unit tested rather than only
+      exercised in a live CI run. The YAML steps are one-line calls.
+
+## Review follow-ups
+
+Addressed after the first review round:
+
+- Cache-stat parsing existed in three places (`formatCacheStats` plus two inline `jq`
+  pipelines), with the hit-rate formula only in the JS one. All three now route through
+  `cache-stats.mjs`, so the numbers cannot drift.
+- The wait was a bespoke synchronisation primitive written as inline bash. Moved to
+  `wait-for-cache-prime.mjs` with tests covering pagination, deadline expiry, transient API
+  failure, and the already-published case.
+- Waiters polled every 5s, so a large matrix pointed dozens of jobs at the same endpoint in
+  lockstep. The interval is now 15s with +/-20% jitter to spread them out, and each request
+  carries a 10s timeout so a stalled connection cannot outlive the overall deadline.
+- Artifact listing was capped at one page of 100. A matrix large enough to exceed that
+  would never have found its marker, so the lookup now paginates.
+
+The marker name carries `github.run_attempt`. The reviewer framed the unscoped name as
+risking a stale-marker false positive, but the sharper problem is the opposite: artifacts
+are unique per run rather than per attempt, so on a full re-run an unscoped name collides
+with the previous attempt's marker and fails the upload. Scoping costs something in the
+re-run-failed-jobs-only case, where waiters look for a marker no surviving primer will
+publish and so wait out the timeout. That spends runner minutes, not API budget, because a
+re-run's prefix has expired regardless.
 
 ### Rejected: reordering for cross-agent sharing
 
