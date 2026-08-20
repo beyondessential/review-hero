@@ -236,6 +236,9 @@ export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
       "--model", model,
       "--max-turns", String(maxTurns),
       "--allowedTools", tools,
+      // Keeps per-machine detail (cwd, env info, git status) out of the system
+      // prompt so the cacheable prefix is stable across runners.
+      "--exclude-dynamic-system-prompt-sections",
     ],
     {
       input: readFileSync(tmpPath, "utf-8"),
@@ -248,6 +251,33 @@ export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
 
   logClaudeSession(raw);
   return raw;
+}
+
+/**
+ * Summarise prompt-cache usage for a session.
+ *
+ * `cache_read_input_tokens` are billed at a fraction of base input, while
+ * `cache_creation_input_tokens` are billed at a premium — so the read share
+ * is the number that tells us whether prefix sharing is actually working.
+ * Without this, a cache hit and a cache miss look identical in the logs.
+ */
+export function formatCacheStats(usage) {
+  if (!usage) return [];
+
+  const read = usage.cache_read_input_tokens ?? 0;
+  const written = usage.cache_creation_input_tokens ?? 0;
+  if (read === 0 && written === 0) return [];
+
+  const stats = [
+    `Cache read: ${read.toLocaleString()}`,
+    `Cache write: ${written.toLocaleString()}`,
+  ];
+
+  const cacheable = read + written;
+  if (cacheable > 0) {
+    stats.push(`Cache hit rate: ${Math.round((read / cacheable) * 100)}%`);
+  }
+  return stats;
 }
 
 export function logClaudeSession(raw, label = "Claude") {
@@ -276,6 +306,7 @@ export function logClaudeSession(raw, label = "Claude") {
         stats.push(`Input tokens: ${u.input_tokens.toLocaleString()}`);
       if (u.output_tokens != null)
         stats.push(`Output tokens: ${u.output_tokens.toLocaleString()}`);
+      stats.push(...formatCacheStats(u));
     }
     if (stats.length > 0) {
       core.info(`${label} session: ${stats.join(" | ")}`);
