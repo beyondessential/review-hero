@@ -140,7 +140,16 @@ function parseAgentResult(filePath, agentKey, voter) {
       text = parsed.result;
     }
   } catch {
-    // Not valid JSON at top level — treat the raw file as the agent's text.
+    // A file that opens with `{` is a CLI envelope that never finished being
+    // written (step timeout, killed process, truncated artifact). Its
+    // metadata arrays are not findings, so fail rather than scanning them —
+    // the same reason we don't mine a complete errored envelope above.
+    if (raw.trimStart().startsWith("{")) {
+      console.warn(`${filePath}: truncated or malformed CLI envelope`);
+      return null;
+    }
+    // Otherwise it's not an envelope at all — treat the raw file as the
+    // agent's own text output.
   }
 
   const findings = extractJsonArray(text);

@@ -69,6 +69,33 @@ test("an errored (max-turns) run is a failure and its metadata arrays are never 
   assert.equal(result, null);
 });
 
+test("a truncated CLI envelope is a failure, not an empty result", () => {
+  // A step timeout or killed process can cut the envelope off mid-write, so
+  // JSON.parse fails. Scanning the raw text would mine the envelope's own
+  // `usage.iterations` / `errors` arrays and report a bogus clean review.
+  const full = JSON.stringify({
+    duration_api_ms: 27450,
+    usage: { iterations: [{ input_tokens: 2, output_tokens: 213 }] },
+    errors: ["Reached maximum number of turns (5)"],
+    result: "[]",
+  });
+  const result = parse(
+    "truncated-result.json",
+    full.slice(0, Math.floor(full.length * 0.75)),
+  );
+  assert.equal(result, null);
+});
+
+test("raw non-envelope text is still scanned for an array", () => {
+  // Not a CLI envelope, so the raw-text fallback still applies.
+  const result = parse(
+    "raw-text-result.json",
+    'Findings:\n[{"file":"a.ts","line":7,"severity":"nitpick","comment":"Tidy."}]',
+  );
+  assert.equal(result.length, 1);
+  assert.equal(result[0].line, 7);
+});
+
 test("parses a bare JSON array written as the whole file", () => {
   const result = parse("bare-array-result.json", [
     { file: "a.ts", line: 3, severity: "critical", comment: "Oops." },
