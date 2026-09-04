@@ -31,15 +31,26 @@ test("parses a findings array embedded in the CLI result field", () => {
   assert.equal(result[0].voter, "project-conventions-0");
 });
 
-test("a completed review with a prose 'no issues' result counts as zero findings, not a failure", () => {
+test("a prose result with no array is a failure — agents must emit [] for no findings", () => {
   // Mirrors project-conventions-voter-2-result.json: successful run whose
-  // result field is prose with no JSON array.
+  // result field is prose with no JSON array. The output contract requires
+  // an array, so prose can't be distinguished from a truncated answer.
   const result = parse("prose-result.json", {
     type: "result",
     subtype: "success",
     is_error: false,
     result:
       "No project-convention issues found in this diff — spelling, file naming, and design-system usage are all consistent.",
+  });
+  assert.equal(result, null);
+});
+
+test("an explicit empty array is zero findings, not a failure", () => {
+  const result = parse("empty-array-result.json", {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "[]",
   });
   assert.deepEqual(result, []);
 });

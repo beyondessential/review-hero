@@ -342,6 +342,7 @@ jobs:
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
           VOTER: ${{ matrix.agent.voter }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
+          MAX_TURNS: ${{ needs.triage.outputs.max_turns }}
         timeout-minutes: 20
         run: |
           set -euo pipefail
@@ -351,6 +352,10 @@ jobs:
           if [ -n "$VOTER" ]; then
             RESULT_NAME="${RESULT_NAME}-voter-${VOTER}"
           fi
+
+          # Soft cap told to the agent: leave headroom to write up findings
+          # after exploration, so it never gets truncated before answering.
+          SOFT_CAP=$(( MAX_TURNS > 4 ? MAX_TURNS - 3 : MAX_TURNS - 1 ))
 
           # Build the prompt by concatenating:
           # 1. Project context (if any)
@@ -390,7 +395,7 @@ jobs:
               cat /tmp/ai-rules.md
             fi
 
-            printf '\n\n## Turn budget\n\nYou have at most %s agent turns for this review, including every tool call. Sample files selectively rather than reading them end-to-end, prioritise the highest-risk changes, and emit your final JSON findings array while you still have turns left. Returning fewer high-confidence findings on time is better than being cut off mid-exploration with no output.\n' "${{ needs.triage.outputs.max_turns }}"
+            printf '\n\n## Turn budget\n\nYou have at most %s agent turns for this review, and every tool call spends one. Stop exploring by turn %s and spend the remainder writing up findings. Prioritise the highest-risk changes, sample files selectively rather than reading them end-to-end, and make your final message the JSON array (exactly `[]` if you found nothing). Returning fewer high-confidence findings on time beats being cut off mid-exploration with no output at all.\n' "$MAX_TURNS" "$SOFT_CAP"
 
             printf '\n\n## PR Title\n\n%s\n\n## PR Diff\n\n```diff\n' "$PR_TITLE"
             cat /tmp/pr-filtered.diff

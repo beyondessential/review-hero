@@ -122,7 +122,6 @@ function parseAgentResult(filePath, agentKey, voter) {
   // (iterations, modelUsage, …) is CLI metadata and must never be mined for
   // findings — doing so turns an errored run into a bogus empty result.
   let text = raw;
-  let fromEnvelope = false;
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
@@ -130,7 +129,6 @@ function parseAgentResult(filePath, agentKey, voter) {
       return validateFindings(parsed, agentKey, voter);
     }
     if (parsed && typeof parsed === "object") {
-      fromEnvelope = true;
       // An errored run (e.g. max-turns budget exhaustion) has no `result`
       // string and produced no answer. Treat it as a failure, not silently
       // as zero findings, and don't scan the envelope's own arrays.
@@ -150,11 +148,10 @@ function parseAgentResult(filePath, agentKey, voter) {
     return validateFindings(findings, agentKey, voter);
   }
 
-  // The agent completed but wrote its answer as prose (e.g. "No issues
-  // found") instead of the required array. For a successful envelope that
-  // means zero findings — not a parse failure.
-  if (fromEnvelope) return [];
-
+  // The agent is required to emit a JSON array — `[]` when it finds nothing.
+  // Prose instead of an array means it ignored the output contract, so we
+  // can't tell "no issues" from "never got to the answer". Treat it as a
+  // failure so it shows up rather than silently voting zero findings.
   console.warn(`No JSON array found in ${filePath}`);
   return null;
 }
