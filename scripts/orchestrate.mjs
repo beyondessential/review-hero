@@ -79,61 +79,84 @@ function validateFindings(findings, agentKey, voter) {
 }
 
 /**
- * Parse agent output. Returns null on parse failure (distinct from [] which
- * means "parsed OK, no findings").
+ * Extract the first JSON array embedded in `text` by trying [start..end]
+ * pairs. Returns the parsed array, or null if none is found.
+ */
+function extractJsonArray(text) {
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const start = text.indexOf("[", searchFrom);
+    if (start === -1) break;
+    let searchEnd = text.length;
+    while (searchEnd > start) {
+      const end = text.lastIndexOf("]", searchEnd - 1);
+      if (end <= start) break;
+      try {
+        const parsed = JSON.parse(text.slice(start, end + 1));
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // Not valid JSON for this pair — try a shorter span
+      }
+      searchEnd = end;
+    }
+    searchFrom = start + 1;
+  }
+  return null;
+}
+
+/**
+ * Parse agent output. Returns null on failure (agent produced no usable
+ * output), distinct from [] which means "completed OK, no findings".
  */
 function parseAgentResult(filePath, agentKey, voter) {
+  let raw;
   try {
-    const raw = readFileSync(filePath, "utf-8");
-
-    // Claude CLI --output-format json wraps the response in a JSON object
-    // with a "result" field containing the text output
-    let text = raw;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed.result) {
-        text = parsed.result;
-      } else if (Array.isArray(parsed)) {
-        return validateFindings(parsed, agentKey, voter);
-      }
-    } catch {
-      // Not valid JSON at top level — might be raw text with JSON embedded
-    }
-
-    // Extract JSON array from text by trying [start..end] pairs.
-    let findings = null;
-    let searchFrom = 0;
-    outer: while (searchFrom < text.length) {
-      const start = text.indexOf("[", searchFrom);
-      if (start === -1) break;
-      let searchEnd = text.length;
-      while (searchEnd > start) {
-        const end = text.lastIndexOf("]", searchEnd - 1);
-        if (end <= start) break;
-        try {
-          const parsed = JSON.parse(text.slice(start, end + 1));
-          if (Array.isArray(parsed)) {
-            findings = parsed;
-            break outer;
-          }
-        } catch {
-          // Not valid JSON for this pair — try a shorter span
-        }
-        searchEnd = end;
-      }
-      searchFrom = start + 1;
-    }
-
-    if (!findings) {
-      console.warn(`No JSON array found in ${filePath}`);
-      return null;
-    }
-
-    return validateFindings(findings, agentKey, voter);
+    raw = readFileSync(filePath, "utf-8");
   } catch (err) {
-    console.warn(`Failed to parse ${filePath}: ${err.message}`);
+    console.warn(`Failed to read ${filePath}: ${err.message}`);
     return null;
   }
+
+  // The Claude CLI --output-format json wraps the agent's answer in an
+  // envelope object whose text output lives in `.result`. Every other field
+  // (iterations, modelUsage, …) is CLI metadata and must never be mined for
+  // findings — doing so turns an errored run into a bogus empty result.
+  let text = raw;
+  let fromEnvelope = false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Agent emitted a bare JSON array as the whole file.
+      return validateFindings(parsed, agentKey, voter);
+    }
+    if (parsed && typeof parsed === "object") {
+      fromEnvelope = true;
+      // An errored run (e.g. max-turns budget exhaustion) has no `result`
+      // string and produced no answer. Treat it as a failure, not silently
+      // as zero findings, and don't scan the envelope's own arrays.
+      if (parsed.is_error || typeof parsed.result !== "string") {
+        const reason = parsed.subtype ?? parsed.stop_reason ?? "no result field";
+        console.warn(`${filePath}: agent produced no usable output (${reason})`);
+        return null;
+      }
+      text = parsed.result;
+    }
+  } catch {
+    // Not valid JSON at top level — treat the raw file as the agent's text.
+  }
+
+  const findings = extractJsonArray(text);
+  if (findings !== null) {
+    return validateFindings(findings, agentKey, voter);
+  }
+
+  // The agent completed but wrote its answer as prose (e.g. "No issues
+  // found") instead of the required array. For a successful envelope that
+  // means zero findings — not a parse failure.
+  if (fromEnvelope) return [];
+
+  console.warn(`No JSON array found in ${filePath}`);
+  return null;
 }
 
 // ── Voter consensus ──────────────────────────────────────────────────────────
@@ -918,7 +941,13 @@ async function main() {
   await uncheckReviewHero(prNumber);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only orchestrate when run directly, so the parsing helpers can be imported
+// by tests without kicking off a full review run.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+export { parseAgentResult, extractJsonArray };
