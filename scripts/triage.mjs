@@ -270,15 +270,18 @@ const OPUS_THRESHOLD = 500;
 const agentModel =
   diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 
-// Scale max-turns with diff size.
+// Scale max-turns with diff size. Each tool interaction (Read, Grep, …)
+// consumes a turn, and the agent needs one more to emit its findings array,
+// so the budget must comfortably exceed "explore + answer" — an agent cut off
+// mid-exploration produces no output and wastes its entire run.
 const isOpus = agentModel.includes("opus");
 let maxTurns;
 if (diffLines < 100) {
-  maxTurns = 3;
+  maxTurns = 8;
 } else if (diffLines < OPUS_THRESHOLD) {
-  maxTurns = 5;
+  maxTurns = 15;
 } else {
-  maxTurns = 10;
+  maxTurns = 20;
 }
 
 // Discover all agents
