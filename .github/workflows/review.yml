@@ -333,29 +333,27 @@ jobs:
       - name: Detect AI rules
         run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
 
-      # ── Run agent ────────────────────────────────────────────────────
-      - name: Run ${{ matrix.agent.key }} agent${{ matrix.agent.voter && format(' (voter {0})', matrix.agent.voter) || '' }}
+      # ── Build the agent prompt ───────────────────────────────────────
+      # Written to a file rather than piped inline so the cache-priming run
+      # and the real run send a byte-identical prompt. Every voter of a given
+      # agent builds the same bytes here, which is what makes the prompt
+      # prefix shareable between them.
+      #
+      # Nothing in this prompt may vary between voters (no timestamps, no
+      # per-runner detail) or the shared prefix breaks and each voter pays
+      # for its own cache write.
+      - name: Build agent prompt
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
-          VOTER: ${{ matrix.agent.voter }}
-          AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
           MAX_TURNS: ${{ needs.triage.outputs.max_turns }}
-        timeout-minutes: 20
         run: |
           set -euo pipefail
-
-          # Build result filename — include voter suffix when multi-voter
-          RESULT_NAME="${{ matrix.agent.key }}"
-          if [ -n "$VOTER" ]; then
-            RESULT_NAME="${RESULT_NAME}-voter-${VOTER}"
-          fi
 
           # Soft cap told to the agent: leave headroom to write up findings
           # after exploration, so it never gets truncated before answering.
           SOFT_CAP=$(( MAX_TURNS > 4 ? MAX_TURNS - 3 : MAX_TURNS - 1 ))
+
 
           # Build the prompt by concatenating:
           # 1. Project context (if any)
@@ -369,11 +367,6 @@ jobs:
           # prompts were removed because they conflict with domain-specific
           # agent prompts (e.g. telling a security agent to "focus on
           # testing" pulls it off its actual job).
-
-          # Temporarily disable `set -e` so we can read PIPESTATUS: index 0 is the
-          # brace-group (prompt build), index 1 is claude — $? alone can blame claude
-          # when the real failure is a missing file in the brace group.
-          set +e
           {
             if [ -n "$PROJECT_CONTEXT" ]; then
               printf '## Project Context\n\n%s\n\n' "$PROJECT_CONTEXT"
@@ -400,16 +393,117 @@ jobs:
             printf '\n\n## PR Title\n\n%s\n\n## PR Diff\n\n```diff\n' "$PR_TITLE"
             cat /tmp/pr-filtered.diff
             echo '```'
-          } | claude -p \
-              --output-format json \
-              --model "$AGENT_MODEL" \
-              --max-turns ${{ needs.triage.outputs.max_turns }} \
-              --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
-            > "/tmp/${RESULT_NAME}-result.json"
-          pipe_statuses=("${PIPESTATUS[@]}")
-          prompt_rc=${pipe_statuses[0]:-0}
-          claude_rc=${pipe_statuses[1]:-0}
+          } > /tmp/agent-prompt.md
+
+          echo "Prompt built: $(wc -c < /tmp/agent-prompt.md) bytes"
+
+      # ── Prime the prompt cache ───────────────────────────────────────
+      # Voter 0 writes the cache entry the other voters read. A cache entry
+      # only becomes readable once the first response has begun, so without
+      # this every voter races, writes its own copy, and none gets a hit.
+      #
+      # `--max-turns 1` is a client-side loop control and does not change the
+      # request body, so this still writes the full prefix — but it returns in
+      # seconds instead of running a whole review.
+      - name: Prime prompt cache
+        if: matrix.agent.primer == '1'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+
+          # Create the marker up front so the upload below always has a file to
+          # publish. If it were created only on success, a failed prime would
+          # publish nothing and every sibling voter would wait out the full
+          # timeout instead of proceeding immediately.
+          touch /tmp/cache-primed
+
+          # Hitting the turn cap is the expected outcome here, so a non-zero
+          # exit is not a failure. The cache write happens on the first API
+          # request regardless of how the run terminates.
+          set +e
+          claude -p \
+            --output-format json \
+            --model "$AGENT_MODEL" \
+            --max-turns 1 \
+            --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+            --exclude-dynamic-system-prompt-sections \
+            < /tmp/agent-prompt.md \
+            > /tmp/prime-result.json
           set -e
+
+          node .review-hero/scripts/cache-stats.mjs /tmp/prime-result.json \
+            --label "prime ${{ matrix.agent.key }}" \
+            --require-write
+
+      # Publishing the marker is what releases the sibling voters, so it must
+      # happen even if the prime run failed — otherwise they wait out the full
+      # timeout for nothing.
+      #
+      # The name carries the run attempt because artifacts are unique per run,
+      # not per attempt: on a full re-run an unscoped name would collide with
+      # the previous attempt's marker and fail this upload. The tradeoff is
+      # that re-running only the failed jobs leaves waiters looking for a
+      # marker no surviving primer will publish, so they wait out the timeout
+      # and proceed. That costs runner minutes, not API spend — a re-run's
+      # prefix is long expired either way.
+      - name: Publish cache-prime marker
+        if: always() && matrix.agent.primer == '1'
+        uses: actions/upload-artifact@v7
+        with:
+          name: cache-primed-${{ matrix.agent.key }}-${{ github.run_attempt }}
+          path: /tmp/cache-primed
+          retention-days: 1
+          if-no-files-found: ignore
+
+      # ── Wait for the cache to be primed ──────────────────────────────
+      # Setup runs in parallel across every voter; only the Claude call is
+      # staggered. That keeps the gap between the cache write and these reads
+      # to seconds, which matters because the CLI manages `cache_control`
+      # itself and we cannot request the longer TTL.
+      - name: Wait for cache prime
+        if: matrix.agent.voter != '' && matrix.agent.primer != '1'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MARKER_NAME: cache-primed-${{ matrix.agent.key }}-${{ github.run_attempt }}
+        run: node .review-hero/scripts/wait-for-cache-prime.mjs
+
+      # ── Run agent ────────────────────────────────────────────────────
+      - name: Run ${{ matrix.agent.key }} agent${{ matrix.agent.voter && format(' (voter {0})', matrix.agent.voter) || '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          VOTER: ${{ matrix.agent.voter }}
+          AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+
+          # Build result filename — include voter suffix when multi-voter
+          RESULT_NAME="${{ matrix.agent.key }}"
+          if [ -n "$VOTER" ]; then
+            RESULT_NAME="${RESULT_NAME}-voter-${VOTER}"
+          fi
+
+          set +e
+          claude -p \
+            --output-format json \
+            --model "$AGENT_MODEL" \
+            --max-turns ${{ needs.triage.outputs.max_turns }} \
+            --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+            --exclude-dynamic-system-prompt-sections \
+            < /tmp/agent-prompt.md \
+            > "/tmp/${RESULT_NAME}-result.json"
+          claude_rc=$?
+          set -e
+
+          # Report cache usage so a missed prefix is visible rather than just
+          # showing up on the bill.
+          node .review-hero/scripts/cache-stats.mjs \
+            "/tmp/${RESULT_NAME}-result.json" --label "$RESULT_NAME"
 
           # Claude CLI exits non-zero when it hits --max-turns. That's an
           # expected budget exhaustion, not a CI failure — the agent ran out
@@ -425,18 +519,10 @@ jobs:
             fi
           fi
 
-          if [ "$prompt_rc" -ne 0 ] || [ "$claude_rc" -ne 0 ]; then
-            if [ "$prompt_rc" -ne 0 ]; then
-              echo "::error::Prompt build (stdin to claude) failed with exit status ${prompt_rc} for ${RESULT_NAME} — e.g. missing agent-prompt.md, agent prompt file, or pr-filtered.diff"
-            fi
-            if [ "$claude_rc" -ne 0 ]; then
-              echo "::error::claude (${RESULT_NAME}) exited with status ${claude_rc} (see stderr above in this step)"
-            fi
+          if [ "$claude_rc" -ne 0 ]; then
+            echo "::error::claude (${RESULT_NAME}) exited with status ${claude_rc} (see stderr above in this step)"
             echo "---- Last 200 lines of claude stdout (result JSON; errors sometimes land here) ----"
             tail -n 200 "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || echo "(no output file)"
-            if [ "$prompt_rc" -ne 0 ]; then
-              exit "$prompt_rc"
-            fi
             exit "$claude_rc"
           fi
 
