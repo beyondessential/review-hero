@@ -259,7 +259,7 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 
 ### Automatic Opus upgrade for large PRs
 
-For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. Max turns are reduced (6 instead of 10) to stay within timeout budgets — Opus uses fewer but deeper reasoning turns. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
+For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
 
 ### Suppression rules
 
@@ -352,16 +352,16 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 ### Review
 
 - **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
-- **Agents**: one Sonnet session per selected agent, with up to 3–10 tool-use turns depending on diff size. This is where most cost comes from.
+- **Agents**: one Sonnet session per selected agent, with up to 8–20 tool-use turns depending on diff size. This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
 
-Max turns scale with the filtered diff size and are capped at 10:
+Max turns scale with the filtered diff size and are capped at 20:
 
 | Filtered diff lines | Max turns |
 |---------------------|-----------|
-| < 100               | 3         |
-| 100–499             | 5         |
-| 500+                | 10        |
+| < 100               | 8         |
+| 100–499             | 15        |
+| 500+                | 20        |
 
 ### Auto-Fix
 
