@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseAgentResult } from "./orchestrate.mjs";
+import { parseAgentResult, buildSummaryHeader } from "./orchestrate.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-parse-"));
 
@@ -119,4 +119,32 @@ test("drops entries that are not valid findings", () => {
 
 test("a missing file is a failure", () => {
   assert.equal(parseAgentResult(join(dir, "nope.json"), "bugs", undefined), null);
+});
+
+test("summary header carries the round number", () => {
+  const header = buildSummaryHeader({
+    round: 3,
+    agentsCompleted: 5,
+    agentsFailed: 0,
+    counts: { critical: 1, suggestion: 3, nitpick: 0 },
+  });
+  assert.equal(
+    header,
+    "🦸 **Review Hero Summary** (round 3)\n" +
+      "**5 agents** reviewed this PR | 1 critical | 3 suggestions | 0 nitpicks",
+  );
+});
+
+test("summary header omits the round when it could not be determined", () => {
+  const header = buildSummaryHeader({
+    round: null,
+    agentsCompleted: 1,
+    agentsFailed: 2,
+    counts: { critical: 0, suggestion: 1, nitpick: 1 },
+  });
+  assert.equal(
+    header,
+    "🦸 **Review Hero Summary**\n" +
+      "**1 agent** reviewed this PR | 2 failed | 0 critical | 1 suggestion | 1 nitpick",
+  );
 });
