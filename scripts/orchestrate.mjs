@@ -34,6 +34,7 @@ import { MAX_VOTERS } from "./lib.mjs";
 const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
 const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SEVERITY_ORDER = { critical: 0, suggestion: 1, nitpick: 2 };
+const SUMMARY_HEADER = "🦸 **Review Hero Summary**";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -455,6 +456,17 @@ function buildInlineComment(f, agentNames) {
   return `**[${agentName}]** \`${f.severity}\`\n\n${f.comment}`;
 }
 
+function buildSummaryHeader({ round, agentsCompleted, agentsFailed, counts }) {
+  return (
+    `${SUMMARY_HEADER}${round ? ` (round ${round})` : ""}\n` +
+    `**${agentsCompleted} agent${agentsCompleted === 1 ? "" : "s"}** reviewed this PR` +
+    (agentsFailed > 0 ? ` | ${agentsFailed} failed` : "") +
+    ` | ${counts.critical} critical` +
+    ` | ${counts.suggestion} suggestion${counts.suggestion === 1 ? "" : "s"}` +
+    ` | ${counts.nitpick} nitpick${counts.nitpick === 1 ? "" : "s"}`
+  );
+}
+
 function buildSummaryTable(nitpicks, agentNames) {
   if (nitpicks.length === 0) return "";
 
@@ -601,6 +613,17 @@ async function postReview(prNumber, commitSha, inlineComments) {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+async function countPreviousRounds(prNumber) {
+  let count = 0;
+  for (let page = 1; ; page++) {
+    const comments = await githubApi(
+      `/issues/${prNumber}/comments?per_page=100&page=${page}`,
+    );
+    count += comments.filter((c) => c.body?.startsWith(SUMMARY_HEADER)).length;
+    if (comments.length < 100) return count;
+  }
 }
 
 async function postComment(prNumber, body) {
@@ -871,11 +894,15 @@ async function main() {
   }
 
   // Build and post summary
+  let round = null;
+  try {
+    round = (await countPreviousRounds(prNumber)) + 1;
+  } catch (err) {
+    console.warn(`Failed to count previous rounds: ${err.message}`);
+  }
+
   const summaryParts = [
-    `🦸 **Review Hero Summary**\n`,
-    `**${agentsCompleted} agent${agentsCompleted === 1 ? "" : "s"}** reviewed this PR`,
-    agentsFailed > 0 ? ` | ${agentsFailed} failed` : "",
-    ` | ${counts.critical} critical | ${counts.suggestion} suggestion${counts.suggestion === 1 ? "" : "s"} | ${counts.nitpick} nitpick${counts.nitpick === 1 ? "" : "s"}`,
+    buildSummaryHeader({ round, agentsCompleted, agentsFailed, counts }),
   ];
 
   // Show filtering stats when non-trivial filtering occurred
@@ -956,4 +983,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 }
 
-export { parseAgentResult, extractJsonArray };
+export { parseAgentResult, extractJsonArray, buildSummaryHeader };
