@@ -5,7 +5,7 @@
  * 2. Discovers base agents (from review-hero prompts/) and custom agents
  *    (from the caller repo's .github/review-hero/)
  * 3. Calls Claude Haiku to select which agents are relevant
- * 4. Calculates max-turns based on filtered diff size
+ * 4. Picks the agent model from filtered diff size
  * 5. Outputs matrix, max_turns, and agent_names for downstream jobs
  *
  * Environment variables:
@@ -270,19 +270,13 @@ const OPUS_THRESHOLD = 500;
 const agentModel =
   diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 
-// Scale max-turns with diff size. Each tool interaction (Read, Grep, …)
-// consumes a turn, and the agent needs one more to emit its findings array,
-// so the budget must comfortably exceed "explore + answer" — an agent cut off
-// mid-exploration produces no output and wastes its entire run.
+// Each tool interaction (Read, Grep, …) consumes a turn, and the agent needs
+// one more to emit its findings array. An agent cut off mid-exploration
+// produces no output and wastes its entire run, so the budget is flat: how
+// much surrounding code an agent reads to judge a change does not track the
+// size of the diff.
 const isOpus = agentModel.includes("opus");
-let maxTurns;
-if (diffLines < 100) {
-  maxTurns = 8;
-} else if (diffLines < OPUS_THRESHOLD) {
-  maxTurns = 15;
-} else {
-  maxTurns = 20;
-}
+const maxTurns = 20;
 
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);
