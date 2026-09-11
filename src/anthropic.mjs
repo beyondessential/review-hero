@@ -36,6 +36,14 @@ export function createAnthropicModelCaller({ apiKey, baseUrl = "https://api.anth
     }
 
     const result = await response.json();
-    return result.content?.[0]?.text ?? "";
+    // Collect every text block rather than just the first. A response may
+    // carry several, and a caller that enables thinking gets a thinking block
+    // ahead of them — reading only block 0 would return "", which each stage
+    // reads as unparseable output and quietly keeps every finding, with
+    // nothing to signal that the call in fact succeeded.
+    return (result.content ?? [])
+      .filter((block) => block?.type === "text" && typeof block.text === "string")
+      .map((block) => block.text)
+      .join("");
   };
 }

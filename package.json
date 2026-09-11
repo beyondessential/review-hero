@@ -11,6 +11,10 @@
   },
   "main": "./src/index.mjs",
   "types": "./src/index.d.ts",
+  "files": [
+    "src/",
+    "prompts/"
+  ],
   "scripts": {
     "test": "node --test \"scripts/**/*.test.mjs\" \"src/**/*.test.mjs\""
   },

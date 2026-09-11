@@ -193,3 +193,18 @@ export function createAnthropicModelCaller(opts: {
   apiKey: string;
   baseUrl?: string;
 }): CallModel;
+
+// ── Prompt-safe rendering ────────────────────────────────────────────────────
+
+/** Characters of a finding's comment included in a filtering prompt. */
+export const COMMENT_LIMIT: number;
+
+/**
+ * Render an untrusted value for interpolation into a prompt: collapse newline
+ * runs to a space and drop `<comment>` delimiters. Truncates to `maxLength`
+ * first when given.
+ */
+export function sanitizeForPrompt(
+  value: unknown,
+  options?: { maxLength?: number },
+): string;

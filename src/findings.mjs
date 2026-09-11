@@ -22,6 +22,10 @@ export function validateFindings(findings, agentKey, voter) {
   return findings
     .filter(
       (f) =>
+        // Agent output is untrusted: a stray `null` or scalar in the array
+        // must drop that one entry, not throw out of the whole review.
+        f &&
+        typeof f === "object" &&
         typeof f.file === "string" &&
         f.file &&
         VALID_SEVERITIES.has(f.severity) &&

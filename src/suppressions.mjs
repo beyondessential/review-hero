@@ -16,6 +16,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
+import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 
 /**
  * Load suppressions from a YAML file.
@@ -52,7 +53,7 @@ export async function callHaikuForBatch(batch, suppressionList, callModel) {
   const findingsList = batch
     .map(
       (f, i) =>
-        `${i}. [${f.severity}] ${f.file}:${f.line} — ${f.comment.slice(0, 300)}`,
+        `${i}. [${sanitizeForPrompt(f.severity)}] ${sanitizeForPrompt(f.file)}:${sanitizeForPrompt(f.line)} — ${sanitizeForPrompt(f.comment, { maxLength: COMMENT_LIMIT })}`,
     )
     .join("\n");
 

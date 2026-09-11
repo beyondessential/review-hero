@@ -10,6 +10,8 @@
  * fallback.
  */
 
+import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
+
 /**
  * Apply voter consensus to determine whether findings from different voters are
  * about the same issue. The model receives all findings and returns which ones
@@ -32,16 +34,12 @@ export async function applyConsensus(findings, voterCount, callModel) {
 
   const findingsList = findings
     .map((f, i) => {
-      const safeComment = f.comment
-        .slice(0, 300)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
-      const safeVoter = String(f.voter).replace(/[\r\n]+/g, " ");
-      const safeFile = String(f.file)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
-      const safeLine = String(f.line).replace(/[\r\n]+/g, " ");
-      return `${i}. [voter=${safeVoter}] [${f.severity}] ${safeFile}:${safeLine} — <comment>${safeComment}</comment>`;
+      const safeComment = sanitizeForPrompt(f.comment, { maxLength: COMMENT_LIMIT });
+      const safeVoter = sanitizeForPrompt(f.voter);
+      const safeFile = sanitizeForPrompt(f.file);
+      const safeLine = sanitizeForPrompt(f.line);
+      const safeSeverity = sanitizeForPrompt(f.severity);
+      return `${i}. [voter=${safeVoter}] [${safeSeverity}] ${safeFile}:${safeLine} — <comment>${safeComment}</comment>`;
     })
     .join("\n");
 
@@ -131,15 +129,13 @@ export async function groupAllFindings(kept, dropped, callModel) {
 
   const findingsList = all
     .map((f, i) => {
-      const safeComment = f.comment
-        .slice(0, 300)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
-      const safeFile = String(f.file)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
+      const safeComment = sanitizeForPrompt(f.comment, { maxLength: COMMENT_LIMIT });
+      const safeFile = sanitizeForPrompt(f.file);
+      const safeLine = sanitizeForPrompt(f.line);
+      const safeAgent = sanitizeForPrompt(f.agent);
+      const safeSeverity = sanitizeForPrompt(f.severity);
       const tag = f._status === "kept" ? "KEPT" : "DROPPED";
-      return `${i}. [${tag}] [${f.agent}] [${f.severity}] ${safeFile}:${f.line} — <comment>${safeComment}</comment>`;
+      return `${i}. [${tag}] [${safeAgent}] [${safeSeverity}] ${safeFile}:${safeLine} — <comment>${safeComment}</comment>`;
     })
     .join("\n");
 

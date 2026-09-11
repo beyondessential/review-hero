@@ -53,3 +53,5 @@ export {
 } from "./summary.mjs";
 
 export { createAnthropicModelCaller } from "./anthropic.mjs";
+
+export { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
