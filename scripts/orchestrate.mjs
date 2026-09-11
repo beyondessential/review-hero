@@ -21,20 +21,27 @@
  *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
  */
 
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
-import { loadSuppressions, filterWithSuppressions } from "./suppress.mjs";
 import {
   findRejectedFindings,
   generateSuppressions,
 } from "./learn-from-reactions.mjs";
 import { join } from "node:path";
 import { MAX_VOTERS } from "./lib.mjs";
-
-const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
-const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const SEVERITY_ORDER = { critical: 0, suggestion: 1, nitpick: 2 };
-const SUMMARY_HEADER = "🦸 **Review Hero Summary**";
+import {
+  parseAgentResult,
+  extractJsonArray,
+  applyConsensus,
+  groupAllFindings,
+  loadSuppressions,
+  filterWithSuppressions,
+  VALID_AGENT_KEY,
+  SUMMARY_HEADER,
+  buildSummaryHeader,
+  buildSummaryTable,
+  createAnthropicModelCaller,
+} from "../src/index.mjs";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,435 +62,11 @@ function loadAgentNames() {
   }
 }
 
-// ── Finding parsing ──────────────────────────────────────────────────────────
-
-function validateFindings(findings, agentKey, voter) {
-  return findings
-    .filter(
-      (f) =>
-        typeof f.file === "string" &&
-        f.file &&
-        VALID_SEVERITIES.has(f.severity) &&
-        typeof f.comment === "string" &&
-        f.comment &&
-        typeof f.line === "number" &&
-        f.line > 0,
-    )
-    .map((f) => ({
-      file: f.file,
-      line: f.line,
-      severity: f.severity,
-      comment: f.comment,
-      agent: agentKey,
-      ...(voter !== undefined && { voter: `${agentKey}-${voter}` }),
-    }));
-}
-
-/**
- * Extract the first JSON array embedded in `text` by trying [start..end]
- * pairs. Returns the parsed array, or null if none is found.
- */
-function extractJsonArray(text) {
-  let searchFrom = 0;
-  while (searchFrom < text.length) {
-    const start = text.indexOf("[", searchFrom);
-    if (start === -1) break;
-    let searchEnd = text.length;
-    while (searchEnd > start) {
-      const end = text.lastIndexOf("]", searchEnd - 1);
-      if (end <= start) break;
-      try {
-        const parsed = JSON.parse(text.slice(start, end + 1));
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        // Not valid JSON for this pair — try a shorter span
-      }
-      searchEnd = end;
-    }
-    searchFrom = start + 1;
-  }
-  return null;
-}
-
-/**
- * Parse agent output. Returns null on failure (agent produced no usable
- * output), distinct from [] which means "completed OK, no findings".
- */
-function parseAgentResult(filePath, agentKey, voter) {
-  let raw;
-  try {
-    raw = readFileSync(filePath, "utf-8");
-  } catch (err) {
-    console.warn(`Failed to read ${filePath}: ${err.message}`);
-    return null;
-  }
-
-  // The Claude CLI --output-format json wraps the agent's answer in an
-  // envelope object whose text output lives in `.result`. Every other field
-  // (iterations, modelUsage, …) is CLI metadata and must never be mined for
-  // findings — doing so turns an errored run into a bogus empty result.
-  let text = raw;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      // Agent emitted a bare JSON array as the whole file.
-      return validateFindings(parsed, agentKey, voter);
-    }
-    if (parsed && typeof parsed === "object") {
-      // An errored run (e.g. max-turns budget exhaustion) has no `result`
-      // string and produced no answer. Treat it as a failure, not silently
-      // as zero findings, and don't scan the envelope's own arrays.
-      if (parsed.is_error || typeof parsed.result !== "string") {
-        const reason = parsed.subtype ?? parsed.stop_reason ?? "no result field";
-        console.warn(`${filePath}: agent produced no usable output (${reason})`);
-        return null;
-      }
-      text = parsed.result;
-    }
-  } catch {
-    // A file that opens with `{` is a CLI envelope that never finished being
-    // written (step timeout, killed process, truncated artifact). Its
-    // metadata arrays are not findings, so fail rather than scanning them —
-    // the same reason we don't mine a complete errored envelope above.
-    if (raw.trimStart().startsWith("{")) {
-      console.warn(`${filePath}: truncated or malformed CLI envelope`);
-      return null;
-    }
-    // Otherwise it's not an envelope at all — treat the raw file as the
-    // agent's own text output.
-  }
-
-  const findings = extractJsonArray(text);
-  if (findings !== null) {
-    return validateFindings(findings, agentKey, voter);
-  }
-
-  // The agent is required to emit a JSON array — `[]` when it finds nothing.
-  // Prose instead of an array means it ignored the output contract, so we
-  // can't tell "no issues" from "never got to the answer". Treat it as a
-  // failure so it shows up rather than silently voting zero findings.
-  console.warn(`No JSON array found in ${filePath}`);
-  return null;
-}
-
-// ── Voter consensus ──────────────────────────────────────────────────────────
-
-/**
- * Apply voter consensus using Sonnet to semantically determine whether
- * findings from different voters are about the same issue.
- *
- * Sonnet receives all findings and returns which ones to keep — i.e. the
- * deduplicated set of issues that a majority of voters agree on.
- *
- * Falls back to keeping all findings (stripped of voter tags) on error.
- */
-async function applyConsensus(findings, voterCount, { apiKey, baseUrl }) {
-  if (voterCount <= 1) {
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
-  }
-
-  if (!apiKey) {
-    console.warn("No API key for consensus — keeping all findings");
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
-  }
-
-  const threshold = Math.floor(voterCount / 2) + 1;
-
-  const findingsList = findings
-    .map((f, i) => {
-      const safeComment = f.comment
-        .slice(0, 300)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
-      const safeVoter = String(f.voter).replace(/[\r\n]+/g, " ");
-      const safeFile = String(f.file)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
-      const safeLine = String(f.line).replace(/[\r\n]+/g, " ");
-      return `${i}. [voter=${safeVoter}] [${f.severity}] ${safeFile}:${safeLine} — <comment>${safeComment}</comment>`;
-    })
-    .join("\n");
-
-  try {
-    const response = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-5",
-        max_tokens: 2000,
-        // Mechanical grouping — no reasoning needed, and thinking would eat
-        // into the token budget the JSON output needs.
-        thinking: { type: "disabled" },
-        messages: [
-          {
-            role: "user",
-            content: `You are deduplicating code review findings from ${voterCount} independent voters. Each voter reviewed the same code independently.
-
-## Grouping rules
-
-Two findings belong in the SAME group if they describe the same root problem, even if they:
-- Use completely different wording or framing
-- Reference different but nearby lines in the same file (e.g. line 48 vs 55)
-- Have different severity levels
-- Approach the issue from different angles (e.g. "missing try/catch" vs "JSON.parse can throw" vs "no error handling")
-- One is more specific than the other (e.g. "no validation" vs "no validation on JSON.parse input")
-
-Two findings belong in DIFFERENT groups only if fixing one would NOT fix the other.
-
-## Threshold
-
-For each group, count the number of distinct voters (use the voter= tag). If >= ${threshold} distinct voters flagged it, keep the single best-worded finding as the representative.
-
-## Findings
-${findingsList}
-
-Output a JSON array of finding indices (0-based) — only the best-worded representative from each group that meets the ${threshold}-voter threshold.
-
-Example: [0, 3]`,
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API ${response.status}: ${await response.text()}`);
-    }
-
-    const result = await response.json();
-    const text = result.content?.[0]?.text ?? "";
-
-    const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < findings.length;
-
-    const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
-    if (!arrMatch) {
-      console.warn("Consensus returned no parseable output — keeping all");
-      return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
-    }
-    const keptIndices = new Set(JSON.parse(arrMatch[0]).map(Number).filter(validIndex));
-
-    const kept = findings
-      .filter((_, i) => keptIndices.has(i))
-      .map(({ voter, ...rest }) => rest);
-    const droppedFindings = findings
-      .filter((_, i) => !keptIndices.has(i))
-      .map(({ voter, ...rest }) => rest);
-
-    console.log(
-      `Consensus: kept ${kept.length}, dropped ${droppedFindings.length} (${threshold}/${voterCount} voter threshold)`,
-    );
-    return { kept, dropped: droppedFindings.length, droppedFindings };
-  } catch (err) {
-    console.warn(`Consensus filter failed, keeping all: ${err.message}`);
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
-  }
-}
-
-// ── Cross-agent grouping (Phase 2) ──────────────────────────────────────────
-
-/**
- * Group ALL findings (kept + dropped) across all agents using Sonnet.
- * Picks the best-worded comment per group. Returns grouped findings split
- * into kept groups (any member passed consensus) and dropped groups (none did).
- */
-async function groupAllFindings(kept, dropped, { apiKey, baseUrl }) {
-  const all = [
-    ...kept.map((f) => ({ ...f, _status: "kept" })),
-    ...dropped.map((f) => ({ ...f, _status: "dropped" })),
-  ];
-
-  if (all.length <= 1 || !apiKey) {
-    return {
-      keptGroups: kept.map((f) => ({ representative: f, members: [f] })),
-      droppedGroups: dropped.map((f) => ({ representative: f, members: [f] })),
-    };
-  }
-
-  const findingsList = all
-    .map((f, i) => {
-      const safeComment = f.comment
-        .slice(0, 300)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
-      const safeFile = String(f.file)
-        .replace(/[\r\n]+/g, " ")
-        .replace(/<\/?comment>/gi, "");
-      const tag = f._status === "kept" ? "KEPT" : "DROPPED";
-      return `${i}. [${tag}] [${f.agent}] [${f.severity}] ${safeFile}:${f.line} — <comment>${safeComment}</comment>`;
-    })
-    .join("\n");
-
-  try {
-    const response = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-5",
-        max_tokens: 2000,
-        // Mechanical grouping — no reasoning needed, and thinking would eat
-        // into the token budget the JSON output needs.
-        thinking: { type: "disabled" },
-        messages: [
-          {
-            role: "user",
-            content: `You are grouping code review findings from multiple independent review agents. Some findings passed voter consensus (KEPT), others did not (DROPPED). Different agents may have flagged the same underlying issue.
-
-## Grouping rules
-
-Two findings belong in the SAME group if they describe the same root problem, even if they:
-- Come from different agents (bugs, security, performance, etc.)
-- Have different KEPT/DROPPED status
-- Use different wording, severity, or framing
-- Reference different but nearby lines in the same file
-- Approach the issue from different angles (e.g. "missing try/catch" vs "JSON.parse can throw")
-
-Two findings belong in DIFFERENT groups only if fixing one would NOT fix the other.
-
-For each group, pick the single best-worded finding as the representative.
-
-## Findings
-${findingsList}
-
-Output a JSON object mapping representative index to array of group member indices.
-Example: {"0": [0, 3, 7], "2": [2], "5": [5, 8]}`,
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API ${response.status}: ${await response.text()}`);
-    }
-
-    const result = await response.json();
-    const text = result.content?.[0]?.text ?? "";
-
-    // Extract JSON object using bracket-pair scanning (not greedy regex,
-    // which would break if the LLM adds explanatory text with braces).
-    let parsed = null;
-    let searchFrom = 0;
-    while (searchFrom < text.length) {
-      const start = text.indexOf("{", searchFrom);
-      if (start === -1) break;
-      let searchEnd = text.length;
-      while (searchEnd > start) {
-        const end = text.lastIndexOf("}", searchEnd - 1);
-        if (end <= start) break;
-        try {
-          const candidate = JSON.parse(text.slice(start, end + 1));
-          if (typeof candidate === "object" && !Array.isArray(candidate)) {
-            parsed = candidate;
-            break;
-          }
-        } catch {
-          // Not valid JSON for this pair — try a shorter span
-        }
-        searchEnd = end;
-      }
-      if (parsed) break;
-      searchFrom = start + 1;
-    }
-    if (!parsed) {
-      throw new Error("No parseable JSON object in response");
-    }
-    const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < all.length;
-    const keptGroups = [];
-    const droppedGroups = [];
-    const assigned = new Set();
-
-    for (const [repStr, members] of Object.entries(parsed)) {
-      const rep = Number(repStr);
-      if (!validIndex(rep) || !Array.isArray(members)) continue;
-      const validMembers = members.map(Number).filter(validIndex);
-      if (validMembers.length === 0) continue;
-
-      const allMembers = [rep, ...validMembers.filter((m) => m !== rep)];
-      for (const m of allMembers) assigned.add(m);
-
-      const memberFindings = allMembers.map((m) => all[m]);
-      const hasKept = memberFindings.some((f) => f._status === "kept");
-      // Strip _status before returning
-      const clean = (f) => { const { _status, ...rest } = f; return rest; };
-      const group = {
-        representative: clean(all[rep]),
-        members: memberFindings.map(clean),
-      };
-
-      if (hasKept) {
-        keptGroups.push(group);
-      } else {
-        droppedGroups.push(group);
-      }
-    }
-
-    // Add unassigned findings
-    for (let i = 0; i < all.length; i++) {
-      if (assigned.has(i)) continue;
-      const { _status, ...rest } = all[i];
-      const group = { representative: rest, members: [rest] };
-      if (_status === "kept") {
-        keptGroups.push(group);
-      } else {
-        droppedGroups.push(group);
-      }
-    }
-
-    console.log(
-      `Cross-agent grouping: ${all.length} findings → ${keptGroups.length} kept groups, ${droppedGroups.length} dropped groups`,
-    );
-    return { keptGroups, droppedGroups };
-  } catch (err) {
-    console.warn(`Cross-agent grouping failed: ${err.message}`);
-    const clean = (f) => { const { _status, ...rest } = f; return rest; };
-    return {
-      keptGroups: kept.map((f) => ({ representative: clean(f), members: [clean(f)] })),
-      droppedGroups: dropped.map((f) => ({ representative: clean(f), members: [clean(f)] })),
-    };
-  }
-}
-
 // ── Comment formatting ───────────────────────────────────────────────────────
 
 function buildInlineComment(f, agentNames) {
   const agentName = agentNames[f.agent] ?? f.agent;
   return `**[${agentName}]** \`${f.severity}\`\n\n${f.comment}`;
-}
-
-function buildSummaryHeader({ round, agentsCompleted, agentsFailed, counts }) {
-  return (
-    `${SUMMARY_HEADER}${round ? ` (round ${round})` : ""}\n` +
-    `**${agentsCompleted} agent${agentsCompleted === 1 ? "" : "s"}** reviewed this PR` +
-    (agentsFailed > 0 ? ` | ${agentsFailed} failed` : "") +
-    ` | ${counts.critical} critical` +
-    ` | ${counts.suggestion} suggestion${counts.suggestion === 1 ? "" : "s"}` +
-    ` | ${counts.nitpick} nitpick${counts.nitpick === 1 ? "" : "s"}`
-  );
-}
-
-function buildSummaryTable(nitpicks, agentNames) {
-  if (nitpicks.length === 0) return "";
-
-  const rows = nitpicks
-    .map((f) => {
-      const agentName = agentNames[f.agent] ?? f.agent;
-      const shortComment =
-        f.comment.length > 300 ? `${f.comment.slice(0, 297)}...` : f.comment;
-      const escaped = shortComment
-        .replace(/\\/g, "\\\\")
-        .replace(/\|/g, "\\|")
-        .replace(/\n/g, " ");
-      return `| \`${f.file}\` | ${f.line} | ${agentName} | ${escaped} |`;
-    })
-    .join("\n");
-
-  return `### Nitpicks\n\n| File | Line | Agent | Comment |\n|------|------|-------|---------|\n${rows}`;
 }
 
 // ── GitHub API ───────────────────────────────────────────────────────────────
@@ -678,6 +261,13 @@ async function main() {
     process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   const repo = getEnvOrThrow("GITHUB_REPOSITORY");
 
+  // The filtering stages reach the model through a caller-supplied function;
+  // this repo backs it with the Anthropic API. Null when no key is set, which
+  // makes consensus, grouping, and suppression keep every finding.
+  const callModel = apiKey
+    ? createAnthropicModelCaller({ apiKey, baseUrl: anthropicBaseUrl })
+    : null;
+
   console.log(`Orchestrating AI review for PR #${prNumber}`);
   if (voterCount > 1) {
     console.log(`Voter consensus enabled: ${voterCount} voters per agent`);
@@ -803,7 +393,7 @@ async function main() {
     const entries = [...findingsByAgent.entries()];
     const results = await Promise.all(
       entries.map(([, agentFindings]) =>
-        applyConsensus(agentFindings, voterCount, { apiKey, baseUrl: anthropicBaseUrl })
+        applyConsensus(agentFindings, voterCount, callModel)
       )
     );
     for (const c of results) {
@@ -829,7 +419,7 @@ async function main() {
       const { kept, suppressed } = await filterWithSuppressions(
         findings,
         allSuppressions,
-        { apiKey, baseUrl: anthropicBaseUrl },
+        callModel,
       );
       suppressedCount = suppressed.length;
       if (suppressedCount > 0) {
@@ -852,7 +442,7 @@ async function main() {
   const { keptGroups, droppedGroups } = await groupAllFindings(
     findings,
     allDroppedFindings,
-    { apiKey, baseUrl: anthropicBaseUrl },
+    callModel,
   );
 
   // Split kept groups by severity

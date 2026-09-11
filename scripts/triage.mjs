@@ -17,55 +17,15 @@
  *   FILTERED_DIFF_PATH  — Where to write the filtered diff for agents to consume
  */
 
-import {
-  readFileSync,
-  writeFileSync,
-  readdirSync,
-  existsSync,
-  appendFileSync,
-} from "node:fs";
-import { basename, join } from "node:path";
-import { execSync } from "node:child_process";
+import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { MAX_VOTERS } from "./lib.mjs";
-
-// ── Defaults ────────────────────────────────────────────────────────────────
-
-const DEFAULT_IGNORE_PATTERNS = [
-  "package-lock.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "Cargo.lock",
-  "go.sum",
-  "composer.lock",
-  "Gemfile.lock",
-  "poetry.lock",
-  "bun.lockb",
-  "flake.lock",
-  "*.generated.*",
-];
-
-const BASE_AGENTS = {
-  bugs: {
-    name: "Bugs & Correctness",
-    description:
-      "Logic errors, edge cases, null access, race conditions, concurrency, type mismatches, error handling",
-  },
-  performance: {
-    name: "Performance",
-    description:
-      "Expensive loops, unbounded growth, N+1 queries, resource exhaustion, unnecessary allocations, missing pagination",
-  },
-  design: {
-    name: "Design & Architecture",
-    description:
-      "Architecture, separation of concerns, wrong abstractions, DRY violations, over-engineering",
-  },
-  security: {
-    name: "Security",
-    description:
-      "Injection, XSS, auth bypass, sensitive data exposure, input validation, path traversal, SSRF, hardcoded secrets",
-  },
-};
+import {
+  DEFAULT_IGNORE_PATTERNS,
+  filterDiff,
+  loadCallerConfig,
+  discoverBaseAgents,
+  discoverCustomAgents,
+} from "../src/index.mjs";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,148 +38,6 @@ function envOrDie(name) {
   return val;
 }
 
-/**
- * Agent keys must be safe for use in filenames, artifact names, and shell
- * interpolation. Allow only lowercase alphanumeric characters and hyphens.
- */
-const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-function isValidAgentKey(key) {
-  return VALID_AGENT_KEY.test(key);
-}
-
-/**
- * Rudimentary glob match — supports `*` (any within segment) and `**` (any
- * path depth).  Good enough for lockfile patterns; we don't need full minimatch.
- */
-function globMatch(pattern, filePath) {
-  // Direct basename match (e.g. "package-lock.json" matches "foo/package-lock.json")
-  if (!pattern.includes("/") && !pattern.includes("**")) {
-    const name = basename(filePath);
-    return simpleWildcard(pattern, name);
-  }
-  // Path-based patterns with **
-  const regex = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "__GLOBSTAR__")
-    .replace(/\*/g, "[^/]*")
-    .replace(/__GLOBSTAR__/g, ".*");
-  return new RegExp(`^${regex}$`).test(filePath);
-}
-
-function simpleWildcard(pattern, str) {
-  const regex = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*");
-  return new RegExp(`^${regex}$`).test(str);
-}
-
-/**
- * Split a unified diff into per-file sections and filter out ignored files.
- * Returns { filtered: string, removedFiles: string[] }.
- */
-function filterDiff(rawDiff, patterns) {
-  const sections = [];
-  let current = null;
-
-  for (const line of rawDiff.split("\n")) {
-    const fileMatch = line.match(/^diff --git a\/.+ b\/(.+)$/);
-    if (fileMatch) {
-      if (current) sections.push(current);
-      current = { file: fileMatch[1], lines: [line] };
-    } else if (current) {
-      current.lines.push(line);
-    }
-  }
-  if (current) sections.push(current);
-
-  const removedFiles = [];
-  const kept = [];
-
-  for (const section of sections) {
-    const dominated = patterns.some((p) => globMatch(p, section.file));
-    if (dominated) {
-      removedFiles.push(section.file);
-    } else {
-      kept.push(section.lines.join("\n"));
-    }
-  }
-
-  return { filtered: kept.join("\n"), removedFiles };
-}
-
-// ── Config loading ──────────────────────────────────────────────────────────
-
-function loadCallerConfig(callerDir) {
-  const configPath = join(callerDir, ".github", "review-hero", "config.yml");
-  if (!existsSync(configPath)) return {};
-  try {
-    const json = execSync(`yq -o=json '.' ${configPath}`, {
-      encoding: "utf-8",
-    });
-    return JSON.parse(json);
-  } catch (err) {
-    console.warn(`Failed to parse ${configPath}: ${err.message}`);
-    return {};
-  }
-}
-
-// ── Agent discovery ─────────────────────────────────────────────────────────
-
-function discoverBaseAgents(reviewHeroDir) {
-  const promptsDir = join(reviewHeroDir, "prompts");
-  const agents = [];
-
-  for (const [key, meta] of Object.entries(BASE_AGENTS)) {
-    const promptFile = `${key}.md`;
-    const promptPath = join(promptsDir, promptFile);
-    if (!existsSync(promptPath)) {
-      console.warn(`Base prompt missing: ${promptPath}`);
-      continue;
-    }
-    agents.push({
-      key,
-      name: meta.name,
-      description: meta.description,
-      source: "base",
-    });
-  }
-
-  return agents;
-}
-
-function discoverCustomAgents(callerDir, config) {
-  const promptsDir = join(callerDir, ".github", "review-hero", "prompts");
-  if (!existsSync(promptsDir)) return [];
-
-  const agents = [];
-  const configAgents = config.agents || {};
-
-  for (const file of readdirSync(promptsDir)) {
-    if (!file.endsWith(".md")) continue;
-    const key = file.replace(/\.md$/, "");
-
-    if (!isValidAgentKey(key)) {
-      console.warn(
-        `Skipping custom agent prompt "${file}": key "${key}" is invalid (must match ${VALID_AGENT_KEY})`,
-      );
-      continue;
-    }
-
-    const meta = configAgents[key] || {};
-
-    agents.push({
-      key,
-      name:
-        meta.name ||
-        key.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-      description: meta.description || `Custom review agent: ${key}`,
-      source: "custom",
-    });
-  }
-
-  return agents;
-}
 
 // ── Main ────────────────────────────────────────────────────────────────────
 

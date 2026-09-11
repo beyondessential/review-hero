@@ -1,8 +1,11 @@
 /**
  * Review Hero — Suppression Filter
  *
- * Loads suppression rules from YAML and filters findings using Claude Haiku
- * to identify matches against known false-positive patterns.
+ * Loads suppression rules from YAML and filters findings against known
+ * false-positive patterns. The match judgement is delegated to a model, but
+ * the call is injected: `callModel({ model, maxTokens, messages }) =>
+ * Promise<string>` returns the model's text. This repo passes an
+ * Anthropic-backed implementation; other consumers pass their own.
  *
  * Suppressions file format (.github/review-hero/suppressions.yml):
  *
@@ -12,7 +15,8 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { parse as parseYaml } from "yaml";
+import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 
 /**
  * Load suppressions from a YAML file.
@@ -21,10 +25,7 @@ import { execFileSync } from "node:child_process";
 export function loadSuppressions(filePath) {
   if (!filePath || !existsSync(filePath)) return [];
   try {
-    const json = execFileSync("yq", ["-o=json", ".", filePath], {
-      encoding: "utf-8",
-    });
-    const parsed = JSON.parse(json);
+    const parsed = parseYaml(readFileSync(filePath, "utf-8"));
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((s) => s && typeof s.pattern === "string");
   } catch (err) {
@@ -39,38 +40,31 @@ const BATCH_SIZE = 50;
  * Strip control characters and cap length to limit blast radius
  * of a compromised suppressions file.
  */
-function sanitizeSuppressionField(str) {
+export function sanitizeSuppressionField(str) {
   if (typeof str !== "string") return "";
   return str.replace(/[\x00-\x1F\x7F]/g, " ").slice(0, 500);
 }
 
 /**
- * Call Haiku for a single batch of findings.
+ * Filter a single batch of findings against the suppression list.
  * Returns { kept: Finding[], suppressed: Finding[] }.
  */
-async function callHaikuForBatch(batch, suppressionList, { apiKey, baseUrl }) {
+export async function callHaikuForBatch(batch, suppressionList, callModel) {
   const findingsList = batch
     .map(
       (f, i) =>
-        `${i}. [${f.severity}] ${f.file}:${f.line} — ${f.comment.slice(0, 300)}`,
+        `${i}. [${sanitizeForPrompt(f.severity)}] ${sanitizeForPrompt(f.file)}:${sanitizeForPrompt(f.line)} — ${sanitizeForPrompt(f.comment, { maxLength: COMMENT_LIMIT })}`,
     )
     .join("\n");
 
   try {
-    const response = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1000,
-        messages: [
-          {
-            role: "user",
-            content: `You are filtering code review findings against suppression rules. A finding should be suppressed if it raises essentially the same concern a suppression rule describes, in a matching context. Be conservative — only suppress clear matches.
+    const text = await callModel({
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: 1000,
+      messages: [
+        {
+          role: "user",
+          content: `You are filtering code review findings against suppression rules. A finding should be suppressed if it raises essentially the same concern a suppression rule describes, in a matching context. Be conservative — only suppress clear matches.
 
 ## Suppression Rules
 ${suppressionList}
@@ -79,17 +73,9 @@ ${suppressionList}
 ${findingsList}
 
 Output ONLY a JSON array of finding indices (0-based) to SUPPRESS. Output \`[]\` if none match.`,
-          },
-        ],
-      }),
+        },
+      ],
     });
-
-    if (!response.ok) {
-      throw new Error(`API ${response.status}: ${await response.text()}`);
-    }
-
-    const result = await response.json();
-    const text = result.content?.[0]?.text ?? "";
 
     const lastOpen = text.lastIndexOf("[");
     const lastClose = text.lastIndexOf("]");
@@ -124,20 +110,17 @@ Output ONLY a JSON array of finding indices (0-based) to SUPPRESS. Output \`[]\`
 }
 
 /**
- * Use Claude Haiku to filter findings against suppression rules.
+ * Filter findings against suppression rules.
  * Returns { kept: Finding[], suppressed: Finding[] }.
  *
  * Findings are processed in batches of 50 to stay within context limits
  * and make partial failures recoverable (failed batches keep all findings).
  *
- * On failure, returns all findings as kept (safe fallback).
+ * On failure — or when no `callModel` is supplied — returns all findings as
+ * kept (safe fallback).
  */
-export async function filterWithSuppressions(
-  findings,
-  suppressions,
-  { apiKey, baseUrl },
-) {
-  if (suppressions.length === 0 || findings.length === 0) {
+export async function filterWithSuppressions(findings, suppressions, callModel) {
+  if (suppressions.length === 0 || findings.length === 0 || !callModel) {
     return { kept: findings, suppressed: [] };
   }
 
@@ -156,7 +139,7 @@ export async function filterWithSuppressions(
   }
 
   const batchResults = await Promise.all(
-    chunks.map((batch) => callHaikuForBatch(batch, suppressionList, { apiKey, baseUrl })),
+    chunks.map((batch) => callHaikuForBatch(batch, suppressionList, callModel)),
   );
 
   const allKept = batchResults.flatMap((r) => r.kept);
