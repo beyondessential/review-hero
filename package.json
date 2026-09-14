@@ -19,7 +19,9 @@
     "test": "node --test \"scripts/**/*.test.mjs\" \"src/**/*.test.mjs\""
   },
   "dependencies": {
-    "@actions/core": "^1.11.1",
     "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@actions/core": "^1.11.1"
   }
 }
