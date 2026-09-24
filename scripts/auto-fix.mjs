@@ -20,6 +20,7 @@
  *   CUSTOM_RULES_PATH   — Optional path to repo-specific rules to append to the prompt
  *   AI_RULES_PATH       — Optional path to AI rules file
  *   SELF_WORKFLOW        — Name of this workflow (to exclude from CI failure checks)
+ *   REVIEW_HERO_REF     — Review Hero ref the caller asked for (optional)
  */
 
 import { execSync, execFileSync } from "node:child_process";
@@ -45,6 +46,7 @@ import {
   buildBasePromptSections,
   copyCommitHelper,
   workflowLogsUrl,
+  createCompletionReporter,
 } from "./lib.mjs";
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -70,6 +72,48 @@ const aiRulesPath = process.env.AI_RULES_PATH ?? "";
 const selfWorkflow = process.env.SELF_WORKFLOW ?? "Review Hero Auto-Fix";
 
 const gh = createGitHubApi(token, repo);
+const completion = createCompletionReporter({ repo, prNumber });
+
+// ── Completion reporting ─────────────────────────────────────────────────────
+// spec: CMPL#auto-fix
+
+/** The commit the run started from, once it is known. */
+let baseSha = null;
+/** The head the run last pushed, or null when it has pushed nothing. */
+let pushedSha = null;
+
+function currentHead() {
+  return execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
+}
+
+/** Push, and record the head that was pushed (after any rebase onto the remote). */
+function push() {
+  pushChanges();
+  pushedSha = currentHead();
+}
+
+/** Paragraph naming the commit the run started from and the head it pushed, or "" when unknown. */
+function commitsParagraph() {
+  const base = completion.link(baseSha);
+  if (!base) return "";
+  const pushed = completion.link(pushedSha);
+  return `\n\n${pushed ? `Started from ${base}, pushed ${pushed}.` : `Started from ${base}.`}`;
+}
+
+/** The hidden completion block that ends every auto-fix comment, preceded by a blank line. */
+function completionBlock({ kind, outcome, fixRequested, counts }) {
+  return (
+    "\n\n" +
+    completion.block({
+      kind,
+      outcome,
+      ...(fixRequested !== undefined && { fixRequested }),
+      ...(baseSha && { baseSha }),
+      pushedSha,
+      ...(counts && { counts }),
+    })
+  );
+}
 
 // ── Data fetching ────────────────────────────────────────────────────────────
 
@@ -391,7 +435,7 @@ async function runSaveSuppressions() {
           `git commit -m "chore: add ${newSuppressions.length} suppression(s) from developer feedback"`,
         );
       }
-      pushChanges();
+      push();
       console.log(`Committed ${newSuppressions.length} new suppression(s)`);
     }
   }
@@ -410,6 +454,7 @@ async function runSaveSuppressions() {
 async function main() {
   excludeReviewHero();
   configureGitIdentity(appId, appSlug);
+  baseSha = currentHead();
 
   console.log(
     `Auto-fixing PR #${prNumber} (reviews: ${fixReviews}, ci: ${fixCI}, save suppressions: ${saveSuppressions})`,
@@ -434,6 +479,7 @@ async function main() {
   // requested, then exit before the Claude/auto-fix loop.
   if (comments.length === 0 && ciFailures.length === 0) {
     if (saveSuppressions) {
+      const fixRequested = fixReviews || fixCI;
       let saved = 0;
       try {
         saved = await runSaveSuppressions();
@@ -441,20 +487,36 @@ async function main() {
         console.warn(`Save suppressions failed: ${err.message}`);
         await gh.postComment(
           prNumber,
-          `🦸 **Review Hero** — Save suppressions failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.`,
+          `🦸 **Review Hero** — Save suppressions failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.` +
+            commitsParagraph() +
+            completionBlock({ kind: "save-suppressions", outcome: "failed", fixRequested }),
         );
         await uncheckCheckboxes();
         process.exit(1);
       }
-      const fixRequested = fixReviews || fixCI;
       const fixPrefix = fixRequested ? "Nothing to fix. " : "";
       const summary =
         saved > 0
           ? `🦸 **Review Hero** — ${fixPrefix}Saved ${saved} suppression${saved === 1 ? "" : "s"} from developer feedback.`
           : `🦸 **Review Hero** — ${fixPrefix}No new suppressions to save.`;
-      await gh.postComment(prNumber, summary);
+      await gh.postComment(
+        prNumber,
+        summary +
+          commitsParagraph() +
+          completionBlock({
+            kind: "save-suppressions",
+            outcome: saved > 0 ? "saved" : "none",
+            fixRequested,
+            counts: { saved },
+          }),
+      );
     } else {
-      await gh.postComment(prNumber, "🦸 **Review Hero Auto-Fix** — Nothing to fix.");
+      await gh.postComment(
+        prNumber,
+        "🦸 **Review Hero Auto-Fix** — Nothing to fix." +
+          commitsParagraph() +
+          completionBlock({ kind: "auto-fix", outcome: "nothing-to-fix" }),
+      );
     }
     await uncheckCheckboxes();
     return;
@@ -466,9 +528,6 @@ async function main() {
   const commitHelperPath = copyCommitHelper(prNumber);
 
   const prompt = buildPrompt(comments, ciFailures, { commitHelperPath });
-  const headBefore = execSync("git rev-parse HEAD", {
-    encoding: "utf-8",
-  }).trim();
   console.log("Running Claude to apply fixes...");
   let raw;
   try {
@@ -487,20 +546,18 @@ async function main() {
     // Even though Claude failed/timed out, it may have already committed some
     // fixes via the git-commit-fix helper. Push those partial results rather
     // than discarding them — partial fixing is better than nothing.
-    const headAfterFailure = execSync("git rev-parse HEAD", {
-      encoding: "utf-8",
-    }).trim();
+    const headAfterFailure = currentHead();
     const logsUrl = workflowLogsUrl(repo);
 
-    if (headBefore !== headAfterFailure) {
+    if (baseSha !== headAfterFailure) {
       console.log(
         "Claude failed but made commits before failing — pushing partial fixes",
       );
-      pushChanges();
+      push();
       // Filter out comments on files already touched by the partial commits
       // so the local fix prompt only contains genuinely outstanding items.
       const touchedFiles = new Set(
-        execFileSync("git", ["diff", "--name-only", `${headBefore}..HEAD`], {
+        execFileSync("git", ["diff", "--name-only", `${baseSha}..HEAD`], {
           encoding: "utf-8",
         })
           .trim()
@@ -514,12 +571,24 @@ async function main() {
         `🦸 **Review Hero Auto-Fix** partially completed before failing. ` +
         `Some fixes were pushed, but the session did not finish.\n\n` +
         `Check the [workflow logs](${logsUrl}) for details.` +
-        buildLocalFixPrompt(remainingComments);
+        commitsParagraph() +
+        buildLocalFixPrompt(remainingComments) +
+        completionBlock({
+          kind: "auto-fix",
+          outcome: "partial",
+          counts: { outstanding: remainingComments.length },
+        });
       await gh.postComment(prNumber, partialMsg);
     } else {
       const failMsg =
         `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${logsUrl}) for details.` +
-        buildLocalFixPrompt(comments);
+        commitsParagraph() +
+        buildLocalFixPrompt(comments) +
+        completionBlock({
+          kind: "auto-fix",
+          outcome: "failed",
+          counts: { outstanding: comments.length },
+        });
       await gh.postComment(prNumber, failMsg);
     }
     await uncheckCheckboxes();
@@ -628,14 +697,12 @@ async function main() {
   // Check if there are any commits to push (Claude's per-fix commits and/or
   // the leftover commit above). Compare HEAD now against HEAD before Claude ran;
   // avoids relying on @{u} which requires an upstream tracking ref to exist.
-  const headAfter = execSync("git rev-parse HEAD", {
-    encoding: "utf-8",
-  }).trim();
-  const hasCommitsToPush = headBefore !== headAfter;
+  const headAfter = currentHead();
+  const hasCommitsToPush = baseSha !== headAfter;
 
   let pushed = false;
   if (hasCommitsToPush) {
-    pushChanges();
+    push();
     pushed = true;
   } else {
     console.log("No commits to push");
@@ -660,6 +727,19 @@ async function main() {
     );
   }
 
+  // Save suppressions before posting the summary, so the summary reports the
+  // final head (including any suppressions commit) and how many were saved.
+  // This always runs at the end of an auto-fix run so that any 👎 reactions
+  // are captured even if the user didn't tick the `Save suppressions`
+  // checkbox. The checkbox only matters for triggering this step on its own
+  // (when there's nothing to auto-fix).
+  let suppressionsSaved = null;
+  try {
+    suppressionsSaved = await runSaveSuppressions();
+  } catch (err) {
+    console.warn(`Save suppressions failed: ${err.message}`);
+  }
+
   // Post summary
   const summaryParts = ["🦸 **Review Hero Auto-Fix**\n"];
 
@@ -680,9 +760,19 @@ async function main() {
     summaryParts.push("No file changes were needed.");
   }
 
+  summaryParts.push(commitsParagraph());
+
   if (skippedComments.length > 0) {
     summaryParts.push(
       `\n\nSkipped ${skippedComments.length} comment${skippedComments.length === 1 ? "" : "s"} (replied on each thread).`,
+    );
+  }
+
+  if (suppressionsSaved === null) {
+    summaryParts.push("\n\nSaving suppressions failed.");
+  } else if (suppressionsSaved > 0) {
+    summaryParts.push(
+      `\n\nSaved ${suppressionsSaved} suppression${suppressionsSaved === 1 ? "" : "s"} from developer feedback.`,
     );
   }
 
@@ -696,18 +786,22 @@ async function main() {
     summaryParts.push(localPrompt);
   }
 
+  summaryParts.push(
+    completionBlock({
+      kind: "auto-fix",
+      outcome: pushed ? "fixed" : "no-changes",
+      counts: {
+        reviewCommentsFixed: fixedComments.length,
+        reviewCommentsSkipped: skippedComments.length,
+        ciFailuresFixed: fixedCICount,
+        ciFailuresSkipped: skippedCIFailures.length,
+        ...(suppressionsSaved !== null && { suppressionsSaved }),
+      },
+    }),
+  );
+
   await gh.postComment(prNumber, summaryParts.join(""));
   await uncheckCheckboxes();
-
-  // Always run the suppressions step at the end of an auto-fix run so that
-  // any 👎 reactions are captured even if the user didn't tick the
-  // `Save suppressions` checkbox. The checkbox only matters for triggering
-  // this step on its own (when there's nothing to auto-fix).
-  try {
-    await runSaveSuppressions();
-  } catch (err) {
-    console.warn(`Save suppressions failed: ${err.message}`);
-  }
 
   console.log("Done");
 }
@@ -715,9 +809,16 @@ async function main() {
 main().catch(async (err) => {
   console.error(err);
   try {
+    const fixRequested = fixReviews || fixCI;
     await gh.postComment(
       prNumber,
-      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.`,
+      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.` +
+        commitsParagraph() +
+        completionBlock(
+          fixRequested
+            ? { kind: "auto-fix", outcome: pushedSha ? "partial" : "failed" }
+            : { kind: "save-suppressions", outcome: "failed", fixRequested },
+        ),
     );
     await uncheckCheckboxes();
   } catch {

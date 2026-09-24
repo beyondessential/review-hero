@@ -246,4 +246,5 @@ jobs:
           CUSTOM_RULES_PATH: ${{ steps.config.outputs.custom_rules_path }}
           AI_RULES_PATH: /tmp/ai-rules.md
           SELF_WORKFLOW: ${{ github.workflow }}
+          REVIEW_HERO_REF: ${{ inputs.ref }}
         run: node .review-hero/scripts/auto-fix.mjs
