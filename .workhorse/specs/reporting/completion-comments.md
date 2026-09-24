@@ -57,7 +57,9 @@ Completion comments are:
 
 - [ ] `outcome` is `fixed` when fixes were pushed, `no-changes` when the run finished without needing file changes, `partial` when some fixes were pushed before the run failed, `failed` when the run failed without pushing, and `nothing-to-fix` when there were no unresolved review comments or CI failures to work on.
 - [ ] `baseSha` is the commit the run started from, and `pushedSha` is the new head the run pushed, or `null` when it pushed nothing.
-- [ ] For `fixed` and `no-changes`, `counts` holds `reviewCommentsFixed`, `reviewCommentsSkipped`, `ciFailuresFixed`, and `ciFailuresSkipped`.
+- [ ] A run that finishes its fixes saves suppressions from developer feedback before posting its comment, so `pushedSha` is the final head, including any suppressions commit.
+- [ ] The comment for such a run reports how many suppressions were saved, or that saving them failed.
+- [ ] For `fixed` and `no-changes`, `counts` holds `reviewCommentsFixed`, `reviewCommentsSkipped`, `ciFailuresFixed`, `ciFailuresSkipped`, and `suppressionsSaved`, leaving out `suppressionsSaved` when saving suppressions failed.
 - [ ] For `partial` and `failed`, `counts` holds `outstanding`, the number of review comments listed in the comment's local fix prompt.
 - [ ] A run that failed before it could count its work leaves `counts` out, and leaves `baseSha` out if it failed before checking out a commit.
 
