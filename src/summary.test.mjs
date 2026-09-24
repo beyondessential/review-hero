@@ -7,6 +7,7 @@ import {
   formatCommitLink,
   buildCompletionBlock,
   parseCompletionBlock,
+  buildReviewResult,
 } from "./index.mjs";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -72,4 +73,63 @@ test("a comment without a completion block parses to null", () => {
   assert.equal(parseCompletionBlock(`${SUMMARY_HEADER}\nNo issues found.`), null);
   assert.equal(parseCompletionBlock(undefined), null);
   assert.equal(parseCompletionBlock("<!-- review-hero:completion {not json} -->"), null);
+});
+
+// ── Review result ────────────────────────────────────────────────────────────
+
+const group = (severity) => ({ representative: { severity }, members: [] });
+
+test("a review result counts kept groups by severity and reports the filtering figures", () => {
+  assert.deepEqual(
+    buildReviewResult({
+      reviewedSha: SHA,
+      agentsCompleted: 4,
+      agentsFailed: 1,
+      voters: 3,
+      keptGroups: [group("critical"), group("suggestion"), group("suggestion"), group("nitpick")],
+      droppedGroups: [group("suggestion"), group("nitpick")],
+      suppressedCount: 2,
+    }),
+    {
+      kind: "review",
+      outcome: "completed",
+      reviewedSha: SHA,
+      counts: {
+        agentsCompleted: 4,
+        agentsFailed: 1,
+        voters: 3,
+        critical: 1,
+        suggestion: 2,
+        nitpick: 1,
+        belowThreshold: 2,
+        suppressed: 2,
+      },
+    },
+  );
+});
+
+test("a review where no agent completed is a failed result with zero counts", () => {
+  const result = buildReviewResult({ reviewedSha: SHA, agentsCompleted: 0, agentsFailed: 3, voters: 1 });
+  assert.equal(result.outcome, "failed");
+  assert.deepEqual(result.counts, {
+    agentsCompleted: 0,
+    agentsFailed: 3,
+    voters: 1,
+    critical: 0,
+    suggestion: 0,
+    nitpick: 0,
+    belowThreshold: 0,
+    suppressed: 0,
+  });
+});
+
+test("a review result serialises into the review completion block", () => {
+  const result = buildReviewResult({ reviewedSha: SHA, agentsCompleted: 1, agentsFailed: 0, voters: 1 });
+  const block = buildCompletionBlock({ ...result, runUrl: null, reviewHero: { ref: null, sha: null } });
+  assert.deepEqual(parseCompletionBlock(block), {
+    schema: COMPLETION_SCHEMA,
+    ...result,
+    runUrl: null,
+    reviewHero: { ref: null, sha: null },
+  });
 });

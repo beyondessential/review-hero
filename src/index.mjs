@@ -56,6 +56,7 @@ export {
   formatCommitLink,
   buildCompletionBlock,
   parseCompletionBlock,
+  buildReviewResult,
 } from "./summary.mjs";
 
 export { createAnthropicModelCaller } from "./anthropic.mjs";

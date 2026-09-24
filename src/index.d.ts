@@ -263,6 +263,23 @@ export type CompletionBlock =
   | AutoFixCompletion
   | SaveSuppressionsCompletion;
 
+/** A review round's result as data: the `review` block without its run metadata. */
+export type ReviewResult = Omit<ReviewCompletion, "schema" | "runUrl" | "reviewHero">;
+
+/**
+ * Build a review round's result from the pipeline's outputs. The hosted review
+ * serialises this same object into its completion block.
+ */
+export function buildReviewResult(args: {
+  reviewedSha: string;
+  agentsCompleted: number;
+  agentsFailed: number;
+  voters: number;
+  keptGroups?: FindingGroup[];
+  droppedGroups?: FindingGroup[];
+  suppressedCount?: number;
+}): ReviewResult;
+
 /** `Omit` applied to each member of a union rather than to their common keys. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>

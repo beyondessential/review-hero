@@ -15,6 +15,9 @@ Cases marked "(smoke)" were checked by running the script against a stubbed GitH
 - [x] The reporter fills in `runUrl`, `reviewHero.ref`, and the resolved `reviewHero.sha`
 - [x] The run URL is null outside Actions, and the logs URL still falls back to the Actions page
 - [x] The summary header names the reviewed commit after the round (verifies spec: CMPL)
+- [x] The review result counts kept groups by severity and reports voters, below-threshold and suppressed figures (verifies spec: CMPL)
+- [x] A review with no completed agents is a `failed` result with zero counts (verifies spec: CMPL)
+- [x] A review result serialises into the review block and parses back unchanged (verifies spec: CMPL)
 
 ## Review
 

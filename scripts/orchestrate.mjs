@@ -42,6 +42,7 @@ import {
   SUMMARY_HEADER,
   buildSummaryHeader,
   buildSummaryTable,
+  buildReviewResult,
   createAnthropicModelCaller,
 } from "../src/index.mjs";
 
@@ -368,21 +369,14 @@ async function main() {
   }
 
   if (agentsCompleted === 0) {
-    const block = completion.block({
-      kind: "review",
-      outcome: "failed",
-      reviewedSha,
-      counts: {
+    const block = completion.block(
+      buildReviewResult({
+        reviewedSha,
         agentsCompleted,
         agentsFailed,
         voters: voterCount,
-        critical: 0,
-        suggestion: 0,
-        nitpick: 0,
-        belowThreshold: 0,
-        suppressed: 0,
-      },
-    });
+      }),
+    );
     await postComment(
       prNumber,
       `🦸 **Review Hero** was requested${reviewedLink ? ` for ${reviewedLink}` : ""} but could not complete — all agents failed. Check the workflow logs for details.\n\n${block}`,
@@ -461,14 +455,22 @@ async function main() {
     callModel,
   );
 
+  const result = buildReviewResult({
+    reviewedSha,
+    agentsCompleted,
+    agentsFailed,
+    voters: voterCount,
+    keptGroups,
+    droppedGroups,
+    suppressedCount,
+  });
+
   // Split kept groups by severity
   const inlineComments = [];
   const nitpicks = [];
-  const counts = { critical: 0, suggestion: 0, nitpick: 0 };
 
   for (const group of keptGroups) {
     const f = group.representative;
-    counts[f.severity]++;
 
     if (f.severity === "nitpick") {
       nitpicks.push(f);
@@ -514,7 +516,7 @@ async function main() {
       commitLink: reviewedLink,
       agentsCompleted,
       agentsFailed,
-      counts,
+      counts: result.counts,
     }),
   ];
 
@@ -580,22 +582,7 @@ async function main() {
     summaryParts.push(localPrompt);
   }
 
-  summaryParts.push(
-    "\n\n" +
-      completion.block({
-        kind: "review",
-        outcome: "completed",
-        reviewedSha,
-        counts: {
-          agentsCompleted,
-          agentsFailed,
-          voters: voterCount,
-          ...counts,
-          belowThreshold: droppedGroups.length,
-          suppressed: suppressedCount,
-        },
-      }),
-  );
+  summaryParts.push(`\n\n${completion.block(result)}`);
 
   await postComment(prNumber, summaryParts.join(""));
   console.log("Posted summary comment");

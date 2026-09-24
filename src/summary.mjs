@@ -65,6 +65,49 @@ export function parseCompletionBlock(body) {
   }
 }
 
+/**
+ * The result of a review round as data: the `review` completion block's fields
+ * other than the run metadata (`schema`, `runUrl`, `reviewHero`). Built from the
+ * review pipeline's outputs, so a consumer running the review itself gets the
+ * same figures the hosted review reports.
+ *
+ * @param {object} args
+ * @param {string} args.reviewedSha   The commit that was reviewed.
+ * @param {number} args.agentsCompleted
+ * @param {number} args.agentsFailed
+ * @param {number} args.voters        Voters per agent.
+ * @param {Array<{representative: {severity: string}}>} [args.keptGroups]
+ *   Groups that passed consensus, from `groupAllFindings`.
+ * @param {Array} [args.droppedGroups] Groups below the consensus threshold.
+ * @param {number} [args.suppressedCount] Findings removed by suppression rules.
+ */
+// spec: CMPL#review
+export function buildReviewResult({
+  reviewedSha,
+  agentsCompleted,
+  agentsFailed,
+  voters,
+  keptGroups = [],
+  droppedGroups = [],
+  suppressedCount = 0,
+}) {
+  const severities = { critical: 0, suggestion: 0, nitpick: 0 };
+  for (const group of keptGroups) severities[group.representative.severity]++;
+  return {
+    kind: "review",
+    outcome: agentsCompleted > 0 ? "completed" : "failed",
+    reviewedSha,
+    counts: {
+      agentsCompleted,
+      agentsFailed,
+      voters,
+      ...severities,
+      belowThreshold: droppedGroups.length,
+      suppressed: suppressedCount,
+    },
+  };
+}
+
 export function buildSummaryHeader({ round, commitLink, agentsCompleted, agentsFailed, counts }) {
   return (
     `${SUMMARY_HEADER}${round ? ` (round ${round})` : ""}` +
