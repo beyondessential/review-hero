@@ -33,7 +33,7 @@ Completion comments are:
 
 - [ ] Every completion comment ends with exactly one HTML comment of the form `<!-- review-hero:completion {…} -->`, where `{…}` is a single-line JSON object.
 - [ ] The block does not show when the comment is rendered on GitHub.
-- [ ] No value in the JSON can end the HTML comment early: any `>` in a value is written as the JSON escape `>`.
+- [ ] No value in the JSON can end the HTML comment early: any `>` in a value is written as the JSON escape `\u003e`.
 - [ ] The JSON carries only run metadata and counts, never finding or comment text.
 - [ ] The README documents every field and outcome in the block, for consumers.
 
@@ -58,7 +58,7 @@ Completion comments are:
 - [ ] `outcome` is `fixed` when fixes were pushed, `no-changes` when the run finished without needing file changes, `partial` when some fixes were pushed before the run failed, `failed` when the run failed without pushing, and `nothing-to-fix` when there were no unresolved review comments or CI failures to work on.
 - [ ] `baseSha` is the commit the run started from, and `pushedSha` is the new head the run pushed, or `null` when it pushed nothing.
 - [ ] A run that finishes its fixes saves suppressions from developer feedback before posting its comment, so `pushedSha` is the final head, including any suppressions commit.
-- [ ] The comment for such a run reports how many suppressions were saved, or that saving them failed.
+- [ ] The comment for such a run says how many suppressions were saved when it saved any, or that saving them failed.
 - [ ] For `fixed` and `no-changes`, `counts` holds `reviewCommentsFixed`, `reviewCommentsSkipped`, `ciFailuresFixed`, `ciFailuresSkipped`, and `suppressionsSaved`, leaving out `suppressionsSaved` when saving suppressions failed.
 - [ ] For `partial` and `failed`, `counts` holds `outstanding`, the number of review comments listed in the comment's local fix prompt.
 - [ ] A run that failed before it could count its work leaves `counts` out, and leaves `baseSha` out if it failed before checking out a commit.
@@ -69,4 +69,4 @@ Completion comments are:
 - [ ] `outcome` is `saved` when new suppressions were committed, `none` when there were no new suppressions to save, and `failed` when saving failed.
 - [ ] `fixRequested` is `true` when an auto-fix had also been requested and found nothing to fix, and `false` when only saving suppressions was requested.
 - [ ] `baseSha` is the commit the run started from, and `pushedSha` is the new head carrying the suppressions commit, or `null` when nothing was pushed.
-- [ ] `counts.saved` is the number of suppressions committed.
+- [ ] `counts.saved` is the number of suppressions committed, and `counts` is left out when saving failed.

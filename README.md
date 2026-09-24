@@ -290,6 +290,62 @@ Review Hero automatically learns from developer feedback:
 To reject a Review Hero finding: add a 👎 reaction to the comment. Optionally reply in the thread explaining why — this helps generate better suppression rules.
 
 
+## Completion comments
+
+When a review or auto-fix run ends, Review Hero posts a completion comment on the PR. Each one names the commit the run worked on, as a short SHA linked to the commit within the PR, and ends with a hidden, machine-readable block so other tools can track Review Hero without parsing the visible text:
+
+```
+<!-- review-hero:completion {"schema":1,"kind":"review","outcome":"completed","reviewedSha":"…","counts":{…},"runUrl":"…","reviewHero":{"ref":"v1","sha":"…"}} -->
+```
+
+The block is a single-line JSON object inside an HTML comment, so GitHub doesn't render it. Any `>` in a value is written as `\u003e`, so nothing inside the JSON can close the comment early. It carries only run metadata and counts, never finding text. A review is always made against one commit: the PR head as of the event that triggered it. The diff, the agents' checkout, and the inline comments all use that commit, even if the PR moves on while the review is running.
+
+`schema` is the version of the block's shape. Adding a field keeps the same number. Removing a field or changing what one means increments it. The library exports `parseCompletionBlock(body)` to read the block, and `buildCompletionBlock(fields)` to write one.
+
+### Fields on every block
+
+| Field | Description |
+|-------|-------------|
+| `schema` | Version of the block's shape (currently `1`) |
+| `kind` | `review`, `auto-fix`, or `save-suppressions` |
+| `outcome` | How the run ended; see below for the values each `kind` can have |
+| `runUrl` | The GitHub Actions run that posted the comment |
+| `reviewHero.ref` | The Review Hero ref the caller asked for, e.g. `v1` |
+| `reviewHero.sha` | The Review Hero commit that ref resolved to |
+
+All SHAs are full 40-character SHAs.
+
+### `review`
+
+Posted at the end of a review round, or when a review could not complete.
+
+| Field | Description |
+|-------|-------------|
+| `outcome` | `completed` when at least one agent returned results, `failed` when every agent failed |
+| `reviewedSha` | The commit that was reviewed |
+| `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed` |
+
+### `auto-fix`
+
+| Field | Description |
+|-------|-------------|
+| `outcome` | `fixed` (fixes pushed), `no-changes` (finished without file changes), `partial` (some fixes pushed before the run failed), `failed` (failed without pushing), `nothing-to-fix` (no unresolved review comments or CI failures) |
+| `baseSha` | The commit the run started from. Absent if the run failed before checking out a commit |
+| `pushedSha` | The new head the run pushed, or `null` if it pushed nothing. Includes any suppressions commit made at the end of the run |
+| `counts` | For `fixed` and `no-changes`: `reviewCommentsFixed`, `reviewCommentsSkipped`, `ciFailuresFixed`, `ciFailuresSkipped`, and `suppressionsSaved` (absent if saving suppressions failed). For `partial` and `failed`: `outstanding`, the number of review comments in the local fix prompt. Absent if the run failed before it could count its work |
+
+### `save-suppressions`
+
+Posted when an auto-fix run had nothing to fix and `Save suppressions` was ticked.
+
+| Field | Description |
+|-------|-------------|
+| `outcome` | `saved` (new suppressions committed), `none` (nothing new to save), `failed` |
+| `fixRequested` | `true` if auto-fix was also requested and found nothing to fix |
+| `baseSha` | The commit the run started from |
+| `pushedSha` | The new head carrying the suppressions commit, or `null` if nothing was pushed |
+| `counts` | `saved`, the number of suppressions committed. Absent when `outcome` is `failed` |
+
 ## Workflow inputs
 
 The caller workflow can pass these optional inputs:

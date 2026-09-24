@@ -124,6 +124,8 @@ This requires repo admin.
 | `APP_SLUG` | orchestrate, auto-fix | GitHub App slug, used to derive `{slug}[bot]` for identity matching and git commits |
 | `GITHUB_TOKEN` | orchestrate, auto-fix | App installation token for GitHub API calls |
 | `GITHUB_ACTIONS_TOKEN` | orchestrate | Built-in `GITHUB_TOKEN` used to uncheck the checkbox without re-triggering the workflow |
+| `REVIEWED_SHA` | orchestrate | PR head commit as of the triggering event; the commit the review is reported against and inline comments are anchored to |
+| `REVIEW_HERO_REF` | orchestrate, auto-fix | The `ref` input, reported in the completion comment block |
 
 ## Cross-org support
 
