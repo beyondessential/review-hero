@@ -177,6 +177,8 @@ export const SEVERITY_ORDER: Record<Severity, number>;
 
 export function buildSummaryHeader(args: {
   round: number | null;
+  /** Link to the reviewed commit, from `formatCommitLink`. */
+  commitLink?: string | null;
   agentsCompleted: number;
   agentsFailed: number;
   counts: { critical: number; suggestion: number; nitpick: number };
@@ -186,6 +188,103 @@ export function buildSummaryTable(
   nitpicks: Finding[],
   agentNames: Record<string, string>,
 ): string;
+
+// ── Completion comments ──────────────────────────────────────────────────────
+
+/** Marker that opens the machine-readable block in a completion comment. */
+export const COMPLETION_MARKER: string;
+
+/** Version of the completion block's shape. */
+export const COMPLETION_SCHEMA: number;
+
+/** Metadata every completion block carries. */
+interface CompletionBase {
+  schema: number;
+  /** The GitHub Actions run that posted the comment. */
+  runUrl: string | null;
+  reviewHero: {
+    /** The Review Hero ref the caller asked for, e.g. `v1`. */
+    ref: string | null;
+    /** The Review Hero commit that ref resolved to. */
+    sha: string | null;
+  };
+}
+
+export interface ReviewCompletion extends CompletionBase {
+  kind: "review";
+  outcome: "completed" | "failed";
+  reviewedSha: string;
+  counts: {
+    agentsCompleted: number;
+    agentsFailed: number;
+    voters: number;
+    critical: number;
+    suggestion: number;
+    nitpick: number;
+    belowThreshold: number;
+    suppressed: number;
+  };
+}
+
+export interface AutoFixCompletion extends CompletionBase {
+  kind: "auto-fix";
+  outcome: "fixed" | "no-changes" | "partial" | "failed" | "nothing-to-fix";
+  /** Absent when the run failed before checking out a commit. */
+  baseSha?: string;
+  pushedSha: string | null;
+  /**
+   * `fixed` / `no-changes`: fixed and skipped counts, plus `suppressionsSaved`
+   * unless saving suppressions failed. `partial` / `failed`: `outstanding`.
+   * Absent when the run failed before it could count its work.
+   */
+  counts?: {
+    reviewCommentsFixed?: number;
+    reviewCommentsSkipped?: number;
+    ciFailuresFixed?: number;
+    ciFailuresSkipped?: number;
+    suppressionsSaved?: number;
+    outstanding?: number;
+  };
+}
+
+export interface SaveSuppressionsCompletion extends CompletionBase {
+  kind: "save-suppressions";
+  outcome: "saved" | "none" | "failed";
+  fixRequested: boolean;
+  /** Absent when the run failed before checking out a commit. */
+  baseSha?: string;
+  pushedSha: string | null;
+  /** Absent when saving failed. */
+  counts?: { saved: number };
+}
+
+export type CompletionBlock =
+  | ReviewCompletion
+  | AutoFixCompletion
+  | SaveSuppressionsCompletion;
+
+/** `Omit` applied to each member of a union rather than to their common keys. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
+
+/** Short-SHA markdown link to a commit within its pull request, or null for a malformed SHA. */
+export function formatCommitLink(args: {
+  serverUrl: string;
+  repo: string;
+  prNumber: number | string;
+  sha: string | null | undefined;
+}): string | null;
+
+/** The hidden `<!-- review-hero:completion {…} -->` block; `schema` is filled in. */
+export function buildCompletionBlock(
+  fields: DistributiveOmit<CompletionBlock, "schema">,
+): string;
+
+/** The completion block in a comment body, or null when it has none. */
+export function parseCompletionBlock(
+  body: string | null | undefined,
+): CompletionBlock | null;
 
 // ── Anthropic-backed model caller ────────────────────────────────────────────
 

@@ -2,8 +2,9 @@
  * Review Hero — Summary formatting
  *
  * Formats the consolidated review summary a reviewer sees: the header line and
- * the nitpick table. Shared so a consumer presents the same summary this repo
- * does.
+ * the nitpick table. Also builds the pieces every completion comment shares:
+ * commit links and the hidden machine-readable block. Shared so a consumer
+ * presents the same summary this repo does.
  */
 
 /** Leading marker for a Review Hero summary comment, used to detect prior rounds. */
@@ -12,9 +13,62 @@ export const SUMMARY_HEADER = "🦸 **Review Hero Summary**";
 /** Severity sort order, most to least severe. */
 export const SEVERITY_ORDER = { critical: 0, suggestion: 1, nitpick: 2 };
 
-export function buildSummaryHeader({ round, agentsCompleted, agentsFailed, counts }) {
+/** Marker that opens the machine-readable block in a completion comment. */
+export const COMPLETION_MARKER = "review-hero:completion";
+
+/**
+ * Version of the completion block's shape. Adding a field keeps it; removing a
+ * field or changing what one means increments it.
+ */
+export const COMPLETION_SCHEMA = 1;
+
+const FULL_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * Link a commit within its pull request, shown as its short SHA.
+ *
+ * @returns {string | null} Markdown link, or null when `sha` is not a full SHA.
+ */
+export function formatCommitLink({ serverUrl, repo, prNumber, sha }) {
+  if (!FULL_SHA.test(sha ?? "")) return null;
+  return `[\`${sha.slice(0, 7)}\`](${serverUrl}/${repo}/pull/${prNumber}/commits/${sha})`;
+}
+
+/**
+ * Build the hidden block that ends every completion comment: an HTML comment
+ * holding a single-line JSON object.
+ *
+ * `>` is written as `\u003e` so no value can close the HTML comment early.
+ * JSON only has `>` inside strings, where the escape is equivalent.
+ */
+// spec: CMPL#machine-readable-block
+export function buildCompletionBlock(fields) {
+  const json = JSON.stringify({ schema: COMPLETION_SCHEMA, ...fields }).replace(
+    />/g,
+    "\\u003e",
+  );
+  return `<!-- ${COMPLETION_MARKER} ${json} -->`;
+}
+
+/**
+ * Read the completion block out of a comment body.
+ *
+ * @returns {object | null} The parsed block, or null when the body has none.
+ */
+export function parseCompletionBlock(body) {
+  const match = body?.match(/<!-- review-hero:completion (\{[^\n]*?\}) -->/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+export function buildSummaryHeader({ round, commitLink, agentsCompleted, agentsFailed, counts }) {
   return (
-    `${SUMMARY_HEADER}${round ? ` (round ${round})` : ""}\n` +
+    `${SUMMARY_HEADER}${round ? ` (round ${round})` : ""}` +
+    `${commitLink ? ` · reviewed ${commitLink}` : ""}\n` +
     `**${agentsCompleted} agent${agentsCompleted === 1 ? "" : "s"}** reviewed this PR` +
     (agentsFailed > 0 ? ` | ${agentsFailed} failed` : "") +
     ` | ${counts.critical} critical` +
