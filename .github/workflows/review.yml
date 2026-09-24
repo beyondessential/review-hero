@@ -194,13 +194,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # ── Get PR diff ──────────────────────────────────────────────────
+      # Diff at the reviewed commit (the PR head as of the triggering
+      # event), not the live PR head, so a push made while this run is
+      # queued doesn't change what the agents see. The agents check out
+      # the same commit, and the orchestrator anchors comments to it.
       - name: Get PR diff
         if: steps.check.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          gh pr diff ${{ github.event.pull_request.number }} \
-            --repo "${{ github.repository }}" > /tmp/pr.diff
+          gh api \
+            -H "Accept: application/vnd.github.diff" \
+            "repos/${{ github.repository }}/compare/${BASE_SHA}...${HEAD_SHA}" > /tmp/pr.diff
 
       # ── Triage ───────────────────────────────────────────────────────
       - name: Triage
@@ -592,6 +599,8 @@ jobs:
           GITHUB_ACTIONS_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_HERO_REF: ${{ inputs.ref }}
           ARTIFACTS_DIR: /tmp/artifacts
           AGENT_NAMES: ${{ needs.triage.outputs.agent_names }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}

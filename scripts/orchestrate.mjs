@@ -11,6 +11,8 @@
  *                         without re-triggering the workflow)
  *   GITHUB_REPOSITORY   — owner/repo
  *   PR_NUMBER           — Pull request number
+ *   REVIEWED_SHA        — PR head commit the agents reviewed
+ *   REVIEW_HERO_REF     — Review Hero ref the caller asked for (optional)
  *   ARTIFACTS_DIR       — Directory containing agent result files
  *   AGENT_NAMES         — JSON map of agent key → display name
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
@@ -28,7 +30,7 @@ import {
   generateSuppressions,
 } from "./learn-from-reactions.mjs";
 import { join } from "node:path";
-import { MAX_VOTERS } from "./lib.mjs";
+import { MAX_VOTERS, createCompletionReporter } from "./lib.mjs";
 import {
   parseAgentResult,
   extractJsonArray,
@@ -175,11 +177,6 @@ async function resolvePreviousReviewHeroThreads(prNumber, botLogin) {
   }
 }
 
-async function getLatestCommit(prNumber) {
-  const pr = await githubApi(`/pulls/${prNumber}`);
-  return pr.head.sha;
-}
-
 async function postReview(prNumber, commitSha, inlineComments) {
   const body = {
     commit_id: commitSha,
@@ -247,6 +244,8 @@ async function uncheckReviewHero(prNumber) {
 
 async function main() {
   const prNumber = getEnvOrThrow("PR_NUMBER");
+  // spec: CMPL#reviewed-commit
+  const reviewedSha = getEnvOrThrow("REVIEWED_SHA");
   const artifactsDir = getEnvOrThrow("ARTIFACTS_DIR");
   const agentNames = loadAgentNames();
   const appSlug = process.env.APP_SLUG || "review-hero";
@@ -260,6 +259,8 @@ async function main() {
   const anthropicBaseUrl =
     process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   const repo = getEnvOrThrow("GITHUB_REPOSITORY");
+  const completion = createCompletionReporter({ repo, prNumber });
+  const reviewedLink = completion.link(reviewedSha);
 
   // The filtering stages reach the model through a caller-supplied function;
   // this repo backs it with the Anthropic API. Null when no key is set, which
@@ -367,9 +368,24 @@ async function main() {
   }
 
   if (agentsCompleted === 0) {
+    const block = completion.block({
+      kind: "review",
+      outcome: "failed",
+      reviewedSha,
+      counts: {
+        agentsCompleted,
+        agentsFailed,
+        voters: voterCount,
+        critical: 0,
+        suggestion: 0,
+        nitpick: 0,
+        belowThreshold: 0,
+        suppressed: 0,
+      },
+    });
     await postComment(
       prNumber,
-      "🦸 **Review Hero** was requested but could not complete — all agents failed. Check the workflow logs for details.",
+      `🦸 **Review Hero** was requested${reviewedLink ? ` for ${reviewedLink}` : ""} but could not complete — all agents failed. Check the workflow logs for details.\n\n${block}`,
     );
     return;
   }
@@ -466,10 +482,11 @@ async function main() {
   }
 
   // Post inline review comments
+  // Anchored to the reviewed commit even if the PR has moved on since, so the
+  // comments sit on the code the agents actually saw.
   if (inlineComments.length > 0) {
-    const commitSha = await getLatestCommit(prNumber);
     try {
-      await postReview(prNumber, commitSha, inlineComments);
+      await postReview(prNumber, reviewedSha, inlineComments);
       console.log(`Posted ${inlineComments.length} inline review comments`);
     } catch (err) {
       console.error(`Failed to post inline review: ${err.message}`);
@@ -492,7 +509,13 @@ async function main() {
   }
 
   const summaryParts = [
-    buildSummaryHeader({ round, agentsCompleted, agentsFailed, counts }),
+    buildSummaryHeader({
+      round,
+      commitLink: reviewedLink,
+      agentsCompleted,
+      agentsFailed,
+      counts,
+    }),
   ];
 
   // Show filtering stats when non-trivial filtering occurred
@@ -556,6 +579,23 @@ async function main() {
   if (localPrompt) {
     summaryParts.push(localPrompt);
   }
+
+  summaryParts.push(
+    "\n\n" +
+      completion.block({
+        kind: "review",
+        outcome: "completed",
+        reviewedSha,
+        counts: {
+          agentsCompleted,
+          agentsFailed,
+          voters: voterCount,
+          ...counts,
+          belowThreshold: droppedGroups.length,
+          suppressed: suppressedCount,
+        },
+      }),
+  );
 
   await postComment(prNumber, summaryParts.join(""));
   console.log("Posted summary comment");
