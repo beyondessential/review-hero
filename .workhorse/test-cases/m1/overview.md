@@ -11,6 +11,8 @@ Cases marked "(smoke)" were checked by running the script against a stubbed GitH
 - [x] Untrusted text has block-shaped content replaced, and ordinary HTML comments are left alone (verifies spec: CMPL)
 - [x] A block quoted in a PR review thread cannot reach the body of the comment Review Hero posts (verifies spec: CMPL)
 - [x] A commit link is refused when the repo, PR number, or server URL could break out of the markdown link
+- [x] A block in a finding's text or file path is redacted from the nitpick table rather than reaching the posted comment (verifies spec: CMPL)
+- [x] (smoke) A forged block in an agent finding is redacted end to end, leaving the genuine block as the only one in the summary (verifies spec: CMPL)
 - [ ] A consumer reading a forged block on a non-Review-Hero comment rejects it on author, per the README guidance (verifies spec: CMPL)
 
 ## Shared helpers
@@ -49,7 +51,9 @@ Cases marked "(smoke)" were checked by running the script against a stubbed GitH
 - [ ] A push that has to rebase onto the remote reports the rebased head as `pushedSha`
 - [x] (smoke) A failing summary post is retried with the same block rather than a contradicting failure block, so exactly one completion comment goes out (verifies spec: CMPL)
 - [x] The Review Hero SHA is left unknown when the running copy sits inside another repository (verifies spec: CMPL)
-- [ ] A hung suppressions step cannot starve the completion comment: the model call is bounded and thread resolution runs concurrently
+- [x] (smoke) When even the retry fails, a short fallback comment goes out carrying the run's own block rather than a contradicting failure block (verifies spec: CMPL)
+- [x] Thread resolution runs concurrently but never exceeds its cap, and preserves order
+- [ ] A backlog of rejected findings larger than one batch stops at the suppressions deadline and saves what completed (verifies spec: CMPL)
 
 ## Save suppressions
 

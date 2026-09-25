@@ -36,6 +36,7 @@ Completion comments are:
 - [ ] No value in the JSON can end the HTML comment early: any `>` in a value is written as the JSON escape `\u003e`.
 - [ ] The JSON carries only run metadata and counts, never finding or comment text.
 - [ ] A run posts at most one completion comment, so a run that concludes and then fails to report does not follow up with a second comment contradicting the first.
+- [ ] A run that cannot post its full report still posts a short one carrying the block it concluded with, rather than nothing at all.
 - [ ] The README documents every field and outcome in the block, for consumers.
 
 ### Telling Review Hero's own block apart
@@ -44,7 +45,7 @@ A completion comment quotes text from the pull request, and anyone who can comme
 
 - [ ] Review Hero's own block is the last one in the comment, and everything it quotes from the pull request comes before it.
 - [ ] Reading a comment takes the last block in the body, so quoted text cannot stand in for the run's own result.
-- [ ] Text quoted from the pull request has block-shaped content replaced before it goes into a comment Review Hero posts.
+- [ ] Text quoted from the pull request has block-shaped content replaced before it goes into a comment Review Hero posts. This covers finding text, file paths, and the local fix prompt, since a finding quotes the diff and so carries whatever anyone who can push to the branch wrote.
 - [ ] The README tells consumers that a block is only Review Hero's when the comment was authored by the Review Hero app, since the block alone proves nothing.
 
 ### Fields
@@ -72,6 +73,7 @@ A completion comment quotes text from the pull request, and anyone who can comme
 - [ ] `outcome` is `fixed` when fixes were pushed, `no-changes` when the run finished without needing file changes, `partial` when some fixes were pushed before the run failed, `failed` when the run failed without pushing, and `nothing-to-fix` when there were no unresolved review comments or CI failures to work on.
 - [ ] `baseSha` is the commit the run started from, and `pushedSha` is the new head the run pushed, or `null` when it pushed nothing.
 - [ ] A run that finishes its fixes saves suppressions from developer feedback before posting its comment, so `pushedSha` is the final head, including any suppressions commit.
+- [ ] Saving suppressions is bounded, so however much developer feedback is waiting, it cannot hold up the comment: the run saves what it can in the time and reports that.
 - [ ] The comment for such a run says how many suppressions were saved when it saved any, or that saving them failed.
 - [ ] For `fixed` and `no-changes`, `counts` holds `reviewCommentsFixed`, `reviewCommentsSkipped`, `ciFailuresFixed`, `ciFailuresSkipped`, and `suppressionsSaved`, leaving out `suppressionsSaved` when saving suppressions failed.
 - [ ] For `partial` and `failed`, `counts` holds `outstanding`, the number of review comments listed in the comment's local fix prompt.
