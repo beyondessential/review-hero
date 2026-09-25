@@ -47,6 +47,7 @@ import {
   copyCommitHelper,
   workflowLogsUrl,
   createCompletionReporter,
+  mapWithConcurrency,
 } from "./lib.mjs";
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -104,6 +105,11 @@ function commitsParagraph() {
 let reported = false;
 /** A composed completion comment that has not been posted yet. */
 let pendingComment = null;
+
+/** The completion block a composed comment ends with. */
+function trailingBlock(body) {
+  return body.match(/<!-- review-hero:completion \{[^\n]*?\} -->$/)?.[0] ?? "";
+}
 
 /**
  * Post the run's completion comment. Exactly one goes out per run: the body is
@@ -219,6 +225,9 @@ async function fetchUnresolvedComments() {
 
   return comments;
 }
+
+/** Thread resolutions in flight at once. Kept well under GitHub's throttling thresholds. */
+const RESOLVE_CONCURRENCY = 6;
 
 const LOG_LINES_PER_JOB = 500;
 const MAX_CI_LOG_CHARS = 50_000;
@@ -459,10 +468,13 @@ async function runSaveSuppressions() {
   }
 
   // Resolve thumbs-downed threads so they aren't re-processed on subsequent
-  // runs. Concurrently: the completion comment is posted after this step, and
-  // there can be up to a hundred threads to get through.
-  await Promise.all(
-    rejected.filter((r) => r.threadId).map((r) => resolveThread(r.threadId)),
+  // runs. The completion comment is posted after this step and there can be up
+  // to a hundred threads, so run them concurrently but capped — an unbounded
+  // burst of mutations against one PR is what GitHub throttles.
+  await mapWithConcurrency(
+    rejected.filter((r) => r.threadId),
+    RESOLVE_CONCURRENCY,
+    (r) => resolveThread(r.threadId),
   );
   console.log(`Resolved ${rejected.length} thumbs-downed thread(s)`);
 
@@ -829,7 +841,19 @@ main().catch(async (err) => {
     if (pendingComment) {
       // The run reached its conclusion and only the post failed. Retry that
       // comment: a failure block here would contradict what actually happened.
-      await gh.postComment(prNumber, pendingComment);
+      try {
+        await gh.postComment(prNumber, pendingComment);
+      } catch {
+        // The body itself may be why it failed — too long, say. Fall back to
+        // the run's block alone so there is still a report, and still one that
+        // agrees with what the run did.
+        await gh.postComment(
+          prNumber,
+          `🦸 **Review Hero Auto-Fix** — the full report could not be posted; check the [workflow logs](${workflowLogsUrl(repo)}).` +
+            commitsParagraph() +
+            `\n\n${trailingBlock(pendingComment)}`,
+        );
+      }
     } else if (!reported) {
       const fixRequested = fixReviews || fixCI;
       await gh.postComment(

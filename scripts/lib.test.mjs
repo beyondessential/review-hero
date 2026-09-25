@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,6 +12,7 @@ import {
   workflowLogsUrl,
   reviewHeroVersion,
   createCompletionReporter,
+  mapWithConcurrency,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -119,6 +120,7 @@ test("the Review Hero SHA is left unknown when the directory is not its own chec
   // `git rev-parse HEAD` walks up to an enclosing repository, so an
   // npm-installed copy sitting inside a consumer's checkout must not report
   // that consumer's HEAD as Review Hero's version.
+  // Cleaned up below: this copies src/ and symlinks into the real node_modules.
   const consumer = mkdtempSync(join(tmpdir(), "review-hero-consumer-"));
   execFileSync("git", ["init", "-q", consumer]);
   execFileSync("git", ["-C", consumer, "config", "user.email", "t@t"]);
@@ -143,9 +145,28 @@ test("the Review Hero SHA is left unknown when the directory is not its own chec
   }).trim();
   assert.match(consumerHead, /^[0-9a-f]{40}$/);
 
-  return import(pathToFileURL(join(nested, "scripts", "lib.mjs")).href).then(
-    ({ reviewHeroVersion: nestedVersion }) => {
+  return import(pathToFileURL(join(nested, "scripts", "lib.mjs")).href)
+    .then(({ reviewHeroVersion: nestedVersion }) => {
       assert.equal(nestedVersion().sha, null);
-    },
-  );
+    })
+    .finally(() => rmSync(consumer, { recursive: true, force: true }));
+});
+
+test("bounded concurrency preserves order and never exceeds the cap", async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const items = Array.from({ length: 25 }, (_, i) => i);
+  const out = await mapWithConcurrency(items, 6, async (n) => {
+    peak = Math.max(peak, ++inFlight);
+    await new Promise((r) => setTimeout(r, 1));
+    inFlight--;
+    return n * 2;
+  });
+  assert.deepEqual(out, items.map((n) => n * 2));
+  assert.ok(peak <= 6, `peak concurrency was ${peak}`);
+  assert.ok(peak > 1, "should actually run concurrently");
+});
+
+test("bounded concurrency copes with an empty list", async () => {
+  assert.deepEqual(await mapWithConcurrency([], 6, async () => 1), []);
 });

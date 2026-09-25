@@ -49,6 +49,26 @@ export async function withRetry(fn, attempts = 3) {
   }
 }
 
+/**
+ * Run `fn` over `items` with at most `limit` in flight, preserving order.
+ *
+ * GitHub caps concurrent requests at 100 and throttles content-creating ones
+ * well below that, so fanning out an unbounded `Promise.all` over a large
+ * backlog is the case most likely to get 403-throttled.
+ */
+export async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export function createGitHubApi(token, repo) {
   async function api(endpoint, options = {}) {
     const baseUrl = `https://api.github.com/repos/${repo}`;
