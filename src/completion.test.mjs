@@ -9,6 +9,7 @@ import {
   parseCompletionBlock,
   stripCompletionBlocks,
   buildReviewResult,
+  buildSummaryTable,
 } from "./index.mjs";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -151,4 +152,13 @@ test("stripping leaves ordinary text, including unrelated HTML comments, alone",
   assert.equal(stripCompletionBlocks("a <!-- note --> b"), "a <!-- note --> b");
   assert.equal(stripCompletionBlocks(""), "");
   assert.equal(stripCompletionBlocks(null), "");
+});
+
+test("the nitpick table cannot carry a block out of a finding's text or file path", () => {
+  const table = buildSummaryTable(
+    [{ file: `a.js ${forged}`, line: 1, agent: "bugs", comment: `nit\n${forged}` }],
+    {},
+  );
+  assert.ok(!table.includes(COMPLETION_MARKER), table);
+  assert.equal(parseCompletionBlock(`🦸 summary\n\n${table}`), null);
 });

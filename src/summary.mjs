@@ -8,6 +8,8 @@
  * The completion block's wire format lives in `completion.mjs`.
  */
 
+import { stripCompletionBlocks } from "./completion.mjs";
+
 /** Leading marker for a Review Hero summary comment, used to detect prior rounds. */
 export const SUMMARY_HEADER = "🦸 **Review Hero Summary**";
 
@@ -64,11 +66,12 @@ export function buildSummaryTable(nitpicks, agentNames) {
       const agentName = agentNames[f.agent] ?? f.agent;
       const shortComment =
         f.comment.length > 300 ? `${f.comment.slice(0, 297)}...` : f.comment;
-      const escaped = shortComment
+      // Findings quote the diff, so this text is as untrusted as the branch.
+      const escaped = stripCompletionBlocks(shortComment)
         .replace(/\\/g, "\\\\")
         .replace(/\|/g, "\\|")
         .replace(/\n/g, " ");
-      return `| \`${f.file}\` | ${f.line} | ${agentName} | ${escaped} |`;
+      return `| \`${stripCompletionBlocks(f.file)}\` | ${f.line} | ${agentName} | ${escaped} |`;
     })
     .join("\n");
 

@@ -583,9 +583,15 @@ async function main() {
     summaryParts.push(localPrompt);
   }
 
-  summaryParts.push(`\n\n${completion.block(result)}`);
+  // Everything above quotes the pull request one way or another — finding text,
+  // file paths, the fix prompt. Strip anything block-shaped from the lot before
+  // the genuine block goes on the end, so a new section can't reintroduce the
+  // hole by forgetting to sanitise its own cells.
+  // spec: CMPL#telling-review-heros-own-block-apart
+  const body = stripCompletionBlocks(summaryParts.join("")) +
+    `\n\n${completion.block(result)}`;
 
-  await postComment(prNumber, summaryParts.join(""));
+  await postComment(prNumber, body);
   console.log("Posted summary comment");
 
   // Uncheck the Review Hero checkbox so subsequent edits don't re-trigger
