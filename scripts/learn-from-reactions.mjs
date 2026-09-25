@@ -133,6 +133,9 @@ async function generateSuppressionsForBatch(batch, { apiKey, baseUrl }) {
 
   const response = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
+    // The completion comment is posted after this step, so an unbounded call
+    // here would hold up the run's only report to the developer.
+    signal: AbortSignal.timeout(SUPPRESSION_CALL_TIMEOUT_MS),
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
@@ -192,6 +195,9 @@ Only output the JSON array.`,
       reason: s.reason || "Rejected by developer (thumbs-down)",
     }));
 }
+
+/** Ceiling on the Haiku call that turns rejected findings into suppression rules. */
+const SUPPRESSION_CALL_TIMEOUT_MS = 60_000;
 
 export async function generateSuppressions(
   rejectedThreads,
