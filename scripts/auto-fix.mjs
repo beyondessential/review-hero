@@ -100,6 +100,24 @@ function commitsParagraph() {
   return `\n\n${pushed ? `Started from ${base}, pushed ${pushed}.` : `Started from ${base}.`}`;
 }
 
+/** Set once a completion comment has been posted, so only one ever goes out. */
+let reported = false;
+/** A composed completion comment that has not been posted yet. */
+let pendingComment = null;
+
+/**
+ * Post the run's completion comment. Exactly one goes out per run: the body is
+ * held first so that if the post itself fails, the top-level handler retries
+ * this comment rather than posting a failure that contradicts it.
+ */
+// spec: CMPL
+async function postCompletionComment(body) {
+  pendingComment = body;
+  await gh.postComment(prNumber, body);
+  reported = true;
+  pendingComment = null;
+}
+
 /** The hidden completion block that ends every auto-fix comment, preceded by a blank line. */
 function completionBlock({ kind, outcome, fixRequested, counts }) {
   return (
@@ -440,10 +458,12 @@ async function runSaveSuppressions() {
     }
   }
 
-  // Resolve thumbs-downed threads so they aren't re-processed on subsequent runs.
-  for (const r of rejected) {
-    if (r.threadId) await resolveThread(r.threadId);
-  }
+  // Resolve thumbs-downed threads so they aren't re-processed on subsequent
+  // runs. Concurrently: the completion comment is posted after this step, and
+  // there can be up to a hundred threads to get through.
+  await Promise.all(
+    rejected.filter((r) => r.threadId).map((r) => resolveThread(r.threadId)),
+  );
   console.log(`Resolved ${rejected.length} thumbs-downed thread(s)`);
 
   return newSuppressions.length;
@@ -485,8 +505,7 @@ async function main() {
         saved = await runSaveSuppressions();
       } catch (err) {
         console.warn(`Save suppressions failed: ${err.message}`);
-        await gh.postComment(
-          prNumber,
+        await postCompletionComment(
           `🦸 **Review Hero** — Save suppressions failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.` +
             commitsParagraph() +
             completionBlock({ kind: "save-suppressions", outcome: "failed", fixRequested }),
@@ -499,8 +518,7 @@ async function main() {
         saved > 0
           ? `🦸 **Review Hero** — ${fixPrefix}Saved ${saved} suppression${saved === 1 ? "" : "s"} from developer feedback.`
           : `🦸 **Review Hero** — ${fixPrefix}No new suppressions to save.`;
-      await gh.postComment(
-        prNumber,
+      await postCompletionComment(
         summary +
           commitsParagraph() +
           completionBlock({
@@ -511,8 +529,7 @@ async function main() {
           }),
       );
     } else {
-      await gh.postComment(
-        prNumber,
+      await postCompletionComment(
         "🦸 **Review Hero Auto-Fix** — Nothing to fix." +
           commitsParagraph() +
           completionBlock({ kind: "auto-fix", outcome: "nothing-to-fix" }),
@@ -578,7 +595,7 @@ async function main() {
           outcome: "partial",
           counts: { outstanding: remainingComments.length },
         });
-      await gh.postComment(prNumber, partialMsg);
+      await postCompletionComment(partialMsg);
     } else {
       const failMsg =
         `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${logsUrl}) for details.` +
@@ -589,7 +606,7 @@ async function main() {
           outcome: "failed",
           counts: { outstanding: comments.length },
         });
-      await gh.postComment(prNumber, failMsg);
+      await postCompletionComment(failMsg);
     }
     await uncheckCheckboxes();
     process.exit(1);
@@ -800,7 +817,7 @@ async function main() {
     }),
   );
 
-  await gh.postComment(prNumber, summaryParts.join(""));
+  await postCompletionComment(summaryParts.join(""));
   await uncheckCheckboxes();
 
   console.log("Done");
@@ -809,17 +826,23 @@ async function main() {
 main().catch(async (err) => {
   console.error(err);
   try {
-    const fixRequested = fixReviews || fixCI;
-    await gh.postComment(
-      prNumber,
-      `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.` +
-        commitsParagraph() +
-        completionBlock(
-          fixRequested
-            ? { kind: "auto-fix", outcome: pushedSha ? "partial" : "failed" }
-            : { kind: "save-suppressions", outcome: "failed", fixRequested },
-        ),
-    );
+    if (pendingComment) {
+      // The run reached its conclusion and only the post failed. Retry that
+      // comment: a failure block here would contradict what actually happened.
+      await gh.postComment(prNumber, pendingComment);
+    } else if (!reported) {
+      const fixRequested = fixReviews || fixCI;
+      await gh.postComment(
+        prNumber,
+        `🦸 **Review Hero Auto-Fix** failed — check the [workflow logs](${workflowLogsUrl(repo)}) for details.` +
+          commitsParagraph() +
+          completionBlock(
+            fixRequested
+              ? { kind: "auto-fix", outcome: pushedSha ? "partial" : "failed" }
+              : { kind: "save-suppressions", outcome: "failed", fixRequested },
+          ),
+      );
+    }
     await uncheckCheckboxes();
   } catch {
     // best effort
