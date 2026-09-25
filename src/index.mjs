@@ -51,13 +51,17 @@ export {
   SEVERITY_ORDER,
   buildSummaryHeader,
   buildSummaryTable,
+  formatCommitLink,
+} from "./summary.mjs";
+
+export {
   COMPLETION_MARKER,
   COMPLETION_SCHEMA,
-  formatCommitLink,
   buildCompletionBlock,
   parseCompletionBlock,
+  stripCompletionBlocks,
   buildReviewResult,
-} from "./summary.mjs";
+} from "./completion.mjs";
 
 export { createAnthropicModelCaller } from "./anthropic.mjs";
 

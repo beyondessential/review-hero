@@ -285,7 +285,10 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
   : never;
 
-/** Short-SHA markdown link to a commit within its pull request, or null for a malformed SHA. */
+/**
+ * Short-SHA markdown link to a commit within its pull request. Null when any
+ * part is malformed, so a bad value can't break out of the markdown link.
+ */
 export function formatCommitLink(args: {
   serverUrl: string;
   repo: string;
@@ -298,10 +301,24 @@ export function buildCompletionBlock(
   fields: DistributiveOmit<CompletionBlock, "schema">,
 ): string;
 
-/** The completion block in a comment body, or null when it has none. */
+/**
+ * The completion block in a comment body, or null when it has none. Reads the
+ * last block, since the genuine one is always appended after any quoted text.
+ *
+ * SECURITY: this identifies Review Hero's own block within a comment Review
+ * Hero wrote. It does not establish that the comment is Review Hero's — anyone
+ * who can comment on the PR can post a well-formed block. Check the comment's
+ * author before trusting the result.
+ */
 export function parseCompletionBlock(
   body: string | null | undefined,
 ): CompletionBlock | null;
+
+/**
+ * Neutralise anything block-shaped in untrusted text before embedding it in a
+ * comment you post, so it can't be mistaken for your own block.
+ */
+export function stripCompletionBlocks(text: string | null | undefined): string;
 
 // ── Anthropic-backed model caller ────────────────────────────────────────────
 

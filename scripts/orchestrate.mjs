@@ -43,6 +43,7 @@ import {
   buildSummaryHeader,
   buildSummaryTable,
   buildReviewResult,
+  stripCompletionBlocks,
   createAnthropicModelCaller,
 } from "../src/index.mjs";
 

@@ -4,11 +4,12 @@
  * Common helpers used by auto-fix and other action scripts.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { join } from "node:path";
 import * as core from "@actions/core";
-import { formatCommitLink, buildCompletionBlock } from "../src/summary.mjs";
+import { formatCommitLink } from "../src/summary.mjs";
+import { buildCompletionBlock } from "../src/completion.mjs";
 
 // Prompt assembly and result parsing live in the shared library so the
 // Actions side and any external consumer share one implementation.
@@ -390,12 +391,22 @@ export function workflowLogsUrl(repo) {
  * the checkout these scripts are running from.
  */
 export function reviewHeroVersion() {
-  let sha = null;
-  try {
-    sha = execFileSync("git", ["-C", join(import.meta.dirname, ".."), "rev-parse", "HEAD"], {
+  const dir = join(import.meta.dirname, "..");
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
+
+  let sha = null;
+  try {
+    // `rev-parse HEAD` alone would walk up to the nearest enclosing repository,
+    // so an npm-installed copy under a consumer's checkout would report the
+    // consumer's HEAD as Review Hero's version. Only trust it when the
+    // enclosing repository is this directory.
+    if (realpathSync(git("rev-parse", "--show-toplevel")) === realpathSync(dir)) {
+      sha = git("rev-parse", "HEAD");
+    }
   } catch {
     // Not a git checkout — leave the SHA unknown
   }
