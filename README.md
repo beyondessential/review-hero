@@ -300,7 +300,9 @@ When a review or auto-fix run ends, Review Hero posts a completion comment on th
 
 The block is a single-line JSON object inside an HTML comment, so GitHub doesn't render it. Any `>` in a value is written as `\u003e`, so nothing inside the JSON can close the comment early. It carries only run metadata and counts, never finding text. A review is always made against one commit: the PR head as of the event that triggered it. The diff, the agents' checkout, and the inline comments all use that commit, even if the PR moves on while the review is running.
 
-`schema` is the version of the block's shape. Adding a field keeps the same number. Removing a field or changing what one means increments it. The library exports `parseCompletionBlock(body)` to read the block and `buildCompletionBlock(fields)` to write one. It also exports `buildReviewResult(…)`, which turns the review pipeline's outputs into a review's `kind`, `outcome`, `reviewedSha` and `counts`. A consumer that runs the review itself gets the same figures as data, and the hosted review writes that same object into its block.
+`schema` is the version of the block's shape. Adding a field keeps the same number. Removing a field or changing what one means increments it. The library exports `parseCompletionBlock(body)` to read the block and `buildCompletionBlock(fields)` to write one.
+
+> **Check the author before trusting a block.** Anyone who can comment on a PR can post a well-formed completion block, so the block alone proves nothing — only a comment authored by your Review Hero app (`{app-slug}[bot]`) does. Within such a comment, `parseCompletionBlock` reads the *last* block, because Review Hero appends its own after any quoted PR text. It also exports `buildReviewResult(…)`, which turns the review pipeline's outputs into a review's `kind`, `outcome`, `reviewedSha` and `counts`. A consumer that runs the review itself gets the same figures as data, and the hosted review writes that same object into its block.
 
 ### Fields on every block
 

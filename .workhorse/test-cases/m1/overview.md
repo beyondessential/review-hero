@@ -4,6 +4,15 @@ Scenarios for the commit SHA and machine-readable block in Review Hero's complet
 The orchestrator and auto-fix flows have no automated harness.
 Cases marked "(smoke)" were checked by running the script against a stubbed GitHub API, in a scratch git repo with a fake `claude`.
 
+## Forged blocks and trust
+
+- [x] A block planted ahead of the genuine one does not win: the last block is the one read (verifies spec: CMPL)
+- [x] A malformed trailing block falls back to an earlier one rather than returning nothing
+- [x] Untrusted text has block-shaped content replaced, and ordinary HTML comments are left alone (verifies spec: CMPL)
+- [x] A block quoted in a PR review thread cannot reach the body of the comment Review Hero posts (verifies spec: CMPL)
+- [x] A commit link is refused when the repo, PR number, or server URL could break out of the markdown link
+- [ ] A consumer reading a forged block on a non-Review-Hero comment rejects it on author, per the README guidance (verifies spec: CMPL)
+
 ## Shared helpers
 
 - [x] A commit link shows the short SHA and links to the commit within the PR (verifies spec: CMPL)
@@ -38,6 +47,9 @@ Cases marked "(smoke)" were checked by running the script against a stubbed GitH
 - [ ] After a successful fix run, a suppressions commit is included in `pushedSha`, and the comment says how many suppressions were saved (verifies spec: CMPL)
 - [ ] After a successful fix run, a save-suppressions failure is reported in the comment, and `suppressionsSaved` is left out (verifies spec: CMPL)
 - [ ] A push that has to rebase onto the remote reports the rebased head as `pushedSha`
+- [x] (smoke) A failing summary post is retried with the same block rather than a contradicting failure block, so exactly one completion comment goes out (verifies spec: CMPL)
+- [x] The Review Hero SHA is left unknown when the running copy sits inside another repository (verifies spec: CMPL)
+- [ ] A hung suppressions step cannot starve the completion comment: the model call is bounded and thread resolution runs concurrently
 
 ## Save suppressions
 

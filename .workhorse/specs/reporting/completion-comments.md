@@ -35,7 +35,17 @@ Completion comments are:
 - [ ] The block does not show when the comment is rendered on GitHub.
 - [ ] No value in the JSON can end the HTML comment early: any `>` in a value is written as the JSON escape `\u003e`.
 - [ ] The JSON carries only run metadata and counts, never finding or comment text.
+- [ ] A run posts at most one completion comment, so a run that concludes and then fails to report does not follow up with a second comment contradicting the first.
 - [ ] The README documents every field and outcome in the block, for consumers.
+
+### Telling Review Hero's own block apart
+
+A completion comment quotes text from the pull request, and anyone who can comment there can write something block-shaped.
+
+- [ ] Review Hero's own block is the last one in the comment, and everything it quotes from the pull request comes before it.
+- [ ] Reading a comment takes the last block in the body, so quoted text cannot stand in for the run's own result.
+- [ ] Text quoted from the pull request has block-shaped content replaced before it goes into a comment Review Hero posts.
+- [ ] The README tells consumers that a block is only Review Hero's when the comment was authored by the Review Hero app, since the block alone proves nothing.
 
 ### Fields
 
@@ -45,6 +55,7 @@ Completion comments are:
 - [ ] `outcome` says how the run ended, from the set of outcomes for its `kind` (see below).
 - [ ] `runUrl` links to the GitHub Actions run that posted the comment.
 - [ ] `reviewHero.ref` is the Review Hero ref the caller asked for (for example `v1`), and `reviewHero.sha` is the Review Hero commit that ref resolved to for the run.
+- [ ] `reviewHero.sha` is null rather than a guess when the running copy of Review Hero is not its own checkout, so a copy installed inside another repository does not report that repository's commit.
 - [ ] All SHAs in the block are full 40-character SHAs.
 
 ### Review
