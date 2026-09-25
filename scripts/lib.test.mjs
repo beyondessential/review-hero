@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
 
 import {
   formatCacheStats,
@@ -8,7 +13,7 @@ import {
   reviewHeroVersion,
   createCompletionReporter,
 } from "./lib.mjs";
-import { parseCompletionBlock } from "../src/summary.mjs";
+import { parseCompletionBlock } from "../src/completion.mjs";
 
 test("reports nothing when the cache was not involved", () => {
   assert.deepEqual(formatCacheStats(undefined), []);
@@ -106,6 +111,41 @@ test("the completion reporter fills in the run URL and Review Hero version", () 
         reporter.link(block.reviewHero.sha),
         `[\`${block.reviewHero.sha.slice(0, 7)}\`](https://github.com/o/r/pull/7/commits/${block.reviewHero.sha})`,
       );
+    },
+  );
+});
+
+test("the Review Hero SHA is left unknown when the directory is not its own checkout", () => {
+  // `git rev-parse HEAD` walks up to an enclosing repository, so an
+  // npm-installed copy sitting inside a consumer's checkout must not report
+  // that consumer's HEAD as Review Hero's version.
+  const consumer = mkdtempSync(join(tmpdir(), "review-hero-consumer-"));
+  execFileSync("git", ["init", "-q", consumer]);
+  execFileSync("git", ["-C", consumer, "config", "user.email", "t@t"]);
+  execFileSync("git", ["-C", consumer, "config", "user.name", "t"]);
+  writeFileSync(join(consumer, "f"), "x");
+  execFileSync("git", ["-C", consumer, "add", "f"]);
+  execFileSync("git", ["-C", consumer, "commit", "-qm", "init"]);
+
+  const nested = join(consumer, "node_modules", "review-hero");
+  mkdirSync(join(nested, "scripts"), { recursive: true });
+  // lib.mjs imports @actions/core; let the copy resolve it from here.
+  symlinkSync(
+    join(import.meta.dirname, "..", "node_modules", "@actions"),
+    join(consumer, "node_modules", "@actions"),
+  );
+  cpSync(join(import.meta.dirname, "lib.mjs"), join(nested, "scripts", "lib.mjs"));
+  cpSync(join(import.meta.dirname, "..", "src"), join(nested, "src"), { recursive: true });
+
+  // Sanity check: bare rev-parse there really does resolve the consumer's HEAD.
+  const consumerHead = execFileSync("git", ["-C", nested, "rev-parse", "HEAD"], {
+    encoding: "utf-8",
+  }).trim();
+  assert.match(consumerHead, /^[0-9a-f]{40}$/);
+
+  return import(pathToFileURL(join(nested, "scripts", "lib.mjs")).href).then(
+    ({ reviewHeroVersion: nestedVersion }) => {
+      assert.equal(nestedVersion().sha, null);
     },
   );
 });
