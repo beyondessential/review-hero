@@ -4,9 +4,12 @@
  * Common helpers used by auto-fix and other action scripts.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
+import { join } from "node:path";
 import * as core from "@actions/core";
+import { formatCommitLink } from "../src/summary.mjs";
+import { buildCompletionBlock } from "../src/completion.mjs";
 
 // Prompt assembly and result parsing live in the shared library so the
 // Actions side and any external consumer share one implementation.
@@ -44,6 +47,26 @@ export async function withRetry(fn, attempts = 3) {
       }
     }
   }
+}
+
+/**
+ * Run `fn` over `items` with at most `limit` in flight, preserving order.
+ *
+ * GitHub caps concurrent requests at 100 and throttles content-creating ones
+ * well below that, so fanning out an unbounded `Promise.all` over a large
+ * backlog is the case most likely to get 403-throttled.
+ */
+export async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 export function createGitHubApi(token, repo) {
@@ -343,24 +366,85 @@ export function copyCommitHelper(prNumber) {
   return dest;
 }
 
-// ── Workflow logs URL ────────────────────────────────────────────────────────
+// ── Workflow URLs ────────────────────────────────────────────────────────────
 
-export function workflowLogsUrl(repo) {
+/** The GitHub server origin from GITHUB_SERVER_URL, or github.com if it is unset or malformed. */
+export function githubServerUrl() {
   const rawServerUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
-  let serverUrl = "https://github.com";
   try {
     const parsed = new URL(rawServerUrl);
     if (parsed.protocol === "https:" && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(parsed.hostname)) {
-      serverUrl = parsed.origin;
+      return parsed.origin;
     }
   } catch {
     // Invalid URL — fall back to default
   }
+  return "https://github.com";
+}
+
+function safeRepoName(repo) {
+  return /^[\w.-]+\/[\w.-]+$/.test(repo ?? "") ? repo : null;
+}
+
+/** URL of the current Actions run, or null outside Actions. */
+export function workflowRunUrl(repo) {
   const rawRunId = process.env.GITHUB_RUN_ID;
   const runId = /^\d+$/.test(rawRunId ?? "") ? rawRunId : null;
-  const safeRepo = /^[\w.-]+\/[\w.-]+$/.test(repo ?? "") ? repo : null;
-  if (!safeRepo) return `${serverUrl}/actions`;
-  return runId
-    ? `${serverUrl}/${safeRepo}/actions/runs/${runId}`
-    : `${serverUrl}/${safeRepo}/actions`;
+  const safeRepo = safeRepoName(repo);
+  if (!runId || !safeRepo) return null;
+  return `${githubServerUrl()}/${safeRepo}/actions/runs/${runId}`;
+}
+
+export function workflowLogsUrl(repo) {
+  const runUrl = workflowRunUrl(repo);
+  if (runUrl) return runUrl;
+  const safeRepo = safeRepoName(repo);
+  return safeRepo
+    ? `${githubServerUrl()}/${safeRepo}/actions`
+    : `${githubServerUrl()}/actions`;
+}
+
+// ── Completion comments ──────────────────────────────────────────────────────
+
+/**
+ * The Review Hero ref the caller asked for (REVIEW_HERO_REF) and the commit of
+ * the checkout these scripts are running from.
+ */
+export function reviewHeroVersion() {
+  const dir = join(import.meta.dirname, "..");
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+
+  let sha = null;
+  try {
+    // `rev-parse HEAD` alone would walk up to the nearest enclosing repository,
+    // so an npm-installed copy under a consumer's checkout would report the
+    // consumer's HEAD as Review Hero's version. Only trust it when the
+    // enclosing repository is this directory.
+    if (realpathSync(git("rev-parse", "--show-toplevel")) === realpathSync(dir)) {
+      sha = git("rev-parse", "HEAD");
+    }
+  } catch {
+    // Not a git checkout — leave the SHA unknown
+  }
+  return { ref: process.env.REVIEW_HERO_REF || null, sha };
+}
+
+/**
+ * Bind the completion-comment helpers to one pull request and run: `link`
+ * formats a commit link, and `block` builds the hidden block with the run
+ * metadata filled in.
+ */
+// spec: CMPL
+export function createCompletionReporter({ repo, prNumber }) {
+  const serverUrl = githubServerUrl();
+  const runUrl = workflowRunUrl(repo);
+  const reviewHero = reviewHeroVersion();
+  return {
+    link: (sha) => formatCommitLink({ serverUrl, repo, prNumber, sha }),
+    block: (fields) => buildCompletionBlock({ ...fields, runUrl, reviewHero }),
+  };
 }

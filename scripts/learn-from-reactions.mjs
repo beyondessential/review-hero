@@ -113,7 +113,7 @@ function escapeXml(str) {
  */
 const SUPPRESSION_BATCH_SIZE = 20;
 
-async function generateSuppressionsForBatch(batch, { apiKey, baseUrl }) {
+async function generateSuppressionsForBatch(batch, { apiKey, baseUrl, signal }) {
   // Wrap untrusted content (PR comments written by humans) in XML tags
   // to clearly delimit it from the prompt instructions, reducing prompt
   // injection risk.
@@ -133,6 +133,7 @@ async function generateSuppressionsForBatch(batch, { apiKey, baseUrl }) {
 
   const response = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
+    signal,
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
@@ -193,17 +194,41 @@ Only output the JSON array.`,
     }));
 }
 
+/**
+ * Ceiling on the whole step that turns rejected findings into suppression
+ * rules, batches included. The completion comment is posted after this step, so
+ * the bound has to cover the step rather than any single call within it: the
+ * run reports what it managed in the time, rather than the developer getting no
+ * report at all.
+ */
+const SUPPRESSION_DEADLINE_MS = 90_000;
+
 export async function generateSuppressions(
   rejectedThreads,
   { apiKey, baseUrl },
 ) {
   if (rejectedThreads.length === 0) return [];
 
+  // One deadline across every batch. Batches run sequentially, so bounding each
+  // call separately would still let wall-clock grow with the number of rejected
+  // findings; whatever is done when the deadline passes is what gets saved.
+  const signal = AbortSignal.timeout(SUPPRESSION_DEADLINE_MS);
+
   const allSuppressions = [];
   for (let i = 0; i < rejectedThreads.length; i += SUPPRESSION_BATCH_SIZE) {
+    if (signal.aborted) {
+      console.warn(
+        `Suppression deadline reached — keeping ${allSuppressions.length} rule(s) from the batches that finished, skipping ${rejectedThreads.length - i} remaining finding(s)`,
+      );
+      break;
+    }
     const batch = rejectedThreads.slice(i, i + SUPPRESSION_BATCH_SIZE);
     try {
-      const batchResults = await generateSuppressionsForBatch(batch, { apiKey, baseUrl });
+      const batchResults = await generateSuppressionsForBatch(batch, {
+        apiKey,
+        baseUrl,
+        signal,
+      });
       allSuppressions.push(...batchResults);
     } catch (err) {
       console.warn(

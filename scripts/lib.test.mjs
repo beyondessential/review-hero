@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
 
-import { formatCacheStats } from "./lib.mjs";
+import {
+  formatCacheStats,
+  workflowRunUrl,
+  workflowLogsUrl,
+  reviewHeroVersion,
+  createCompletionReporter,
+  mapWithConcurrency,
+} from "./lib.mjs";
+import { parseCompletionBlock } from "../src/completion.mjs";
 
 test("reports nothing when the cache was not involved", () => {
   assert.deepEqual(formatCacheStats(undefined), []);
@@ -50,4 +63,110 @@ test("treats a missing counter as zero rather than dropping the report", () => {
     "Cache write: 0",
     "Cache hit rate: 100%",
   ]);
+});
+
+// ── Completion reporting ─────────────────────────────────────────────────────
+
+function withEnv(vars, fn) {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+test("the run URL points at the current Actions run", () => {
+  withEnv({ GITHUB_SERVER_URL: "https://github.com", GITHUB_RUN_ID: "42" }, () => {
+    assert.equal(workflowRunUrl("o/r"), "https://github.com/o/r/actions/runs/42");
+    assert.equal(workflowLogsUrl("o/r"), "https://github.com/o/r/actions/runs/42");
+  });
+});
+
+test("the run URL is null outside Actions, while the logs URL falls back", () => {
+  withEnv({ GITHUB_SERVER_URL: undefined, GITHUB_RUN_ID: undefined }, () => {
+    assert.equal(workflowRunUrl("o/r"), null);
+    assert.equal(workflowLogsUrl("o/r"), "https://github.com/o/r/actions");
+  });
+});
+
+test("the completion reporter fills in the run URL and Review Hero version", () => {
+  withEnv(
+    { GITHUB_SERVER_URL: "https://github.com", GITHUB_RUN_ID: "42", REVIEW_HERO_REF: "v1" },
+    () => {
+      const reporter = createCompletionReporter({ repo: "o/r", prNumber: "7" });
+      const block = parseCompletionBlock(reporter.block({ kind: "auto-fix", outcome: "nothing-to-fix" }));
+      assert.equal(block.kind, "auto-fix");
+      assert.equal(block.runUrl, "https://github.com/o/r/actions/runs/42");
+      assert.equal(block.reviewHero.ref, "v1");
+      assert.match(block.reviewHero.sha, /^[0-9a-f]{40}$/);
+      assert.equal(block.reviewHero.sha, reviewHeroVersion().sha);
+      assert.equal(
+        reporter.link(block.reviewHero.sha),
+        `[\`${block.reviewHero.sha.slice(0, 7)}\`](https://github.com/o/r/pull/7/commits/${block.reviewHero.sha})`,
+      );
+    },
+  );
+});
+
+test("the Review Hero SHA is left unknown when the directory is not its own checkout", () => {
+  // `git rev-parse HEAD` walks up to an enclosing repository, so an
+  // npm-installed copy sitting inside a consumer's checkout must not report
+  // that consumer's HEAD as Review Hero's version.
+  // Cleaned up below: this copies src/ and symlinks into the real node_modules.
+  const consumer = mkdtempSync(join(tmpdir(), "review-hero-consumer-"));
+  execFileSync("git", ["init", "-q", consumer]);
+  execFileSync("git", ["-C", consumer, "config", "user.email", "t@t"]);
+  execFileSync("git", ["-C", consumer, "config", "user.name", "t"]);
+  writeFileSync(join(consumer, "f"), "x");
+  execFileSync("git", ["-C", consumer, "add", "f"]);
+  execFileSync("git", ["-C", consumer, "commit", "-qm", "init"]);
+
+  const nested = join(consumer, "node_modules", "review-hero");
+  mkdirSync(join(nested, "scripts"), { recursive: true });
+  // lib.mjs imports @actions/core; let the copy resolve it from here.
+  symlinkSync(
+    join(import.meta.dirname, "..", "node_modules", "@actions"),
+    join(consumer, "node_modules", "@actions"),
+  );
+  cpSync(join(import.meta.dirname, "lib.mjs"), join(nested, "scripts", "lib.mjs"));
+  cpSync(join(import.meta.dirname, "..", "src"), join(nested, "src"), { recursive: true });
+
+  // Sanity check: bare rev-parse there really does resolve the consumer's HEAD.
+  const consumerHead = execFileSync("git", ["-C", nested, "rev-parse", "HEAD"], {
+    encoding: "utf-8",
+  }).trim();
+  assert.match(consumerHead, /^[0-9a-f]{40}$/);
+
+  return import(pathToFileURL(join(nested, "scripts", "lib.mjs")).href)
+    .then(({ reviewHeroVersion: nestedVersion }) => {
+      assert.equal(nestedVersion().sha, null);
+    })
+    .finally(() => rmSync(consumer, { recursive: true, force: true }));
+});
+
+test("bounded concurrency preserves order and never exceeds the cap", async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const items = Array.from({ length: 25 }, (_, i) => i);
+  const out = await mapWithConcurrency(items, 6, async (n) => {
+    peak = Math.max(peak, ++inFlight);
+    await new Promise((r) => setTimeout(r, 1));
+    inFlight--;
+    return n * 2;
+  });
+  assert.deepEqual(out, items.map((n) => n * 2));
+  assert.ok(peak <= 6, `peak concurrency was ${peak}`);
+  assert.ok(peak > 1, "should actually run concurrently");
+});
+
+test("bounded concurrency copes with an empty list", async () => {
+  assert.deepEqual(await mapWithConcurrency([], 6, async () => 1), []);
 });

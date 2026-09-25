@@ -177,6 +177,8 @@ export const SEVERITY_ORDER: Record<Severity, number>;
 
 export function buildSummaryHeader(args: {
   round: number | null;
+  /** Link to the reviewed commit, from `formatCommitLink`. */
+  commitLink?: string | null;
   agentsCompleted: number;
   agentsFailed: number;
   counts: { critical: number; suggestion: number; nitpick: number };
@@ -186,6 +188,137 @@ export function buildSummaryTable(
   nitpicks: Finding[],
   agentNames: Record<string, string>,
 ): string;
+
+// ── Completion comments ──────────────────────────────────────────────────────
+
+/** Marker that opens the machine-readable block in a completion comment. */
+export const COMPLETION_MARKER: string;
+
+/** Version of the completion block's shape. */
+export const COMPLETION_SCHEMA: number;
+
+/** Metadata every completion block carries. */
+interface CompletionBase {
+  schema: number;
+  /** The GitHub Actions run that posted the comment. */
+  runUrl: string | null;
+  reviewHero: {
+    /** The Review Hero ref the caller asked for, e.g. `v1`. */
+    ref: string | null;
+    /** The Review Hero commit that ref resolved to. */
+    sha: string | null;
+  };
+}
+
+export interface ReviewCompletion extends CompletionBase {
+  kind: "review";
+  outcome: "completed" | "failed";
+  reviewedSha: string;
+  counts: {
+    agentsCompleted: number;
+    agentsFailed: number;
+    voters: number;
+    critical: number;
+    suggestion: number;
+    nitpick: number;
+    belowThreshold: number;
+    suppressed: number;
+  };
+}
+
+export interface AutoFixCompletion extends CompletionBase {
+  kind: "auto-fix";
+  outcome: "fixed" | "no-changes" | "partial" | "failed" | "nothing-to-fix";
+  /** Absent when the run failed before checking out a commit. */
+  baseSha?: string;
+  pushedSha: string | null;
+  /**
+   * `fixed` / `no-changes`: fixed and skipped counts, plus `suppressionsSaved`
+   * unless saving suppressions failed. `partial` / `failed`: `outstanding`.
+   * Absent when the run failed before it could count its work.
+   */
+  counts?: {
+    reviewCommentsFixed?: number;
+    reviewCommentsSkipped?: number;
+    ciFailuresFixed?: number;
+    ciFailuresSkipped?: number;
+    suppressionsSaved?: number;
+    outstanding?: number;
+  };
+}
+
+export interface SaveSuppressionsCompletion extends CompletionBase {
+  kind: "save-suppressions";
+  outcome: "saved" | "none" | "failed";
+  fixRequested: boolean;
+  /** Absent when the run failed before checking out a commit. */
+  baseSha?: string;
+  pushedSha: string | null;
+  /** Absent when saving failed. */
+  counts?: { saved: number };
+}
+
+export type CompletionBlock =
+  | ReviewCompletion
+  | AutoFixCompletion
+  | SaveSuppressionsCompletion;
+
+/** A review round's result as data: the `review` block without its run metadata. */
+export type ReviewResult = Omit<ReviewCompletion, "schema" | "runUrl" | "reviewHero">;
+
+/**
+ * Build a review round's result from the pipeline's outputs. The hosted review
+ * serialises this same object into its completion block.
+ */
+export function buildReviewResult(args: {
+  reviewedSha: string;
+  agentsCompleted: number;
+  agentsFailed: number;
+  voters: number;
+  keptGroups?: FindingGroup[];
+  droppedGroups?: FindingGroup[];
+  suppressedCount?: number;
+}): ReviewResult;
+
+/** `Omit` applied to each member of a union rather than to their common keys. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
+
+/**
+ * Short-SHA markdown link to a commit within its pull request. Null when any
+ * part is malformed, so a bad value can't break out of the markdown link.
+ */
+export function formatCommitLink(args: {
+  serverUrl: string;
+  repo: string;
+  prNumber: number | string;
+  sha: string | null | undefined;
+}): string | null;
+
+/** The hidden `<!-- review-hero:completion {…} -->` block; `schema` is filled in. */
+export function buildCompletionBlock(
+  fields: DistributiveOmit<CompletionBlock, "schema">,
+): string;
+
+/**
+ * The completion block in a comment body, or null when it has none. Reads the
+ * last block, since the genuine one is always appended after any quoted text.
+ *
+ * SECURITY: this identifies Review Hero's own block within a comment Review
+ * Hero wrote. It does not establish that the comment is Review Hero's — anyone
+ * who can comment on the PR can post a well-formed block. Check the comment's
+ * author before trusting the result.
+ */
+export function parseCompletionBlock(
+  body: string | null | undefined,
+): CompletionBlock | null;
+
+/**
+ * Neutralise anything block-shaped in untrusted text before embedding it in a
+ * comment you post, so it can't be mistaken for your own block.
+ */
+export function stripCompletionBlocks(text: string | null | undefined): string;
 
 // ── Anthropic-backed model caller ────────────────────────────────────────────
 

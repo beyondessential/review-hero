@@ -3,7 +3,8 @@
  *
  * The importable entry point for review-hero's review logic: finding parsing,
  * consensus and cross-agent grouping, suppression filtering, agent discovery,
- * scope filtering, prompt assembly, and summary formatting.
+ * scope filtering, prompt assembly, and summary and completion-comment
+ * formatting.
  *
  * This entry point is deliberately dependency-light and free of any GitHub
  * Actions runtime — a consumer wires in its own model caller (see
@@ -50,7 +51,17 @@ export {
   SEVERITY_ORDER,
   buildSummaryHeader,
   buildSummaryTable,
+  formatCommitLink,
 } from "./summary.mjs";
+
+export {
+  COMPLETION_MARKER,
+  COMPLETION_SCHEMA,
+  buildCompletionBlock,
+  parseCompletionBlock,
+  stripCompletionBlocks,
+  buildReviewResult,
+} from "./completion.mjs";
 
 export { createAnthropicModelCaller } from "./anthropic.mjs";
 

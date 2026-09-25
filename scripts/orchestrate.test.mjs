@@ -148,3 +148,17 @@ test("summary header omits the round when it could not be determined", () => {
       "**1 agent** reviewed this PR | 2 failed | 0 critical | 1 suggestion | 1 nitpick",
   );
 });
+
+test("summary header names the reviewed commit after the round", () => {
+  const header = buildSummaryHeader({
+    round: 2,
+    commitLink: "[`abc1234`](https://github.com/o/r/pull/7/commits/abc)",
+    agentsCompleted: 3,
+    agentsFailed: 0,
+    counts: { critical: 0, suggestion: 0, nitpick: 0 },
+  });
+  assert.equal(
+    header.split("\n")[0],
+    "🦸 **Review Hero Summary** (round 2) · reviewed [`abc1234`](https://github.com/o/r/pull/7/commits/abc)",
+  );
+});

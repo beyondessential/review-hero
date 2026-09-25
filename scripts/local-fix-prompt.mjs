@@ -13,6 +13,8 @@
  * @returns {string} Markdown string to append to a summary comment, or "" if
  *   there is nothing to report.
  */
+
+import { stripCompletionBlocks } from "../src/completion.mjs";
 export function buildLocalFixPrompt(comments) {
   if (!comments?.length) return "";
 
@@ -56,13 +58,23 @@ function fenceLength(content) {
 }
 
 /**
- * Strip horizontal rules (`---` or more on its own line) from user-supplied
- * text. The prompt uses `-------` lines to separate items, so a comment
- * containing one would read as an item boundary to the coding agent.
+ * Sanitise user-supplied text for the prompt.
+ *
+ * Two things are neutralised:
+ *
+ * - Horizontal rules (`---` or more on its own line). The prompt uses
+ *   `-------` lines to separate items, so a comment containing one would read
+ *   as an item boundary to the coding agent.
+ * - Anything shaped like a completion block. These comment bodies come from
+ *   any PR participant, and the prompt is embedded in a comment Review Hero
+ *   posts, so without this a participant could plant a block in a comment we
+ *   sign. A markdown code fence is no defence — a regex parser reads straight
+ *   through it.
  *
  * Nothing else needs escaping: the prompt sits inside a fenced code block, so
  * backticks and HTML tags reach the agent as written.
  */
+// spec: CMPL#machine-readable-block
 function sanitise(text) {
-  return text.replace(/^-{3,}$/gm, "");
+  return stripCompletionBlocks(text.replace(/^-{3,}$/gm, ""));
 }
