@@ -73,6 +73,7 @@ The same applies to `ANTHROPIC_BASE_URL` / `REVIEW_HERO_ANTHROPIC_BASE_URL`, whi
 |--------------------------------------|----------------------------------------------------------|
 | `REVIEW_HERO_ANTHROPIC_API_KEY`      | Anthropic API key (preferred over `ANTHROPIC_API_KEY`)   |
 | `REVIEW_HERO_ANTHROPIC_BASE_URL`     | Custom API base URL (preferred over `ANTHROPIC_BASE_URL`)|
+| `REVIEW_HERO_OPENROUTER_API_KEY`     | OpenRouter key, only needed for [OpenRouter models](#choosing-the-model-per-pr) |
 
 ## Setup (per repo)
 
@@ -260,6 +261,16 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 ### Automatic Opus upgrade for large PRs
 
 For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
+
+### Choosing the model per PR
+
+Add a hidden marker to the PR description to pick the review agents' model for that PR:
+
+```markdown
+<!-- review-hero: model=claude-opus-5 -->
+```
+
+The marker overrides both the `model` input and the Opus upgrade. An id containing `/` (e.g. `z-ai/glm-5.3`) runs the review agents through [OpenRouter](https://openrouter.ai/) and needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; triage and filtering stay on Anthropic. An invalid id, or an OpenRouter id without the secret, logs a warning and falls back to the usual model.
 
 ### Suppression rules
 

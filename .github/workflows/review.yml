@@ -36,6 +36,9 @@ on:
       REVIEW_HERO_ANTHROPIC_BASE_URL:
         description: "Custom base URL for the Anthropic API (preferred over ANTHROPIC_BASE_URL if both are set)"
         required: false
+      REVIEW_HERO_OPENROUTER_API_KEY:
+        description: "OpenRouter API key, needed only when a PR description picks an OpenRouter model (an id containing '/')"
+        required: false
       REVIEW_HERO_APP_ID:
         description: "Review Hero GitHub App ID — typically provided as an org-level secret"
         required: true
@@ -57,6 +60,7 @@ jobs:
       matrix: ${{ steps.triage.outputs.matrix }}
       max_turns: ${{ steps.triage.outputs.max_turns }}
       agent_model: ${{ steps.triage.outputs.agent_model }}
+      agent_provider: ${{ steps.triage.outputs.agent_provider }}
       agent_names: ${{ steps.triage.outputs.agent_names }}
       project_context: ${{ steps.config.outputs.project_context }}
       trusted_ref: ${{ steps.resolve-trusted-ref.outputs.sha }}
@@ -222,6 +226,8 @@ jobs:
           CALLER_REPO_DIR: caller
           VOTERS: ${{ inputs.voters }}
           DEFAULT_MODEL: ${{ inputs.model }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HAS_OPENROUTER_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY != '' }}
         run: |
           set -euo pipefail
           set +e
@@ -415,8 +421,9 @@ jobs:
       - name: Prime prompt cache
         if: matrix.agent.primer == '1'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ needs.triage.outputs.agent_provider != 'openrouter' && (secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY) || '' }}
+          ANTHROPIC_BASE_URL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && 'https://openrouter.ai/api' || secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ needs.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
         timeout-minutes: 5
         run: |
@@ -481,8 +488,9 @@ jobs:
       # ── Run agent ────────────────────────────────────────────────────
       - name: Run ${{ matrix.agent.key }} agent${{ matrix.agent.voter && format(' (voter {0})', matrix.agent.voter) || '' }}
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ needs.triage.outputs.agent_provider != 'openrouter' && (secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY) || '' }}
+          ANTHROPIC_BASE_URL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && 'https://openrouter.ai/api' || secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ needs.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
           VOTER: ${{ matrix.agent.voter }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
         timeout-minutes: 20

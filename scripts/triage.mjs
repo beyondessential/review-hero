@@ -15,10 +15,12 @@
  *   REVIEW_HERO_DIR     — Path to the review-hero checkout (prompts/, scripts/)
  *   CALLER_REPO_DIR     — Path to the caller repo checkout (workspace root)
  *   FILTERED_DIFF_PATH  — Where to write the filtered diff for agents to consume
+ *   PR_BODY             — PR description, read for a model marker
+ *   HAS_OPENROUTER_KEY  — "true" when REVIEW_HERO_OPENROUTER_API_KEY is set
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { MAX_VOTERS } from "./lib.mjs";
+import { MAX_VOTERS, chooseAgentModel } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
@@ -85,14 +87,22 @@ const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
   "",
 );
 const OPUS_THRESHOLD = 500;
-const agentModel =
-  diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
+const sizeModel = diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
+const {
+  model: agentModel,
+  provider: agentProvider,
+  warning: modelWarning,
+} = chooseAgentModel({
+  body: process.env.PR_BODY,
+  fallback: sizeModel,
+  hasOpenRouterKey: process.env.HAS_OPENROUTER_KEY === "true",
+});
+if (modelWarning) console.log(`::warning::${modelWarning}`);
 
 // Scale max-turns with diff size. Each tool interaction (Read, Grep, …)
 // consumes a turn, and the agent needs one more to emit its findings array,
 // so the budget must comfortably exceed "explore + answer" — an agent cut off
 // mid-exploration produces no output and wastes its entire run.
-const isOpus = agentModel.includes("opus");
 let maxTurns;
 if (diffLines < 100) {
   maxTurns = 8;
@@ -228,7 +238,13 @@ console.log(
   `Agents: ${selectedAgents.map((a) => a.key).join(", ")} (${selectedAgents.length}/${allAgents.length})`,
 );
 console.log(`Max turns: ${maxTurns}`);
-console.log(`Model: ${agentModel}${isOpus ? " (upgraded for large PR)" : ""}`);
+const modelNote =
+  agentModel !== sizeModel
+    ? ` (from PR description, via ${agentProvider})`
+    : sizeModel !== defaultModel
+      ? " (upgraded for large PR)"
+      : "";
+console.log(`Model: ${agentModel}${modelNote}`);
 if (voters > 1) {
   console.log(
     `Voters: ${voters} per agent (${matrix.agents.length} total jobs)`,
@@ -241,5 +257,6 @@ if (outputFile) {
   appendFileSync(outputFile, `matrix=${JSON.stringify(matrix)}\n`);
   appendFileSync(outputFile, `max_turns=${maxTurns}\n`);
   appendFileSync(outputFile, `agent_model=${agentModel}\n`);
+  appendFileSync(outputFile, `agent_provider=${agentProvider}\n`);
   appendFileSync(outputFile, `agent_names=${JSON.stringify(agentNames)}\n`);
 }

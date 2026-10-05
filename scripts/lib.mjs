@@ -20,6 +20,33 @@ export { buildBasePromptSections, parseClaudeResult } from "../src/prompt.mjs";
 /** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
 export const MAX_VOTERS = 10;
 
+const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
+const MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*$/;
+const MAX_MODEL_ID_LENGTH = 100;
+
+/**
+ * Applies a `<!-- review-hero: model=<id> -->` marker from the PR body over
+ * `fallback`. Ids containing `/` are OpenRouter ids and need its key.
+ */
+export function chooseAgentModel({ body, fallback, hasOpenRouterKey }) {
+  const chosen = { model: fallback, provider: "anthropic", warning: null };
+  const match = String(body ?? "").match(MODEL_MARKER);
+  if (!match) return chosen;
+
+  const id = match[1];
+  if (id.length > MAX_MODEL_ID_LENGTH || !MODEL_ID.test(id)) {
+    return { ...chosen, warning: `Ignoring invalid model id in PR description; using ${fallback}` };
+  }
+  if (!id.includes("/")) return { ...chosen, model: id };
+  if (!hasOpenRouterKey) {
+    return {
+      ...chosen,
+      warning: `Model ${id} needs REVIEW_HERO_OPENROUTER_API_KEY, which is not set; using ${fallback}`,
+    };
+  }
+  return { model: id, provider: "openrouter", warning: null };
+}
+
 // ── Environment ──────────────────────────────────────────────────────────────
 
 export function getEnvOrThrow(name) {
