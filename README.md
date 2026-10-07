@@ -262,15 +262,15 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 
 For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
 
-### Choosing the model per PR
+### Experimental GLM review
 
-Add a hidden marker to the PR description to pick the review agents' model for that PR:
+A second checkbox runs the review on GLM 5.3 Flash instead of Claude:
 
 ```markdown
-<!-- review-hero: model=claude-opus-5 -->
+- [ ] **Run Review Hero GLM (experimental)** <!-- #ai-review-glm -->
 ```
 
-The marker overrides both the `model` input and the Opus upgrade. An id containing `/` (e.g. `z-ai/glm-5.3`) runs the review agents through [OpenRouter](https://openrouter.ai/) and needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; triage and filtering stay on Anthropic. An invalid id, or an OpenRouter id without the secret, logs a warning and falls back to the usual model.
+The review agents run through [OpenRouter](https://openrouter.ai/) with 1.5× the usual turn budget, and need the `REVIEW_HERO_OPENROUTER_API_KEY` secret; triage and filtering stay on Anthropic. Without the secret it logs a warning and reviews on Claude. Only models listed in `OPT_IN_MODELS` in `scripts/lib.mjs` can be picked this way.
 
 ### Suppression rules
 
@@ -464,6 +464,7 @@ Here's a complete block you can drop into `.github/pull_request_template.md`:
 ### 🦸 Review Hero
 
 - [ ] **Run Review Hero** <!-- #ai-review -->
+- [ ] **Run Review Hero GLM (experimental)** <!-- #ai-review-glm -->
 - [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
 - [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
 - [ ] **Save suppressions** <!-- #save-suppressions -->

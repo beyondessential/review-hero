@@ -221,10 +221,7 @@ async function uncheckReviewHero(prNumber) {
     const body = pr.body;
     if (!body) return;
 
-    const updated = body.replace(
-      /\[x\]\s+\*\*Run Review Hero\*\* <!-- #ai-review -->/,
-      "[ ] **Run Review Hero** <!-- #ai-review -->",
-    );
+    const updated = body.replace(/\[x\](\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(?:-glm)? -->)/g, "[ ]$1");
 
     if (updated === body) return;
 
@@ -236,7 +233,7 @@ async function uncheckReviewHero(prNumber) {
       { method: "PATCH", body: JSON.stringify({ body: updated }) },
       { token: actionsToken },
     );
-    console.log("Unchecked Review Hero checkbox");
+    console.log("Unchecked Review Hero checkboxes");
   } catch (err) {
     console.warn(`Failed to uncheck checkbox: ${err.message}`);
   }

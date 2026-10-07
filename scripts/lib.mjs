@@ -20,23 +20,23 @@ export { buildBasePromptSections, parseClaudeResult } from "../src/prompt.mjs";
 /** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
 export const MAX_VOTERS = 10;
 
-const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
-const MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*$/;
-const MAX_MODEL_ID_LENGTH = 100;
-
 /**
- * Applies a `<!-- review-hero: model=<id> -->` marker from the PR body over
- * `fallback`. Ids containing `/` are OpenRouter ids and need its key.
+ * Models a PR can opt into with a checkbox in its description, keyed by the
+ * checkbox's anchor. Ids containing `/` are OpenRouter ids and need its key.
  */
+export const OPT_IN_MODELS = {
+  "#ai-review-glm": "z-ai/glm-5.3-flash:floor",
+};
+
+/** Applies a ticked opt-in model checkbox from the PR body over `fallback`. */
 export function chooseAgentModel({ body, fallback, hasOpenRouterKey }) {
   const chosen = { model: fallback, provider: "anthropic", warning: null };
-  const match = String(body ?? "").match(MODEL_MARKER);
-  if (!match) return chosen;
+  const anchor = Object.keys(OPT_IN_MODELS).find((a) =>
+    new RegExp(`\\[x\\][^\\r\\n]*<!-- ${escapeRegExp(a)} -->`).test(String(body ?? "")),
+  );
+  if (!anchor) return chosen;
 
-  const id = match[1];
-  if (id.length > MAX_MODEL_ID_LENGTH || !MODEL_ID.test(id)) {
-    return { ...chosen, warning: `Ignoring invalid model id in PR description; using ${fallback}` };
-  }
+  const id = OPT_IN_MODELS[anchor];
   if (!id.includes("/")) return { ...chosen, model: id };
   if (!hasOpenRouterKey) {
     return {
