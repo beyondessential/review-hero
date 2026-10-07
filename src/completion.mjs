@@ -96,6 +96,7 @@ export function stripCompletionBlocks(text) {
  *   Groups that passed consensus, from `groupAllFindings`.
  * @param {Array} [args.droppedGroups] Groups below the consensus threshold.
  * @param {number} [args.suppressedCount] Findings removed by suppression rules.
+ * @param {string} [args.model] Model the review agents ran on.
  */
 // spec: CMPL#review
 export function buildReviewResult({
@@ -106,6 +107,7 @@ export function buildReviewResult({
   keptGroups = [],
   droppedGroups = [],
   suppressedCount = 0,
+  model,
 }) {
   const severities = { critical: 0, suggestion: 0, nitpick: 0 };
   for (const group of keptGroups) severities[group.representative.severity]++;
@@ -113,6 +115,7 @@ export function buildReviewResult({
     kind: "review",
     outcome: agentsCompleted > 0 ? "completed" : "failed",
     reviewedSha,
+    ...(model && { model }),
     counts: {
       agentsCompleted,
       agentsFailed,

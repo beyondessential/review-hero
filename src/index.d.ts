@@ -214,6 +214,8 @@ export interface ReviewCompletion extends CompletionBase {
   kind: "review";
   outcome: "completed" | "failed";
   reviewedSha: string;
+  /** Model the review agents ran on. */
+  model?: string;
   counts: {
     agentsCompleted: number;
     agentsFailed: number;
@@ -278,6 +280,7 @@ export function buildReviewResult(args: {
   keptGroups?: FindingGroup[];
   droppedGroups?: FindingGroup[];
   suppressedCount?: number;
+  model?: string;
 }): ReviewResult;
 
 /** `Omit` applied to each member of a union rather than to their common keys. */

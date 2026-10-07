@@ -12,7 +12,7 @@ PR checkbox checked
         ▼
    ┌─────────┐   Haiku selects    ┌──────────────────────────────┐
    │ Triage  │──── agents ───────>│ Review agents (x N x voters) │
-   │ (Haiku) │   filters diff     │ (Sonnet, parallel)           │
+   │ (Haiku) │   filters diff     │ (GLM or Claude, parallel)    │
    └─────────┘                    └──────────────┬────────────────┘
                                                  │ JSON findings
                                                  ▼
@@ -73,6 +73,7 @@ The same applies to `ANTHROPIC_BASE_URL` / `REVIEW_HERO_ANTHROPIC_BASE_URL`, whi
 |--------------------------------------|----------------------------------------------------------|
 | `REVIEW_HERO_ANTHROPIC_API_KEY`      | Anthropic API key (preferred over `ANTHROPIC_API_KEY`)   |
 | `REVIEW_HERO_ANTHROPIC_BASE_URL`     | Custom API base URL (preferred over `ANTHROPIC_BASE_URL`)|
+| `REVIEW_HERO_OPENROUTER_API_KEY`     | OpenRouter key, only needed for [OpenRouter models](#choosing-the-model-per-pr) |
 
 ## Setup (per repo)
 
@@ -257,9 +258,23 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 
 **Cost impact:** Voters multiply agent costs linearly. The default of 3 voters strikes a good balance between noise reduction and cost.
 
-### Automatic Opus upgrade for large PRs
+### Choosing the model
 
-For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
+Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with 1.5× the usual turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
+
+A second checkbox runs the review on Claude, meant as a final pass just before merging a substantive PR:
+
+```markdown
+- [ ] **Run Review Hero on Claude (before merge)** <!-- #ai-review-claude -->
+```
+
+The Claude review uses the `model` input, upgraded to Opus for PRs with 500+ changed lines. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
+
+A hidden marker in the PR description can pick another model from `ALLOWED_MODELS` in `scripts/lib.mjs`; any other id logs a warning and is ignored. The Claude checkbox wins over the marker.
+
+```markdown
+<!-- review-hero: model=z-ai/glm-5.3-flash:floor -->
+```
 
 ### Suppression rules
 
@@ -325,6 +340,7 @@ Posted at the end of a review round, or when a review could not complete.
 |-------|-------------|
 | `outcome` | `completed` when at least one agent returned results, `failed` when every agent failed |
 | `reviewedSha` | The commit that was reviewed |
+| `model` | The model the review agents ran on |
 | `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed` |
 
 ### `auto-fix`
@@ -358,7 +374,7 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
-      model: claude-sonnet-5   # Default model (auto-upgrades to Opus for large PRs)
+      model: claude-sonnet-5   # Claude model for the Claude checkbox (auto-upgrades to Opus for large PRs)
       runner: ubuntu-slim      # Runner for all jobs
       voters: 3                # Voters per agent (1 to disable consensus)
     secrets: inherit
@@ -367,7 +383,7 @@ jobs:
 | Input     | Default            | Description |
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
-| `model`   | `claude-sonnet-5`  | Default Claude model for review agents. Triage may upgrade to Opus for large PRs (500+ lines). |
+| `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
 | `voters`  | `3`                | Independent voters per agent. `>=2` enables consensus filtering. Set to `1` to disable. |
 
@@ -410,7 +426,7 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 ### Review
 
 - **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
-- **Agents**: one Sonnet session per selected agent, with up to 8–20 tool-use turns depending on diff size. This is where most cost comes from.
+- **Agents**: one GLM (or Claude) session per selected agent, with up to 8–20 tool-use turns depending on diff size. This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
 
 Max turns scale with the filtered diff size and are capped at 20:
@@ -453,6 +469,7 @@ Here's a complete block you can drop into `.github/pull_request_template.md`:
 ### 🦸 Review Hero
 
 - [ ] **Run Review Hero** <!-- #ai-review -->
+- [ ] **Run Review Hero on Claude (before merge)** <!-- #ai-review-claude -->
 - [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
 - [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
 - [ ] **Save suppressions** <!-- #save-suppressions -->
