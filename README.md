@@ -267,7 +267,7 @@ For PRs with 500+ changed lines, triage automatically upgrades the review model 
 A second checkbox runs the review on GLM 5.3 Flash instead of Claude:
 
 ```markdown
-- [ ] **Run Review Hero GLM (experimental)** <!-- #ai-review-glm -->
+- [ ] **Run Review Hero on GLM (experimental)** <!-- #ai-review-glm -->
 ```
 
 The review agents run through [OpenRouter](https://openrouter.ai/) with 1.5× the usual turn budget, and need the `REVIEW_HERO_OPENROUTER_API_KEY` secret; triage and filtering stay on Anthropic. Without the secret it logs a warning and reviews on Claude. Only models listed in `OPT_IN_MODELS` in `scripts/lib.mjs` can be picked this way.
@@ -464,7 +464,7 @@ Here's a complete block you can drop into `.github/pull_request_template.md`:
 ### 🦸 Review Hero
 
 - [ ] **Run Review Hero** <!-- #ai-review -->
-- [ ] **Run Review Hero GLM (experimental)** <!-- #ai-review-glm -->
+- [ ] **Run Review Hero on GLM (experimental)** <!-- #ai-review-glm -->
 - [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
 - [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
 - [ ] **Save suppressions** <!-- #save-suppressions -->

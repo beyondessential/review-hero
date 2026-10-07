@@ -6,7 +6,7 @@ import { chooseAgentModel } from "./lib.mjs";
 const choose = (body, hasOpenRouterKey = true) =>
   chooseAgentModel({ body, fallback: "claude-sonnet-5", hasOpenRouterKey });
 
-const glm = (box) => `- [${box}] **Run Review Hero GLM (experimental)** <!-- #ai-review-glm -->`;
+const glm = (box) => `- [${box}] **Run Review Hero on GLM (experimental)** <!-- #ai-review-glm -->`;
 
 test("uses the fallback without a ticked opt-in checkbox", () => {
   for (const body of [undefined, "Just a description", glm(" "), "- [x] **Run Review Hero** <!-- #ai-review -->"]) {
