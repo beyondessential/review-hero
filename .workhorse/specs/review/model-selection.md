@@ -4,7 +4,7 @@ id: MODEL
 
 # Review model selection
 
-Triage picks the model the review agents run on. A pull request can opt into an experimental model with a checkbox in its description.
+Triage picks the model the review agents run on. A pull request can pick an allowed model with a checkbox or a hidden marker in its description.
 
 ## Default choice
 
@@ -14,7 +14,9 @@ Triage picks the model the review agents run on. A pull request can opt into an 
 ## Opt-in checkbox
 
 - [ ] Ticking `**Run Review Hero on GLM (experimental)** <!-- #ai-review-glm -->` runs a review with the agents on `z-ai/glm-5.3-flash:floor`, overriding both the `model` input and the Opus upgrade.
-- [ ] Only models in the opt-in safelist can be chosen; nothing typed into the description names a model.
+- [ ] A description containing `<!-- review-hero: model=<id> -->` runs the review agents on `<id>` when `<id>` is in `ALLOWED_MODELS`; the checkbox wins over the marker.
+- [ ] Any other id logs a workflow warning and the review uses the default choice.
+- [ ] Nothing in the description can add or change other triage outputs.
 - [ ] Either Review Hero checkbox triggers a review, and both are unticked once it finishes.
 - [ ] The description reaches triage through the environment, never interpolated into a script.
 

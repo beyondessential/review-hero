@@ -262,7 +262,7 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 
 For PRs with 500+ changed lines, triage automatically upgrades the review model from Sonnet to Opus. Opus reasons more deeply and catches subtle issues in large diffs that Sonnet may miss. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
 
-### Experimental GLM review
+### Choosing the model per PR
 
 A second checkbox runs the review on GLM 5.3 Flash instead of Claude:
 
@@ -270,7 +270,13 @@ A second checkbox runs the review on GLM 5.3 Flash instead of Claude:
 - [ ] **Run Review Hero on GLM (experimental)** <!-- #ai-review-glm -->
 ```
 
-The review agents run through [OpenRouter](https://openrouter.ai/) with 1.5× the usual turn budget, and need the `REVIEW_HERO_OPENROUTER_API_KEY` secret; triage and filtering stay on Anthropic. Without the secret it logs a warning and reviews on Claude. Only models listed in `OPT_IN_MODELS` in `scripts/lib.mjs` can be picked this way.
+A hidden marker in the PR description can also pick the model, overriding both the `model` input and the Opus upgrade:
+
+```markdown
+<!-- review-hero: model=z-ai/glm-5.3-flash:floor -->
+```
+
+Only models in `ALLOWED_MODELS` in `scripts/lib.mjs` can be picked; any other id logs a warning and the review uses the usual model. An id containing `/` runs the review agents through [OpenRouter](https://openrouter.ai/) with 1.5× the usual turn budget, and needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it the review warns and stays on Claude. Triage and filtering always use Anthropic.
 
 ### Suppression rules
 
@@ -336,6 +342,7 @@ Posted at the end of a review round, or when a review could not complete.
 |-------|-------------|
 | `outcome` | `completed` when at least one agent returned results, `failed` when every agent failed |
 | `reviewedSha` | The commit that was reviewed |
+| `model` | The model the review agents ran on |
 | `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed` |
 
 ### `auto-fix`

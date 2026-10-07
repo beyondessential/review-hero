@@ -63,6 +63,7 @@ A completion comment quotes text from the pull request, and anyone who can comme
 
 - [ ] `outcome` is `completed` when at least one agent returned results, and `failed` when every agent failed.
 - [ ] `reviewedSha` is the reviewed commit.
+- [ ] `model` is the model the review agents ran on.
 - [ ] `counts` holds `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, and `suppressed`, matching the figures in the visible summary.
 - [ ] The shared library builds a review's result (`kind`, `outcome`, `reviewedSha`, and `counts`) from the review pipeline's outputs, so a consumer that runs the review itself gets the same figures as data.
 - [ ] The hosted review's block is that same result with the run metadata added.

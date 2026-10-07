@@ -20,23 +20,26 @@ export { buildBasePromptSections, parseClaudeResult } from "../src/prompt.mjs";
 /** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
 export const MAX_VOTERS = 10;
 
-/**
- * Models a PR can opt into with a checkbox in its description, keyed by the
- * checkbox's anchor. Ids containing `/` are OpenRouter ids and need its key.
- */
-export const OPT_IN_MODELS = {
-  "#ai-review-glm": "z-ai/glm-5.3-flash:floor",
-};
+/** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
+export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:floor"];
 
-/** Applies a ticked opt-in model checkbox from the PR body over `fallback`. */
+const GLM_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-glm -->/;
+const GLM_MODEL = "z-ai/glm-5.3-flash:floor";
+const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
+
+/**
+ * Applies a ticked GLM checkbox, or else a `<!-- review-hero: model=<id> -->`
+ * marker naming an allowed model, from the PR body over `fallback`.
+ */
 export function chooseAgentModel({ body, fallback, hasOpenRouterKey }) {
   const chosen = { model: fallback, provider: "anthropic", warning: null };
-  const anchor = Object.keys(OPT_IN_MODELS).find((a) =>
-    new RegExp(`\\[x\\][^\\r\\n]*<!-- ${escapeRegExp(a)} -->`).test(String(body ?? "")),
-  );
-  if (!anchor) return chosen;
+  const text = String(body ?? "");
+  const id = GLM_CHECKBOX.test(text) ? GLM_MODEL : text.match(MODEL_MARKER)?.[1];
+  if (!id) return chosen;
 
-  const id = OPT_IN_MODELS[anchor];
+  if (!ALLOWED_MODELS.includes(id)) {
+    return { ...chosen, warning: `Ignoring model not in ALLOWED_MODELS; using ${fallback}` };
+  }
   if (!id.includes("/")) return { ...chosen, model: id };
   if (!hasOpenRouterKey) {
     return {

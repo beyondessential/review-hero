@@ -610,6 +610,7 @@ jobs:
           REVIEW_HERO_REF: ${{ inputs.ref }}
           ARTIFACTS_DIR: /tmp/artifacts
           AGENT_NAMES: ${{ needs.triage.outputs.agent_names }}
+          AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           VOTERS: ${{ inputs.voters }}
           SUPPRESSIONS_PATH: /tmp/suppressions.yml

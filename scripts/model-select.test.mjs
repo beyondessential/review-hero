@@ -29,10 +29,22 @@ test("the GLM checkbox without the key falls back with a warning", () => {
   assert.match(result.warning, /REVIEW_HERO_OPENROUTER_API_KEY/);
 });
 
-test("free-text model markers are ignored", () => {
-  for (const body of ["<!-- review-hero: model=claude-opus-5 -->", "<!-- review-hero: model=z-ai/glm-5.3 -->"]) {
-    assert.equal(choose(body).model, "claude-sonnet-5");
+test("a marker naming an allowed model selects it", () => {
+  assert.deepEqual(choose("Summary\n\n<!-- review-hero: model=z-ai/glm-5.3-flash:floor -->"), {
+    model: "z-ai/glm-5.3-flash:floor",
+    provider: "openrouter",
+    warning: null,
+  });
+  assert.equal(choose("<!--review-hero:model=z-ai/glm-5.3-flash:floor-->").model, "z-ai/glm-5.3-flash:floor");
+});
+
+test("a marker naming any other model falls back with a warning", () => {
+  for (const id of ["claude-opus-5", "z-ai/glm-5.3", "", "claude;rm", "z-ai/glm-5.3-flash:floor\nx=y"]) {
+    const result = choose(`<!-- review-hero: model=${id} -->`);
+    assert.equal(result.model, "claude-sonnet-5", id);
+    assert.equal(result.provider, "anthropic", id);
   }
+  assert.match(choose("<!-- review-hero: model=claude-opus-5 -->").warning, /ALLOWED_MODELS/);
 });
 
 test("a tick on another line does not select GLM", () => {

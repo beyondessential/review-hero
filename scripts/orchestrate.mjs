@@ -373,6 +373,7 @@ async function main() {
         agentsCompleted,
         agentsFailed,
         voters: voterCount,
+        model: process.env.AGENT_MODEL,
       }),
     );
     await postComment(
@@ -458,6 +459,7 @@ async function main() {
     agentsCompleted,
     agentsFailed,
     voters: voterCount,
+    model: process.env.AGENT_MODEL,
     keptGroups,
     droppedGroups,
     suppressedCount,
