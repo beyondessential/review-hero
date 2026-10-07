@@ -221,7 +221,7 @@ async function uncheckReviewHero(prNumber) {
     const body = pr.body;
     if (!body) return;
 
-    const updated = body.replace(/\[x\](\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(?:-glm)? -->)/g, "[ ]$1");
+    const updated = body.replace(/\[x\](\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(?:-claude)? -->)/g, "[ ]$1");
 
     if (updated === body) return;
 

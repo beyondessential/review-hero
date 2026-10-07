@@ -23,31 +23,35 @@ export const MAX_VOTERS = 10;
 /** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
 export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:floor"];
 
-const GLM_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-glm -->/;
-const GLM_MODEL = "z-ai/glm-5.3-flash:floor";
+export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:floor";
+const CLAUDE_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-claude -->/;
 const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
 
 /**
- * Applies a ticked GLM checkbox, or else a `<!-- review-hero: model=<id> -->`
- * marker naming an allowed model, from the PR body over `fallback`.
+ * Picks the review agents' model from the PR body: `claudeModel` when the
+ * Claude checkbox is ticked, else an allowed model named by a
+ * `<!-- review-hero: model=<id> -->` marker, else `DEFAULT_MODEL`. An
+ * OpenRouter model without its key falls back to `claudeModel`.
  */
-export function chooseAgentModel({ body, fallback, hasOpenRouterKey }) {
-  const chosen = { model: fallback, provider: "anthropic", warning: null };
+export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
+  const claude = { model: claudeModel, provider: "anthropic", warning: null };
   const text = String(body ?? "");
-  const id = GLM_CHECKBOX.test(text) ? GLM_MODEL : text.match(MODEL_MARKER)?.[1];
-  if (!id) return chosen;
+  if (CLAUDE_CHECKBOX.test(text)) return claude;
 
-  if (!ALLOWED_MODELS.includes(id)) {
-    return { ...chosen, warning: `Ignoring model not in ALLOWED_MODELS; using ${fallback}` };
-  }
-  if (!id.includes("/")) return { ...chosen, model: id };
+  let id = DEFAULT_MODEL;
+  let warning = null;
+  const marked = text.match(MODEL_MARKER)?.[1];
+  if (marked && ALLOWED_MODELS.includes(marked)) id = marked;
+  else if (marked) warning = `Ignoring model not in ALLOWED_MODELS; using ${id}`;
+
+  if (!id.includes("/")) return { model: id, provider: "anthropic", warning };
   if (!hasOpenRouterKey) {
     return {
-      ...chosen,
-      warning: `Model ${id} needs REVIEW_HERO_OPENROUTER_API_KEY, which is not set; using ${fallback}`,
+      ...claude,
+      warning: `Model ${id} needs REVIEW_HERO_OPENROUTER_API_KEY, which is not set; using ${claudeModel}`,
     };
   }
-  return { model: id, provider: "openrouter", warning: null };
+  return { model: id, provider: "openrouter", warning };
 }
 
 // ── Environment ──────────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ on:
         type: string
         default: checkbox
       model:
-        description: "Claude model for review agents"
+        description: "Claude model for review agents when a PR ticks the Claude checkbox, or when REVIEW_HERO_OPENROUTER_API_KEY is not set"
         type: string
         default: claude-sonnet-5
       runner:
@@ -83,7 +83,7 @@ jobs:
               return;
             }
             const body = context.payload.pull_request?.body ?? '';
-            core.setOutput('should_run', /\[x\]\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(-glm)? -->/.test(body));
+            core.setOutput('should_run', /\[x\]\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(-claude)? -->/.test(body));
 
       # ── Generate app token ───────────────────────────────────────────
       - name: Generate app token

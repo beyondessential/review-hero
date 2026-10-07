@@ -15,7 +15,7 @@
  *   REVIEW_HERO_DIR     — Path to the review-hero checkout (prompts/, scripts/)
  *   CALLER_REPO_DIR     — Path to the caller repo checkout (workspace root)
  *   FILTERED_DIFF_PATH  — Where to write the filtered diff for agents to consume
- *   PR_BODY             — PR description, read for an opt-in model checkbox
+ *   PR_BODY             — PR description, read for the model checkbox and marker
  *   HAS_OPENROUTER_KEY  — "true" when REVIEW_HERO_OPENROUTER_API_KEY is set
  */
 
@@ -94,7 +94,7 @@ const {
   warning: modelWarning,
 } = chooseAgentModel({
   body: process.env.PR_BODY,
-  fallback: sizeModel,
+  claudeModel: sizeModel,
   hasOpenRouterKey: process.env.HAS_OPENROUTER_KEY === "true",
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
@@ -242,7 +242,7 @@ console.log(
 console.log(`Max turns: ${maxTurns}`);
 const modelNote =
   agentModel !== sizeModel
-    ? ` (from PR description, via ${agentProvider})`
+    ? ` (via ${agentProvider})`
     : sizeModel !== defaultModel
       ? " (upgraded for large PR)"
       : "";
