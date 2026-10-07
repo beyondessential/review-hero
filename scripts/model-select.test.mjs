@@ -32,6 +32,12 @@ test("without the OpenRouter key, reviews on Claude with a warning", () => {
   assert.match(result.warning, /REVIEW_HERO_OPENROUTER_API_KEY/);
 });
 
+test("a rejected marker is still reported when the key is missing", () => {
+  const { warning } = choose("<!-- review-hero: model=claude-opus-5 -->", false);
+  assert.match(warning, /ALLOWED_MODELS/);
+  assert.match(warning, /REVIEW_HERO_OPENROUTER_API_KEY/);
+});
+
 test("a marker naming an allowed model selects it", () => {
   assert.deepEqual(choose("<!-- review-hero: model=z-ai/glm-5.3-flash:floor -->"), GLM);
   assert.equal(choose("<!--review-hero:model=z-ai/glm-5.3-flash:floor-->").model, "z-ai/glm-5.3-flash:floor");

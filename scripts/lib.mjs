@@ -48,7 +48,9 @@ export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
   if (!hasOpenRouterKey) {
     return {
       ...claude,
-      warning: `Model ${id} needs REVIEW_HERO_OPENROUTER_API_KEY, which is not set; using ${claudeModel}`,
+      warning: [warning, `Model ${id} needs REVIEW_HERO_OPENROUTER_API_KEY, which is not set; using ${claudeModel}`]
+        .filter(Boolean)
+        .join(". "),
     };
   }
   return { model: id, provider: "openrouter", warning };
