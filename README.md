@@ -426,10 +426,10 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 ### Review
 
 - **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
-- **Agents**: one GLM (or Claude) session per selected agent, with up to 8–20 tool-use turns depending on diff size on Claude, or 30 on GLM. This is where most cost comes from.
+- **Agents**: one GLM (or Claude) session per selected agent, with a capped number of tool-use turns (below). This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
 
-On Claude, max turns scale with the filtered diff size and are capped at 20. GLM gets a flat 30, since it runs out of turns at the Claude budgets.
+GLM gets 30 turns. Claude's scale with the filtered diff size:
 
 | Filtered diff lines | Max turns |
 |---------------------|-----------|

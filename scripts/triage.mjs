@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { MAX_VOTERS, OPUS_THRESHOLD, chooseAgentModel, claudeMaxTurns, glmMaxTurns } from "./lib.mjs";
+import { MAX_VOTERS, chooseAgentModel } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
@@ -86,6 +86,7 @@ const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
   /[\r\n]/g,
   "",
 );
+const OPUS_THRESHOLD = 500;
 const sizeModel = diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 const {
   model: agentModel,
@@ -97,6 +98,17 @@ const {
   hasOpenRouterKey: process.env.HAS_OPENROUTER_KEY === "true",
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
+
+// An agent cut off mid-exploration produces no output, wasting its whole run.
+function claudeMaxTurns(lines) {
+  if (lines < 100) return 8;
+  if (lines < OPUS_THRESHOLD) return 15;
+  return 20;
+}
+
+function glmMaxTurns() {
+  return 30;
+}
 
 const maxTurns = agentProvider === "openrouter" ? glmMaxTurns() : claudeMaxTurns(diffLines);
 

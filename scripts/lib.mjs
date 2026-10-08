@@ -24,19 +24,6 @@ export const MAX_VOTERS = 10;
 export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:floor"];
 
 export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:floor";
-
-export const OPUS_THRESHOLD = 500;
-
-export function claudeMaxTurns(diffLines) {
-  if (diffLines < 100) return 8;
-  if (diffLines < OPUS_THRESHOLD) return 15;
-  return 20;
-}
-
-export function glmMaxTurns() {
-  return 30;
-}
-
 const CLAUDE_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-claude -->/;
 const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
 

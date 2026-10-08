@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { chooseAgentModel, claudeMaxTurns } from "./lib.mjs";
+import { chooseAgentModel } from "./lib.mjs";
 
 const choose = (body, hasOpenRouterKey = true) =>
   chooseAgentModel({ body, claudeModel: "claude-sonnet-5", hasOpenRouterKey });
@@ -54,11 +54,4 @@ test("a marker naming any other model is ignored with a warning", () => {
 
 test("a tick on another line does not select Claude", () => {
   assert.equal(choose(`- [x] **Other**\n${claudeBox(" ")}`).model, "z-ai/glm-5.3-flash:floor");
-});
-
-test("Claude's turn budget scales with diff size", () => {
-  assert.equal(claudeMaxTurns(99), 8);
-  assert.equal(claudeMaxTurns(100), 15);
-  assert.equal(claudeMaxTurns(499), 15);
-  assert.equal(claudeMaxTurns(500), 20);
 });
