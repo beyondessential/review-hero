@@ -22,7 +22,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
-const CONCURRENCY = 8;
+const CONCURRENCY = 12;
 const VOTER_TIMEOUT_MS = 20 * 60 * 1000;
 const WRAP_UP_TURNS = 3;
 const WRAP_UP_PROMPT =
@@ -127,7 +127,15 @@ async function main() {
   async function runVoter(agent) {
     const name = agent.voter ? `${agent.key}-voter-${agent.voter}` : agent.key;
     const resultPath = join(env.RESULTS_DIR, `${name}-result.json`);
-    let code = await runClaude(name, [...args, "--max-turns", String(maxTurns)], buildPrompt({ agent, ...promptInputs }), resultPath);
+    let prompt;
+    try {
+      prompt = buildPrompt({ agent, ...promptInputs });
+    } catch (err) {
+      console.log(`::error::${name} has no prompt: ${err.message}`);
+      failed.push(name);
+      return;
+    }
+    let code = await runClaude(name, [...args, "--max-turns", String(maxTurns)], prompt, resultPath);
     spawnSync("node", [join(env.REVIEW_HERO_DIR, "scripts/cache-stats.mjs"), resultPath, "--label", name], { stdio: "inherit" });
 
     // A capped voter has done its reading but written nothing, so resume its

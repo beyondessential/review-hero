@@ -277,7 +277,7 @@ jobs:
     if: needs.triage.outputs.should_run == 'true'
     # Every voter runs as a process in this one job, so it needs more room than the other jobs.
     runs-on: ${{ inputs.agent_runner }}
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       # ── Generate app token ───────────────────────────────────────────
       - name: Generate app token
