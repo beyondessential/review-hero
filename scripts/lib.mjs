@@ -27,6 +27,21 @@ export const MAX_VOTERS = 10;
 export const ALLOWED_MODELS = { "z-ai/glm-5.3-flash:floor": { maxTurns: 30 } };
 
 export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:floor";
+
+/** Diffs this many lines or longer review on Opus instead of the `model` input. */
+export const OPUS_THRESHOLD = 500;
+
+/**
+ * Turn budget for one review agent. A capped agent emits nothing, so the
+ * budget must cover exploring and answering. Allowed models carry their own
+ * flat budget; Claude's scales with diff size.
+ */
+export function maxTurnsFor(model, diffLines) {
+  if (Object.hasOwn(ALLOWED_MODELS, model)) return ALLOWED_MODELS[model].maxTurns;
+  if (diffLines < 100) return 8;
+  if (diffLines < OPUS_THRESHOLD) return 15;
+  return 20;
+}
 const CLAUDE_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-claude -->/;
 const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
 

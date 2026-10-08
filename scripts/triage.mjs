@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { ALLOWED_MODELS, MAX_VOTERS, chooseAgentModel } from "./lib.mjs";
+import { MAX_VOTERS, OPUS_THRESHOLD, chooseAgentModel, maxTurnsFor } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
@@ -86,7 +86,6 @@ const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
   /[\r\n]/g,
   "",
 );
-const OPUS_THRESHOLD = 500;
 const sizeModel = diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 const {
   model: agentModel,
@@ -99,13 +98,6 @@ const {
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
 
-// A capped agent emits nothing, so the budget must cover exploring and answering.
-function maxTurnsFor(model, lines) {
-  if (ALLOWED_MODELS[model]) return ALLOWED_MODELS[model].maxTurns;
-  if (lines < 100) return 8;
-  if (lines < OPUS_THRESHOLD) return 15;
-  return 20;
-}
 const maxTurns = maxTurnsFor(agentModel, diffLines);
 
 // Discover all agents
