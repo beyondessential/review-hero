@@ -204,11 +204,6 @@ if (rawVoters > MAX_VOTERS) {
 }
 const voters = Math.min(rawVoters, MAX_VOTERS);
 
-// Every voter of a given agent runs a byte-identical prompt, so they can share
-// a cached prompt prefix — but only if one request lands before the others. A
-// cache entry becomes readable once the first response begins, so voter 0 is
-// marked as the primer: it writes the cache, and its siblings wait for it.
-// With a single voter there is nothing to share, so no primer is nominated.
 const matrix = {
   agents:
     voters > 1
@@ -217,14 +212,12 @@ const matrix = {
             key: a.key,
             source: a.source,
             voter: String(i),
-            primer: i === 0 ? "1" : "",
           })),
         )
       : selectedAgents.map((a) => ({
           key: a.key,
           source: a.source,
           voter: "",
-          primer: "",
         })),
 };
 
@@ -244,7 +237,7 @@ const modelNote =
 console.log(`Model: ${agentModel}${modelNote}`);
 if (voters > 1) {
   console.log(
-    `Voters: ${voters} per agent (${matrix.agents.length} total jobs)`,
+    `Voters: ${voters} per agent (${matrix.agents.length} in total)`,
   );
 }
 

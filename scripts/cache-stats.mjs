@@ -1,10 +1,8 @@
 /**
  * Print prompt-cache usage for a Claude CLI result file.
  *
- * The review-agent matrix invokes the Claude CLI directly from workflow YAML,
- * so it cannot reuse `logClaudeSession`. Rather than re-derive the numbers in
- * jq at each call site (which lets the hit-rate formula drift away from the
- * JS one), those steps shell out to this script.
+ * run-agents.mjs spawns the Claude CLI directly, so it cannot reuse
+ * `logClaudeSession`; it shells out to this script for each result.
  *
  * Usage:
  *   node cache-stats.mjs <result.json> [--label NAME] [--require-write]
