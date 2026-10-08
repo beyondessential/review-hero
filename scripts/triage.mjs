@@ -5,7 +5,7 @@
  * 2. Discovers base agents (from review-hero prompts/) and custom agents
  *    (from the caller repo's .github/review-hero/)
  * 3. Calls Claude Haiku to select which agents are relevant
- * 4. Calculates max-turns based on filtered diff size
+ * 4. Sets max-turns (flat, raised for OpenRouter models)
  * 5. Outputs matrix, max_turns, and agent_names for downstream jobs
  *
  * Environment variables:
@@ -99,18 +99,8 @@ const {
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
 
-// Scale max-turns with diff size. Each tool interaction (Read, Grep, …)
-// consumes a turn, and the agent needs one more to emit its findings array,
-// so the budget must comfortably exceed "explore + answer" — an agent cut off
-// mid-exploration produces no output and wastes its entire run.
-let maxTurns;
-if (diffLines < 100) {
-  maxTurns = 8;
-} else if (diffLines < OPUS_THRESHOLD) {
-  maxTurns = 15;
-} else {
-  maxTurns = 20;
-}
+// A capped agent emits nothing, and how much code it reads doesn't track diff size.
+let maxTurns = 20;
 // GLM often runs out of turns at the budgets sized for Claude.
 if (agentProvider === "openrouter") maxTurns = Math.round(maxTurns * 1.5);
 

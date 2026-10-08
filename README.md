@@ -426,7 +426,49 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 ### Review
 
 - **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
-- **Agents**: one GLM (or Claude) session per selected agent, with up to 8–20 tool-use turns depending on diff size. This is where most cost comes from.
+- **Agents**: one GLM (or Claude) session per selected agent, with up to 20 tool-use turns (30 on GLM). This is where most cost comes from.
+- **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
+
+### Auto-Fix inputs
+
+```yaml
+jobs:
+  auto-fix:
+    uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@v1
+    with:
+      model: claude-sonnet-5
+      runner: ubuntu-slim       # Runner for trigger check + review fixes
+      ci-runner: ubuntu-latest  # Runner when fixing CI failures (may need build tools)
+    secrets: inherit
+```
+
+| Input       | Default            | Description |
+|-------------|--------------------|-------------|
+| `model`     | `claude-sonnet-5`  | The Claude model used for auto-fix. |
+| `runner`    | `ubuntu-slim`      | GitHub Actions runner for the trigger check and review-only fixes. |
+| `ci-runner` | `ubuntu-latest`    | GitHub Actions runner used when fixing CI failures (needs build tools, test runners, etc.). Automatically selected when the CI failures checkbox is checked. |
+
+## Base agents
+
+| Agent        | Focus |
+|--------------|-------|
+| **Bugs & Correctness** | Logic errors, edge cases, null access, race conditions, type mismatches, error handling gaps |
+| **Performance** | Expensive loops, unbounded growth, N+1 queries, resource exhaustion, missing pagination |
+| **Design & Architecture** | Wrong abstractions, DRY violations, over-engineering, separation of concerns |
+| **Security** | Injection, XSS, auth bypass, data exposure, input validation, path traversal |
+
+The triage step uses Haiku to skip agents that aren't relevant to the changed files. **Bugs** is always included.
+
+## Cost
+
+### GitHub Actions minutes
+
+Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows), which means all jobs run against the **calling repo's** Actions minute quota and billing — not this repo's. Each review run (triage + agents + orchestrator) and each auto-fix run count towards your repo's monthly included minutes or usage charges.
+
+### Review
+
+- **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
+- **Agents**: one GLM (or Claude) session per selected agent, with up to 20 tool-use turns (30 on GLM). This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
 
 Max turns scale with the filtered diff size and are capped at 20:
