@@ -71,6 +71,7 @@ export function limit(concurrency) {
     });
 }
 
+// Resolves to the exit code, or "timeout" when the run was stopped for taking too long.
 function runClaude(label, args, input, outputPath) {
   return new Promise((resolve) => {
     const stdout = openSync(outputPath, "w");
@@ -79,14 +80,15 @@ function runClaude(label, args, input, outputPath) {
     child.stderr.on("data", (chunk) => {
       for (const line of chunk.toString().split("\n")) if (line) console.log(`[${label}] ${line}`);
     });
+    let timedOut = false;
     const timer = setTimeout(() => {
-      console.log(`::warning::${label} still running after ${VOTER_TIMEOUT_MS / 60000} minutes, stopping it`);
+      timedOut = true;
       child.kill("SIGTERM");
     }, VOTER_TIMEOUT_MS);
     child.on("close", (code) => {
       clearTimeout(timer);
       closeSync(stdout);
-      resolve(code ?? 1);
+      resolve(timedOut ? "timeout" : (code ?? 1));
     });
   });
 }
@@ -143,8 +145,10 @@ async function main() {
       result = readResult(resultPath);
     }
 
-    // Still capped: the orchestrator counts it as non-contributing.
-    if (code !== 0 && result.subtype === "error_max_turns") {
+    // Out of time or still capped: the orchestrator counts it as non-contributing.
+    if (code === "timeout") {
+      console.log(`::warning::${name} still running after ${VOTER_TIMEOUT_MS / 60000} minutes, stopped and skipped`);
+    } else if (code !== 0 && result.subtype === "error_max_turns") {
       console.log(`::warning::${name} hit max-turns even after the wrap-up, skipping it`);
     } else if (code !== 0) {
       console.log(`::error::${name} exited with status ${code}`);
