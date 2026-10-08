@@ -494,8 +494,6 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ needs.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
           VOTER: ${{ matrix.agent.voter }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
-          # OpenRouter requests occasionally stall; failing one fast lets the CLI retry it.
-          API_TIMEOUT_MS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
         timeout-minutes: 20
         run: |
           set -euo pipefail
