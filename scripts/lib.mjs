@@ -20,8 +20,11 @@ export { buildBasePromptSections, parseClaudeResult } from "../src/prompt.mjs";
 /** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
 export const MAX_VOTERS = 10;
 
-/** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
-export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:floor"];
+/**
+ * Models a PR can pick for its review agents, with each one's flat turn budget.
+ * Ids containing `/` are OpenRouter ids and need its key.
+ */
+export const ALLOWED_MODELS = { "z-ai/glm-5.3-flash:floor": { maxTurns: 30 } };
 
 export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:floor";
 const CLAUDE_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-claude -->/;
@@ -41,7 +44,7 @@ export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
   let id = DEFAULT_MODEL;
   let warning = null;
   const marked = text.match(MODEL_MARKER)?.[1];
-  if (marked && ALLOWED_MODELS.includes(marked)) id = marked;
+  if (marked && Object.hasOwn(ALLOWED_MODELS, marked)) id = marked;
   else if (marked) warning = `Ignoring model not in ALLOWED_MODELS; using ${id}`;
 
   if (!id.includes("/")) return { model: id, provider: "anthropic", warning };

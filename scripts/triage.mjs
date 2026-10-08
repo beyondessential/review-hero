@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { MAX_VOTERS, chooseAgentModel } from "./lib.mjs";
+import { ALLOWED_MODELS, MAX_VOTERS, chooseAgentModel } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
@@ -100,13 +100,13 @@ const {
 if (modelWarning) console.log(`::warning::${modelWarning}`);
 
 // A capped agent emits nothing, so the budget must cover exploring and answering.
-function maxTurnsFor(provider, lines) {
-  if (provider === "openrouter") return 30;
+function maxTurnsFor(model, lines) {
+  if (ALLOWED_MODELS[model]) return ALLOWED_MODELS[model].maxTurns;
   if (lines < 100) return 8;
   if (lines < OPUS_THRESHOLD) return 15;
   return 20;
 }
-const maxTurns = maxTurnsFor(agentProvider, diffLines);
+const maxTurns = maxTurnsFor(agentModel, diffLines);
 
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);
