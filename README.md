@@ -24,7 +24,7 @@ PR checkbox checked
                                         └─────────────────┘
 ```
 
-1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, and scales the agent turn budget by diff size.
+1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, and sets the agent turn budget (flat for GLM, scaled by diff size for Claude).
 2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. When `voters > 1`, each agent runs multiple times independently for consensus. Agents have read-only access to the repo so they can explore surrounding code for context.
 3. **Orchestrator** — collects all agent outputs, applies voter consensus (when enabled), filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
@@ -260,7 +260,7 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 
 ### Choosing the model
 
-Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with 1.5× the usual turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
+Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with a flat 30-turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
 
 A second checkbox runs the review on Claude, meant as a final pass just before merging a substantive PR:
 
@@ -426,10 +426,10 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 ### Review
 
 - **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
-- **Agents**: one GLM (or Claude) session per selected agent, with up to 8–20 tool-use turns depending on diff size. This is where most cost comes from.
+- **Agents**: one GLM (or Claude) session per selected agent, with a capped number of tool-use turns (below). This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
 
-Max turns scale with the filtered diff size and are capped at 20:
+GLM gets 30 turns. Claude's scale with the filtered diff size:
 
 | Filtered diff lines | Max turns |
 |---------------------|-----------|

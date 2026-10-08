@@ -87,6 +87,7 @@ const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
   "",
 );
 const OPUS_THRESHOLD = 500;
+const GLM_MAX_TURNS = 30;
 const sizeModel = diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 const {
   model: agentModel,
@@ -99,20 +100,14 @@ const {
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
 
-// Scale max-turns with diff size. Each tool interaction (Read, Grep, …)
-// consumes a turn, and the agent needs one more to emit its findings array,
-// so the budget must comfortably exceed "explore + answer" — an agent cut off
-// mid-exploration produces no output and wastes its entire run.
-let maxTurns;
-if (diffLines < 100) {
-  maxTurns = 8;
-} else if (diffLines < OPUS_THRESHOLD) {
-  maxTurns = 15;
-} else {
-  maxTurns = 20;
+// An agent cut off mid-exploration produces no output, wasting its whole run.
+function claudeMaxTurns(lines) {
+  if (lines < 100) return 8;
+  if (lines < OPUS_THRESHOLD) return 15;
+  return 20;
 }
-// GLM often runs out of turns at the budgets sized for Claude.
-if (agentProvider === "openrouter") maxTurns = Math.round(maxTurns * 1.5);
+
+const maxTurns = agentProvider === "openrouter" ? GLM_MAX_TURNS : claudeMaxTurns(diffLines);
 
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);

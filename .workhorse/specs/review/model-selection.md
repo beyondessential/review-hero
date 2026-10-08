@@ -27,6 +27,6 @@ Triage picks the model the review agents run on. Reviews run on GLM by default; 
 
 ## OpenRouter models
 
-- [ ] A model id containing `/` runs the review agents through OpenRouter's Anthropic-compatible endpoint, authenticated with the `REVIEW_HERO_OPENROUTER_API_KEY` secret, with 1.5× the usual turn budget.
+- [ ] A model id containing `/` runs the review agents through OpenRouter's Anthropic-compatible endpoint, authenticated with the `REVIEW_HERO_OPENROUTER_API_KEY` secret, with a flat 30-turn budget.
 - [ ] Triage and the orchestrator's filtering always use Anthropic, whatever model the agents run on.
 - [ ] The README documents the default, the checkbox, the marker and the secret.
