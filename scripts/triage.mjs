@@ -5,7 +5,7 @@
  * 2. Discovers base agents (from review-hero prompts/) and custom agents
  *    (from the caller repo's .github/review-hero/)
  * 3. Calls Claude Haiku to select which agents are relevant
- * 4. Sets max-turns: 20 for Claude, 30 for GLM
+ * 4. Sets max-turns per provider
  * 5. Outputs matrix, max_turns, and agent_names for downstream jobs
  *
  * Environment variables:
