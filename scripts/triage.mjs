@@ -99,20 +99,14 @@ const {
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
 
-// Scale max-turns with diff size. Each tool interaction (Read, Grep, …)
-// consumes a turn, and the agent needs one more to emit its findings array,
-// so the budget must comfortably exceed "explore + answer" — an agent cut off
-// mid-exploration produces no output and wastes its entire run.
-let maxTurns;
-if (agentProvider === "openrouter") {
-  maxTurns = 30;
-} else if (diffLines < 100) {
-  maxTurns = 8;
-} else if (diffLines < OPUS_THRESHOLD) {
-  maxTurns = 15;
-} else {
-  maxTurns = 20;
+// A capped agent emits nothing, so the budget must cover exploring and answering.
+function maxTurnsFor(provider, lines) {
+  if (provider === "openrouter") return 30;
+  if (lines < 100) return 8;
+  if (lines < OPUS_THRESHOLD) return 15;
+  return 20;
 }
+const maxTurns = maxTurnsFor(agentProvider, diffLines);
 
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);
