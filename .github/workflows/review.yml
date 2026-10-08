@@ -12,9 +12,13 @@ on:
         type: string
         default: claude-sonnet-5
       runner:
-        description: "GitHub Actions runner for all jobs"
+        description: "GitHub Actions runner for every job except the review agents"
         type: string
         default: ubuntu-slim
+      agent_runner:
+        description: "GitHub Actions runner for the review agents, which can run past ubuntu-slim's 15-minute job limit"
+        type: string
+        default: ubuntu-latest
       voters:
         description: "Number of independent voters per agent (>=2 enables consensus filtering to reduce noise)"
         type: number
@@ -271,7 +275,7 @@ jobs:
   review-agent:
     needs: triage
     if: needs.triage.outputs.should_run == 'true'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.agent_runner }}
     strategy:
       fail-fast: false
       matrix:

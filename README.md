@@ -375,7 +375,8 @@ jobs:
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
       model: claude-sonnet-5   # Claude model for the Claude checkbox (auto-upgrades to Opus for large PRs)
-      runner: ubuntu-slim      # Runner for all jobs
+      runner: ubuntu-slim      # Runner for every job except the review agents
+      agent_runner: ubuntu-latest  # Runner for the review agents
       voters: 3                # Voters per agent (1 to disable consensus)
     secrets: inherit
 ```
@@ -384,7 +385,8 @@ jobs:
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
 | `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
-| `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
+| `runner`  | `ubuntu-slim`      | GitHub Actions runner for every job except the review agents. |
+| `agent_runner` | `ubuntu-latest` | GitHub Actions runner for the review agents, which can outlast `ubuntu-slim`'s 15-minute job limit. |
 | `voters`  | `3`                | Independent voters per agent. `>=2` enables consensus filtering. Set to `1` to disable. |
 
 ### Auto-Fix inputs
