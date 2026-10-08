@@ -418,7 +418,7 @@ jobs:
       # request body, so this still writes the full prefix — but it returns in
       # seconds instead of running a whole review.
       - name: Prime prompt cache
-        if: matrix.agent.primer == '1'
+        if: matrix.agent.primer == '1' && needs.triage.outputs.agent_provider != 'openrouter'
         env:
           ANTHROPIC_API_KEY: ${{ needs.triage.outputs.agent_provider != 'openrouter' && (secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY) || '' }}
           ANTHROPIC_BASE_URL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && 'https://openrouter.ai/api' || secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
@@ -439,6 +439,7 @@ jobs:
           # request regardless of how the run terminates.
           set +e
           claude -p \
+            --permission-mode dontAsk \
             --output-format json \
             --model "$AGENT_MODEL" \
             --max-turns 1 \
@@ -464,7 +465,7 @@ jobs:
       # and proceed. That costs runner minutes, not API spend — a re-run's
       # prefix is long expired either way.
       - name: Publish cache-prime marker
-        if: always() && matrix.agent.primer == '1'
+        if: always() && matrix.agent.primer == '1' && needs.triage.outputs.agent_provider != 'openrouter'
         uses: actions/upload-artifact@v7
         with:
           name: cache-primed-${{ matrix.agent.key }}-${{ github.run_attempt }}
@@ -477,8 +478,9 @@ jobs:
       # staggered. That keeps the gap between the cache write and these reads
       # to seconds, which matters because the CLI manages `cache_control`
       # itself and we cannot request the longer TTL.
+      # OpenRouter models don't use Anthropic's prompt cache, so priming only delays the voters.
       - name: Wait for cache prime
-        if: matrix.agent.voter != '' && matrix.agent.primer != '1'
+        if: matrix.agent.voter != '' && matrix.agent.primer != '1' && needs.triage.outputs.agent_provider != 'openrouter'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           MARKER_NAME: cache-primed-${{ matrix.agent.key }}-${{ github.run_attempt }}
@@ -492,6 +494,8 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ needs.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
           VOTER: ${{ matrix.agent.voter }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
+          # OpenRouter requests occasionally stall; failing one fast lets the CLI retry it.
+          API_TIMEOUT_MS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
         timeout-minutes: 20
         run: |
           set -euo pipefail
@@ -504,6 +508,7 @@ jobs:
 
           set +e
           claude -p \
+            --permission-mode dontAsk \
             --output-format json \
             --model "$AGENT_MODEL" \
             --max-turns ${{ needs.triage.outputs.max_turns }} \
