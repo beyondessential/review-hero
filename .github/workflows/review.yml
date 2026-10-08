@@ -439,6 +439,7 @@ jobs:
           # request regardless of how the run terminates.
           set +e
           claude -p \
+            --permission-mode dontAsk \
             --output-format json \
             --model "$AGENT_MODEL" \
             --max-turns 1 \
@@ -507,6 +508,7 @@ jobs:
 
           set +e
           claude -p \
+            --permission-mode dontAsk \
             --output-format json \
             --model "$AGENT_MODEL" \
             --max-turns ${{ needs.triage.outputs.max_turns }} \
