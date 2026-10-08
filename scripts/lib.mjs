@@ -25,19 +25,14 @@ export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:floor"];
 
 export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:floor";
 
-/** Diffs this many lines or longer review on Opus instead of the `model` input. */
 export const OPUS_THRESHOLD = 500;
 
-// A capped agent emits nothing, so a turn budget must cover exploring and answering.
-
-/** Claude's budget scales with diff size: a capped voter's tokens climb steeply with turns. */
 export function claudeMaxTurns(diffLines) {
   if (diffLines < 100) return 8;
   if (diffLines < OPUS_THRESHOLD) return 15;
   return 20;
 }
 
-/** GLM needs more turns than Claude to reach the same depth, and costs little per token. */
 export function glmMaxTurns() {
   return 30;
 }
