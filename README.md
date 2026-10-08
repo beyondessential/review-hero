@@ -260,7 +260,7 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 
 ### Choosing the model
 
-Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with 1.5× the usual turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
+Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with a larger turn budget (20, 25 or 30 turns by diff size, against Claude's 8, 15 or 20). This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
 
 A second checkbox runs the review on Claude, meant as a final pass just before merging a substantive PR:
 

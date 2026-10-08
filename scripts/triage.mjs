@@ -103,16 +103,14 @@ if (modelWarning) console.log(`::warning::${modelWarning}`);
 // consumes a turn, and the agent needs one more to emit its findings array,
 // so the budget must comfortably exceed "explore + answer" — an agent cut off
 // mid-exploration produces no output and wastes its entire run.
-let maxTurns;
-if (diffLines < 100) {
-  maxTurns = 8;
-} else if (diffLines < OPUS_THRESHOLD) {
-  maxTurns = 15;
-} else {
-  maxTurns = 20;
-}
-// GLM often runs out of turns at the budgets sized for Claude.
-if (agentProvider === "openrouter") maxTurns = Math.round(maxTurns * 1.5);
+// GLM needs more turns than Claude to reach the same depth.
+const TURN_BUDGETS = {
+  anthropic: { small: 8, medium: 15, large: 20 },
+  openrouter: { small: 20, medium: 25, large: 30 },
+};
+const diffSize =
+  diffLines < 100 ? "small" : diffLines < OPUS_THRESHOLD ? "medium" : "large";
+const maxTurns = TURN_BUDGETS[agentProvider][diffSize];
 
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);
