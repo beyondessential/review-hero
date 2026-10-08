@@ -424,10 +424,6 @@ jobs:
           ANTHROPIC_BASE_URL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && 'https://openrouter.ai/api' || secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           ANTHROPIC_AUTH_TOKEN: ${{ needs.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
-          # On OpenRouter every model alias resolves to the agent model, so no side call reaches a Claude model.
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && needs.triage.outputs.agent_model || '' }}
-          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && needs.triage.outputs.agent_model || '' }}
-          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && needs.triage.outputs.agent_model || '' }}
         timeout-minutes: 5
         run: |
           set -euo pipefail
@@ -498,10 +494,6 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ needs.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
           VOTER: ${{ matrix.agent.voter }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
-          # On OpenRouter every model alias resolves to the agent model, so no side call reaches a Claude model.
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && needs.triage.outputs.agent_model || '' }}
-          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && needs.triage.outputs.agent_model || '' }}
-          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ needs.triage.outputs.agent_provider == 'openrouter' && needs.triage.outputs.agent_model || '' }}
           # OpenRouter requests occasionally stall; failing one fast lets the CLI retry it.
           API_TIMEOUT_MS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
         timeout-minutes: 20
