@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { MAX_VOTERS, OPUS_THRESHOLD, chooseAgentModel, maxTurnsFor } from "./lib.mjs";
+import { MAX_VOTERS, OPUS_THRESHOLD, chooseAgentModel, claudeMaxTurns, glmMaxTurns } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
@@ -98,7 +98,7 @@ const {
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
 
-const maxTurns = maxTurnsFor(agentModel, diffLines);
+const maxTurns = agentProvider === "openrouter" ? glmMaxTurns() : claudeMaxTurns(diffLines);
 
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);

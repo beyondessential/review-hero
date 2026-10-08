@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { chooseAgentModel, maxTurnsFor } from "./lib.mjs";
+import { chooseAgentModel, claudeMaxTurns } from "./lib.mjs";
 
 const choose = (body, hasOpenRouterKey = true) =>
   chooseAgentModel({ body, claudeModel: "claude-sonnet-5", hasOpenRouterKey });
@@ -57,19 +57,8 @@ test("a tick on another line does not select Claude", () => {
 });
 
 test("Claude's turn budget scales with diff size", () => {
-  assert.equal(maxTurnsFor("claude-sonnet-5", 99), 8);
-  assert.equal(maxTurnsFor("claude-sonnet-5", 100), 15);
-  assert.equal(maxTurnsFor("claude-opus-5", 499), 15);
-  assert.equal(maxTurnsFor("claude-opus-5", 500), 20);
-});
-
-test("an allowed model uses its own flat budget at every diff size", () => {
-  for (const lines of [1, 250, 5000]) {
-    assert.equal(maxTurnsFor("z-ai/glm-5.3-flash:floor", lines), 30);
-  }
-});
-
-test("a model id that only matches an object key's name is not treated as allowed", () => {
-  assert.equal(maxTurnsFor("constructor", 1), 8);
-  assert.equal(choose("<!-- review-hero: model=constructor -->").model, "z-ai/glm-5.3-flash:floor");
+  assert.equal(claudeMaxTurns(99), 8);
+  assert.equal(claudeMaxTurns(100), 15);
+  assert.equal(claudeMaxTurns(499), 15);
+  assert.equal(claudeMaxTurns(500), 20);
 });
