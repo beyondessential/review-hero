@@ -25,6 +25,7 @@ Completion comments are:
 
 - [ ] Each commit is shown as its short SHA, linked to that commit within the pull request.
 - [ ] The review summary names the reviewed commit on its header line, after the round.
+- [ ] The review summary names the model the agents ran on at the end of its header line.
 - [ ] The comment for a review where every agent failed names the reviewed commit.
 - [ ] An auto-fix or save-suppressions comment names the commit the run started from.
 - [ ] When the run pushed commits, the comment also names the new head it pushed, including when a failed run pushed partial fixes before stopping.
