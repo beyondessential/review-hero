@@ -2,7 +2,7 @@
  * Print prompt-cache usage for a Claude CLI result file.
  *
  * run-agents.mjs spawns the Claude CLI directly, so it cannot reuse
- * `logClaudeSession`; it shells out to this script for each result.
+ * `logClaudeSession`; it shells out to this script for each voter.
  *
  * Usage:
  *   node cache-stats.mjs <result.json> [--label NAME] [--require-write]

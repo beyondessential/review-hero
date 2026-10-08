@@ -19,10 +19,6 @@ on:
         description: "GitHub Actions runner for the job that runs every agent's voters at once"
         type: string
         default: ubuntu-latest
-      agent_concurrency:
-        description: "Claude processes the agents job runs at once"
-        type: number
-        default: 8
       voters:
         description: "Number of independent voters per agent (>=2 enables consensus filtering to reduce noise)"
         type: number
@@ -361,7 +357,6 @@ jobs:
           API_TIMEOUT_MS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
           AGENTS_JSON: ${{ toJson(fromJson(needs.triage.outputs.matrix).agents) }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
-          AGENT_PROVIDER: ${{ needs.triage.outputs.agent_provider }}
           MAX_TURNS: ${{ needs.triage.outputs.max_turns }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PROJECT_CONTEXT: ${{ needs.triage.outputs.project_context }}
@@ -370,7 +365,6 @@ jobs:
           DIFF_PATH: /tmp/pr-filtered.diff
           AI_RULES_PATH: /tmp/ai-rules.md
           RESULTS_DIR: /tmp/results
-          CONCURRENCY: ${{ inputs.agent_concurrency }}
         run: node .review-hero/scripts/run-agents.mjs
 
       - name: Upload results
