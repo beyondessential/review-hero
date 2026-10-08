@@ -494,7 +494,7 @@ jobs:
           VOTER: ${{ matrix.agent.voter }}
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
           # OpenRouter requests occasionally stall; failing one fast lets the CLI retry it.
-          API_TIMEOUT_MS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '120000' || '600000' }}
+          API_TIMEOUT_MS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
         timeout-minutes: 20
         run: |
           set -euo pipefail
