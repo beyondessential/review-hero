@@ -179,6 +179,8 @@ export function buildSummaryHeader(args: {
   round: number | null;
   /** Link to the reviewed commit, from `formatCommitLink`. */
   commitLink?: string | null;
+  /** Model the review agents ran on. */
+  model?: string;
   agentsCompleted: number;
   agentsFailed: number;
   counts: { critical: number; suggestion: number; nitpick: number };

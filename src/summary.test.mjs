@@ -40,3 +40,14 @@ test("the summary header names the reviewed commit after the round", () => {
     "🦸 **Review Hero Summary** (round 2) · reviewed [`abc1234`](https://github.com/o/r/pull/7/commits/abc)",
   );
 });
+
+test("the summary header names the model the agents ran on", () => {
+  const header = buildSummaryHeader({
+    round: 1,
+    model: "z-ai/glm-5.3-flash:floor",
+    agentsCompleted: 3,
+    agentsFailed: 0,
+    counts: { critical: 0, suggestion: 0, nitpick: 0 },
+  });
+  assert.equal(header.split("\n")[0], "🦸 **Review Hero Summary** (round 1) · on `z-ai/glm-5.3-flash:floor`");
+});

@@ -514,6 +514,7 @@ async function main() {
     buildSummaryHeader({
       round,
       commitLink: reviewedLink,
+      model: process.env.AGENT_MODEL,
       agentsCompleted,
       agentsFailed,
       counts: result.counts,

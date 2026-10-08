@@ -46,10 +46,11 @@ export function formatCommitLink({ serverUrl, repo, prNumber, sha }) {
   return `[\`${sha.slice(0, 7)}\`](${origin}/${repo}/pull/${prNumber}/commits/${sha})`;
 }
 
-export function buildSummaryHeader({ round, commitLink, agentsCompleted, agentsFailed, counts }) {
+export function buildSummaryHeader({ round, commitLink, model, agentsCompleted, agentsFailed, counts }) {
   return (
     `${SUMMARY_HEADER}${round ? ` (round ${round})` : ""}` +
-    `${commitLink ? ` · reviewed ${commitLink}` : ""}\n` +
+    `${commitLink ? ` · reviewed ${commitLink}` : ""}` +
+    `${model && !model.includes("`") ? ` · on \`${model}\`` : ""}\n` +
     `**${agentsCompleted} agent${agentsCompleted === 1 ? "" : "s"}** reviewed this PR` +
     (agentsFailed > 0 ? ` | ${agentsFailed} failed` : "") +
     ` | ${counts.critical} critical` +
