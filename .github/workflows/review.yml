@@ -524,11 +524,34 @@ jobs:
           node .review-hero/scripts/cache-stats.mjs \
             "/tmp/${RESULT_NAME}-result.json" --label "$RESULT_NAME"
 
-          # Claude CLI exits non-zero when it hits --max-turns. That's an
-          # expected budget exhaustion, not a CI failure — the agent ran out
-          # of turns before producing a final findings array. Leave the result
-          # file intact (the orchestrator's parser tolerates missing findings
-          # and will count the agent as non-contributing without erroring).
+          # A capped agent has done its reading but written nothing, so resume
+          # its session and ask for the findings it already has.
+          session_id=$(jq -r 'select(.subtype == "error_max_turns") | .session_id // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true)
+          if [ "$claude_rc" -ne 0 ] && [ -n "$session_id" ]; then
+            echo "::notice::Agent ${RESULT_NAME} hit max-turns (${{ needs.triage.outputs.max_turns }}); resuming it to write up findings"
+            set +e
+            echo "You are out of turns. Stop exploring and reply with only your final JSON array of findings, using what you have already confirmed (exactly [] if none)." \
+              | claude -p \
+                --resume "$session_id" \
+                --permission-mode dontAsk \
+                --output-format json \
+                --model "$AGENT_MODEL" \
+                --max-turns 3 \
+                --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+                > "/tmp/${RESULT_NAME}-resumed.json"
+            resume_rc=$?
+            set -e
+            # A failed wrap-up keeps the capped result, which is skipped below.
+            if [ "$resume_rc" -eq 0 ] && [ -s "/tmp/${RESULT_NAME}-resumed.json" ]; then
+              mv "/tmp/${RESULT_NAME}-resumed.json" "/tmp/${RESULT_NAME}-result.json"
+              claude_rc=0
+            fi
+          fi
+
+          # Still capped after the wrap-up: an expected budget exhaustion, not
+          # a CI failure. Leave the result file intact (the orchestrator's
+          # parser tolerates missing findings and will count the agent as
+          # non-contributing without erroring).
           if [ "$claude_rc" -ne 0 ] && [ -s "/tmp/${RESULT_NAME}-result.json" ]; then
             subtype=$(jq -r '.subtype // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || echo "")
             if [ "$subtype" = "error_max_turns" ]; then
