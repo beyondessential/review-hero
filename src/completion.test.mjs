@@ -73,13 +73,13 @@ test("a review result counts kept groups by severity and reports the filtering f
       keptGroups: [group("critical"), group("suggestion"), group("suggestion"), group("nitpick")],
       droppedGroups: [group("suggestion"), group("nitpick")],
       suppressedCount: 2,
-      model: "z-ai/glm-5.3-flash:floor",
+      model: "z-ai/glm-5.3-flash:nitro",
     }),
     {
       kind: "review",
       outcome: "completed",
       reviewedSha: SHA,
-      model: "z-ai/glm-5.3-flash:floor",
+      model: "z-ai/glm-5.3-flash:nitro",
       counts: {
         agentsCompleted: 4,
         agentsFailed: 1,

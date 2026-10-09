@@ -21,9 +21,9 @@ export { buildBasePromptSections, parseClaudeResult } from "../src/prompt.mjs";
 export const MAX_VOTERS = 10;
 
 /** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
-export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:floor"];
+export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:nitro"];
 
-export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:floor";
+export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:nitro";
 const CLAUDE_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-claude -->/;
 const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
 
