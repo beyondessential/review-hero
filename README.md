@@ -273,7 +273,7 @@ The Claude review uses the `model` input, upgraded to Opus for PRs with 500+ cha
 A hidden marker in the PR description can pick another model from `ALLOWED_MODELS` in `scripts/lib.mjs`; any other id logs a warning and is ignored. The Claude checkbox wins over the marker.
 
 ```markdown
-<!-- review-hero: model=z-ai/glm-5.3-flash:floor -->
+<!-- review-hero: model=z-ai/glm-5.3-flash:nitro -->
 ```
 
 ### Suppression rules

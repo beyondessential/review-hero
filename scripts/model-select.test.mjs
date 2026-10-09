@@ -6,7 +6,7 @@ import { chooseAgentModel } from "./lib.mjs";
 const choose = (body, hasOpenRouterKey = true) =>
   chooseAgentModel({ body, claudeModel: "claude-sonnet-5", hasOpenRouterKey });
 
-const GLM = { model: "z-ai/glm-5.3-flash:floor", provider: "openrouter", warning: null };
+const GLM = { model: "z-ai/glm-5.3-flash:nitro", provider: "openrouter", warning: null };
 const CLAUDE = { model: "claude-sonnet-5", provider: "anthropic", warning: null };
 const claudeBox = (box) =>
   `- [${box}] **Run Review Hero on Claude (before merge)** <!-- #ai-review-claude -->`;
@@ -22,7 +22,7 @@ test("the Claude checkbox reviews on the Claude model", () => {
 });
 
 test("the Claude checkbox wins over a marker", () => {
-  assert.deepEqual(choose(`${claudeBox("x")}\n<!-- review-hero: model=z-ai/glm-5.3-flash:floor -->`), CLAUDE);
+  assert.deepEqual(choose(`${claudeBox("x")}\n<!-- review-hero: model=z-ai/glm-5.3-flash:nitro -->`), CLAUDE);
 });
 
 test("without the OpenRouter key, reviews on Claude with a warning", () => {
@@ -39,19 +39,19 @@ test("a rejected marker is still reported when the key is missing", () => {
 });
 
 test("a marker naming an allowed model selects it", () => {
-  assert.deepEqual(choose("<!-- review-hero: model=z-ai/glm-5.3-flash:floor -->"), GLM);
-  assert.equal(choose("<!--review-hero:model=z-ai/glm-5.3-flash:floor-->").model, "z-ai/glm-5.3-flash:floor");
+  assert.deepEqual(choose("<!-- review-hero: model=z-ai/glm-5.3-flash:nitro -->"), GLM);
+  assert.equal(choose("<!--review-hero:model=z-ai/glm-5.3-flash:nitro-->").model, "z-ai/glm-5.3-flash:nitro");
 });
 
 test("a marker naming any other model is ignored with a warning", () => {
-  for (const id of ["claude-opus-5", "z-ai/glm-5.3", "claude;rm", "z-ai/glm-5.3-flash:floor\nx=y"]) {
+  for (const id of ["claude-opus-5", "z-ai/glm-5.3", "claude;rm", "z-ai/glm-5.3-flash:nitro\nx=y"]) {
     const result = choose(`<!-- review-hero: model=${id} -->`);
-    assert.equal(result.model, "z-ai/glm-5.3-flash:floor", id);
+    assert.equal(result.model, "z-ai/glm-5.3-flash:nitro", id);
     assert.equal(result.provider, "openrouter", id);
   }
   assert.match(choose("<!-- review-hero: model=claude-opus-5 -->").warning, /ALLOWED_MODELS/);
 });
 
 test("a tick on another line does not select Claude", () => {
-  assert.equal(choose(`- [x] **Other**\n${claudeBox(" ")}`).model, "z-ai/glm-5.3-flash:floor");
+  assert.equal(choose(`- [x] **Other**\n${claudeBox(" ")}`).model, "z-ai/glm-5.3-flash:nitro");
 });
