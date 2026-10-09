@@ -8,7 +8,7 @@ Triage picks the model the review agents run on. Reviews run on GLM by default; 
 
 ## Default choice
 
-- [ ] The review agents run on `z-ai/glm-5.3-flash:floor` through OpenRouter.
+- [ ] The review agents run on `z-ai/glm-5.3-flash:nitro` through OpenRouter.
 - [ ] When `REVIEW_HERO_OPENROUTER_API_KEY` is not set, the review logs a workflow warning and runs on Claude.
 
 ## Claude checkbox
