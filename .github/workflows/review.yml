@@ -524,13 +524,21 @@ jobs:
           node .review-hero/scripts/cache-stats.mjs \
             "/tmp/${RESULT_NAME}-result.json" --label "$RESULT_NAME"
 
-          # A capped agent has done its reading but written nothing, so resume
-          # its session and ask for the findings it already has.
-          session_id=$(jq -r 'select(.subtype == "error_max_turns") | .session_id // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true)
-          if [ "$claude_rc" -ne 0 ] && [ -n "$session_id" ]; then
-            echo "::notice::Agent ${RESULT_NAME} hit max-turns (${{ needs.triage.outputs.max_turns }}); resuming it to write up findings"
+          # A capped agent has done its reading but written nothing, and one that
+          # answered in prose with no array wrote nothing usable, so resume
+          # either session and ask for the findings it already has.
+          session_id=$(jq -r '.session_id // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true)
+          subtype=$(jq -r '.subtype // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true)
+          wrap_up=""
+          if [ "$claude_rc" -ne 0 ] && [ "$subtype" = "error_max_turns" ]; then
+            wrap_up="hit max-turns (${{ needs.triage.outputs.max_turns }})"
+          elif [ "$claude_rc" -eq 0 ] && ! jq -e '.result // "" | contains("[")' "/tmp/${RESULT_NAME}-result.json" >/dev/null 2>&1; then
+            wrap_up="answered without a findings array"
+          fi
+          if [ -n "$wrap_up" ] && [ -n "$session_id" ]; then
+            echo "::notice::Agent ${RESULT_NAME} ${wrap_up}; resuming it to write up findings"
             set +e
-            echo "You are out of turns. Stop exploring and reply with only your final JSON array of findings, using what you have already confirmed (exactly [] if none)." \
+            echo "Stop exploring and reply with only your final JSON array of findings, using what you have already confirmed (exactly [] if none). No other text." \
               | claude -p \
                 --resume "$session_id" \
                 --permission-mode dontAsk \
@@ -541,8 +549,8 @@ jobs:
                 > "/tmp/${RESULT_NAME}-resumed.json"
             resume_rc=$?
             set -e
-            # A failed wrap-up keeps the capped result, which is skipped below.
-            if [ "$resume_rc" -eq 0 ] && [ -s "/tmp/${RESULT_NAME}-resumed.json" ]; then
+            # A failed wrap-up keeps the original result.
+            if [ "$resume_rc" -eq 0 ] && jq -e '.result // "" | contains("[")' "/tmp/${RESULT_NAME}-resumed.json" >/dev/null 2>&1; then
               mv "/tmp/${RESULT_NAME}-resumed.json" "/tmp/${RESULT_NAME}-result.json"
               claude_rc=0
             fi

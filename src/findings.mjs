@@ -67,6 +67,18 @@ export function extractJsonArray(text) {
     }
     searchFrom = start + 1;
   }
+  // Findings written as bare objects, one or several, without the array
+  // brackets. JSON strings can't hold a raw newline, so one between objects
+  // marks a boundary.
+  const bare = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+  if (bare.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(`[${bare.replace(/}\s*\n\s*{/g, "},{")}]`);
+      if (parsed.every((f) => f && typeof f === "object" && "file" in f)) return parsed;
+    } catch {
+      // Not bare findings either
+    }
+  }
   return null;
 }
 
