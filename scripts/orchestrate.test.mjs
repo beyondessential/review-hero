@@ -162,3 +162,20 @@ test("summary header names the reviewed commit after the round", () => {
     "🦸 **Review Hero Summary** (round 2) · reviewed [`abc1234`](https://github.com/o/r/pull/7/commits/abc)",
   );
 });
+
+test("findings written as bare objects without the array brackets are still read", () => {
+  const one = { file: "a.yml", line: 5, severity: "critical", comment: "Guard the mv." };
+  const two = { file: "a.yml", line: 9, severity: "suggestion", comment: "Use a fallback.\nSecond line." };
+  const single = parse("bare-object-result.json", { type: "result", subtype: "success", result: JSON.stringify(one) });
+  assert.deepEqual(single.map((f) => f.line), [5]);
+  const several = parse("bare-objects-result.json", {
+    type: "result",
+    subtype: "success",
+    result: `${JSON.stringify(one)}\n\n${JSON.stringify(two)}`,
+  });
+  assert.deepEqual(several.map((f) => f.line), [5, 9]);
+});
+
+test("a bare object that is not a finding is still a failure", () => {
+  assert.equal(parse("bare-other-result.json", { type: "result", subtype: "success", result: '{"summary": "looks fine"}' }), null);
+});
