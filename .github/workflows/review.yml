@@ -526,8 +526,8 @@ jobs:
 
           # A capped agent has done its reading but written nothing, so resume
           # its session and ask for the findings it already has.
-          if [ "$claude_rc" -ne 0 ] && [ "$(jq -r '.subtype // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null)" = "error_max_turns" ]; then
-            session_id=$(jq -r '.session_id' "/tmp/${RESULT_NAME}-result.json")
+          session_id=$(jq -r 'select(.subtype == "error_max_turns") | .session_id // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true)
+          if [ "$claude_rc" -ne 0 ] && [ -n "$session_id" ]; then
             echo "::notice::Agent ${RESULT_NAME} hit max-turns (${{ needs.triage.outputs.max_turns }}); resuming it to write up findings"
             set +e
             echo "You are out of turns. Stop exploring and reply with only your final JSON array of findings, using what you have already confirmed (exactly [] if none)." \
@@ -537,10 +537,15 @@ jobs:
                 --output-format json \
                 --model "$AGENT_MODEL" \
                 --max-turns 3 \
+                --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
                 > "/tmp/${RESULT_NAME}-resumed.json"
-            claude_rc=$?
+            resume_rc=$?
             set -e
-            mv "/tmp/${RESULT_NAME}-resumed.json" "/tmp/${RESULT_NAME}-result.json"
+            # A failed wrap-up keeps the capped result, which is skipped below.
+            if [ "$resume_rc" -eq 0 ] && [ -s "/tmp/${RESULT_NAME}-resumed.json" ]; then
+              mv "/tmp/${RESULT_NAME}-resumed.json" "/tmp/${RESULT_NAME}-result.json"
+              claude_rc=0
+            fi
           fi
 
           # Still capped after the wrap-up: an expected budget exhaustion, not
