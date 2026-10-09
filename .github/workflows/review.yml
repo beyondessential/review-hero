@@ -524,20 +524,15 @@ jobs:
           node .review-hero/scripts/cache-stats.mjs \
             "/tmp/${RESULT_NAME}-result.json" --label "$RESULT_NAME"
 
-          # Whether a result's final message holds a findings array, judged by the orchestrator's own parser.
-          has_findings() {
-            node --input-type=module -e 'import { readFileSync } from "node:fs"; import { extractJsonArray } from "./.review-hero/src/findings.mjs"; const r = JSON.parse(readFileSync(process.argv[1], "utf8")); process.exit(extractJsonArray(String(r.result ?? "")) ? 0 : 1);' "$1" 2>/dev/null
-          }
-
-          # A capped agent has done its reading but written nothing, and an
-          # agent that answered in prose wrote nothing usable, so resume either
-          # session and ask for the findings it already has.
+          # A capped agent has done its reading but written nothing, and one that
+          # answered in prose with no array wrote nothing usable, so resume
+          # either session and ask for the findings it already has.
           session_id=$(jq -r '.session_id // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true)
           subtype=$(jq -r '.subtype // ""' "/tmp/${RESULT_NAME}-result.json" 2>/dev/null || true)
           wrap_up=""
           if [ "$claude_rc" -ne 0 ] && [ "$subtype" = "error_max_turns" ]; then
             wrap_up="hit max-turns (${{ needs.triage.outputs.max_turns }})"
-          elif [ "$claude_rc" -eq 0 ] && ! has_findings "/tmp/${RESULT_NAME}-result.json"; then
+          elif [ "$claude_rc" -eq 0 ] && ! jq -e '.result // "" | contains("[")' "/tmp/${RESULT_NAME}-result.json" >/dev/null 2>&1; then
             wrap_up="answered without a findings array"
           fi
           if [ -n "$wrap_up" ] && [ -n "$session_id" ]; then
@@ -554,8 +549,8 @@ jobs:
                 > "/tmp/${RESULT_NAME}-resumed.json"
             resume_rc=$?
             set -e
-            # A failed wrap-up keeps the original result, which is skipped below.
-            if [ "$resume_rc" -eq 0 ] && has_findings "/tmp/${RESULT_NAME}-resumed.json"; then
+            # A failed wrap-up keeps the original result.
+            if [ "$resume_rc" -eq 0 ] && jq -e '.result // "" | contains("[")' "/tmp/${RESULT_NAME}-resumed.json" >/dev/null 2>&1; then
               mv "/tmp/${RESULT_NAME}-resumed.json" "/tmp/${RESULT_NAME}-result.json"
               claude_rc=0
             fi
