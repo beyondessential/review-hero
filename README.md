@@ -260,7 +260,7 @@ The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 v
 
 ### Choosing the model
 
-Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with a flat 30-turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
+Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with a flat 20-turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
 
 A second checkbox runs the review on Claude, meant as a final pass just before merging a substantive PR:
 
@@ -429,7 +429,7 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 - **Agents**: one GLM (or Claude) session per selected agent, with a capped number of tool-use turns (below). This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
 
-GLM gets 30 turns. Claude's scale with the filtered diff size:
+GLM gets 20 turns. Claude's scale with the filtered diff size:
 
 | Filtered diff lines | Max turns |
 |---------------------|-----------|

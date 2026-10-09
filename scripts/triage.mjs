@@ -87,7 +87,7 @@ const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
   "",
 );
 const OPUS_THRESHOLD = 500;
-const GLM_MAX_TURNS = 30;
+const GLM_MAX_TURNS = 20;
 const sizeModel = diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 const {
   model: agentModel,
