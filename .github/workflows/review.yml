@@ -496,6 +496,8 @@ jobs:
           AGENT_MODEL: ${{ needs.triage.outputs.agent_model }}
           # OpenRouter requests occasionally stall; failing one fast lets the CLI retry it.
           API_TIMEOUT_MS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
+          # Some CLI versions cap a model ID they do not know below its real window and refuse the prompt unsent.
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ needs.triage.outputs.agent_provider == 'openrouter' && '1000000' || '' }}
         timeout-minutes: 20
         run: |
           set -euo pipefail
