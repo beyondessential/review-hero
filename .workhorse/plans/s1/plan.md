@@ -40,7 +40,10 @@ Setup (app token, checkouts, `npm ci`, Claude CLI install, rules detection) then
 
 ## Open questions
 
-- Default value of the concurrency cap.
-- How many retries and replacements a voter gets before it counts as non-contributing.
-- What triage scales voter count on (diff size alone, or per-agent relevance too), and how that interacts with the `voters` input (floor, ceiling, or ignored).
-- Whether to keep `runner` as one input or split it.
+The review agent runs spec (RUN) drafts an answer to each; these await confirmation.
+
+- Concurrency cap default: 8.
+- One retry for a crashed voter, one replacement for an empty one.
+- Voter count is review-wide and follows diff size only: the `voters` input below 500 changed lines (the Opus threshold), two more at 500 and above, capped at 10.
+  Consensus stays a strict majority of that count, with non-contributing voters still counted, so `counts.voters` keeps its meaning.
+- `runner` stays one input, defaulting to `ubuntu-latest`; a job-level `if:` skips non-matching events without a runner.
