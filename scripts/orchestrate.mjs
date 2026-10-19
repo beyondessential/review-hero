@@ -1,7 +1,7 @@
 /**
  * Review Hero — Orchestrator
  *
- * Reads structured JSON findings from review agent artifacts, applies voter
+ * Reads structured JSON findings from the review agents' result files, applies voter
  * consensus (when multiple voters per agent), filters against suppression
  * rules, deduplicates, and posts a consolidated PR review via the GitHub API.
  *
@@ -13,10 +13,10 @@
  *   PR_NUMBER           — Pull request number
  *   REVIEWED_SHA        — PR head commit the agents reviewed
  *   REVIEW_HERO_REF     — Review Hero ref the caller asked for (optional)
- *   ARTIFACTS_DIR       — Directory containing agent result files
+ *   ARTIFACTS_DIR       — Directory containing agent result files (scanned recursively)
  *   AGENT_NAMES         — JSON map of agent key → display name
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
- *   VOTERS              — Number of voters per agent (default: 1)
+ *   VOTERS              — Voters each agent ran, as triage set them (default: 1)
  *   SUPPRESSIONS_PATH   — Path to local suppressions YAML file (optional)
  *   GLOBAL_SUPPRESSIONS_PATH — Path to global suppressions YAML file (optional)
  *   ANTHROPIC_API_KEY   — API key for Haiku-based filtering (optional)
@@ -30,7 +30,11 @@ import {
   generateSuppressions,
 } from "./learn-from-reactions.mjs";
 import { join } from "node:path";
-import { MAX_VOTERS, createCompletionReporter } from "./lib.mjs";
+import {
+  MAX_VOTERS,
+  RESULT_FILE_PATTERN,
+  createCompletionReporter,
+} from "./lib.mjs";
 import {
   parseAgentResult,
   extractJsonArray,
@@ -308,10 +312,6 @@ async function main() {
   await resolvePreviousReviewHeroThreads(prNumber, botLogin);
 
   // ── Scan for results ──────────────────────────────────────────────────
-  // Result files follow one of two patterns:
-  //   {key}-result.json          (single voter / voters=1)
-  //   {key}-voter-{n}-result.json (multi-voter)
-  const RESULT_PATTERN = /^(.+?)(?:-voter-(\d+))?-result\.json$/;
   const agentResults = []; // { agentKey, voter, filePath }
 
   function scanForResults(dir) {
@@ -326,7 +326,7 @@ async function main() {
       if (entry.isDirectory()) {
         scanForResults(fullPath);
       } else if (entry.isFile()) {
-        const match = entry.name.match(RESULT_PATTERN);
+        const match = entry.name.match(RESULT_FILE_PATTERN);
         if (match && VALID_AGENT_KEY.test(match[1])) {
           agentResults.push({
             agentKey: match[1],

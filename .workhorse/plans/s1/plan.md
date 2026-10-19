@@ -67,71 +67,70 @@ Recorded in the review agent runs spec (RUN):
 
 ### Triage
 
-- [ ] `scripts/lib.mjs`: add `voterCountForDiff(diffLines, requested)` (one under 100 changed lines, `requested` from 100 to 499, `requested + 2` from 500, clamped to 1..`MAX_VOTERS`), with cases in `lib.test.mjs` at each boundary (`// spec: RUN#voters`)
-- [ ] `scripts/lib.mjs`: reword the `MAX_VOTERS` rationale to cost alone
-- [ ] `scripts/triage.mjs`: replace the `matrix` output with `agents` (JSON array of `{ key, source }`) and `voters` (from `voterCountForDiff`); drop the primer and voter fields; update the header comment and the log lines
-- [ ] `scripts/triage.mjs`: read the caller repo from `.caller-base` and review-hero from `.review-hero` via the existing `CALLER_REPO_DIR` / `REVIEW_HERO_DIR` env (workflow change only, but check nothing hard-codes `caller/`)
+- [x] `scripts/lib.mjs`: add `voterCountForDiff(diffLines, requested)` (one under 100 changed lines, `requested` from 100 to 499, `requested + 2` from 500, clamped to 1..`MAX_VOTERS`), with cases in `lib.test.mjs` at each boundary (`// spec: RUN#voters`)
+- [x] `scripts/lib.mjs`: reword the `MAX_VOTERS` rationale to cost alone
+- [x] `scripts/triage.mjs`: replace the `matrix` output with `agents` (JSON array of `{ key, source }`) and `voters` (from `voterCountForDiff`); drop the primer and voter fields; update the header comment and the log lines
+- [x] `scripts/triage.mjs`: read the caller repo from `.caller-base` and review-hero from `.review-hero` via the existing `CALLER_REPO_DIR` / `REVIEW_HERO_DIR` env (workflow change only, but check nothing hard-codes `caller/`)
 
 ### Prompt
 
-- [ ] `src/prompt.mjs`: add `buildReviewAgentPrompt({ projectContext, basePromptPath, agentPromptPath, aiRulesPath, maxTurns, prTitle, diff })`, porting the workflow's bash build: project context, base prompt, agent prompt, AI rules, turn budget with the same soft-cap formula, PR title and fenced diff
-- [ ] Export it from `src/index.mjs` and type it in `src/index.d.ts`
-- [ ] Tests in `src/index.test.mjs` (or a new `src/prompt.test.mjs`): identical bytes for identical inputs, sections omitted when empty, soft cap at `maxTurns` 4 and 20
+- [x] `src/prompt.mjs`: add `buildReviewAgentPrompt({ projectContext, basePrompt, agentPrompt, aiRules, maxTurns, prTitle, diff })` (contents, not paths, so it is testable) and `softTurnCap`, porting the workflow's bash build: project context, base prompt, agent prompt, AI rules, turn budget with the same soft-cap formula, PR title and fenced diff
+- [x] Export it from `src/index.mjs` and type it in `src/index.d.ts`
+- [x] Tests in `src/index.test.mjs` (or a new `src/prompt.test.mjs`): identical bytes for identical inputs, sections omitted when empty, soft cap at `maxTurns` 4 and 20
 
 ### Agent driver: `scripts/run-agents.mjs`
 
-- [ ] Inputs from env: `AGENTS`, `VOTERS`, `MAX_TURNS`, `AGENT_MODEL`, `AGENT_PROVIDER`, `CONCURRENCY` (default 8, rejects non-positive), `RESULTS_DIR`, prompt inputs, and the Anthropic/OpenRouter variables
-- [ ] Build each selected agent's prompt once with `buildReviewAgentPrompt`, reading custom agent prompts from `.caller-base` (`source` other than `base`), and write it to a file every run of that agent reads
-- [ ] A FIFO slot pool of size `CONCURRENCY`; primers are queued before any voter, and retries and replacements queue behind whatever is waiting (`// spec: RUN#concurrency`)
-- [ ] Async `spawnClaude` on `child_process.spawn`: the same flags as the workflow (`--permission-mode dontAsk`, `--output-format json`, `--allowedTools` read-only set, `--exclude-dynamic-system-prompt-sections`), stdin from the prompt file, stdout to the result file, stderr to a per-process log, a kill on timeout
-- [ ] Spawn with an allowlisted environment (`PATH`, `HOME`, `ANTHROPIC_*`, `API_TIMEOUT_MS`, `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, and what the CLI needs to run) so no GitHub token reaches an agent (`// spec: RUN#credentials`)
-- [ ] Primer per agent when voters > 1 and the provider is Anthropic: `--max-turns 1`, warn when it wrote nothing to the cache, and release the agent's voters however it ends (`// spec: RUN#prompt-cache-priming`)
-- [ ] Voter run with the wrap-up resume ported from bash: resume on `error_max_turns` or a result with no `[`, keep the original if the resume fails
-- [ ] Classify each finished voter as usable, empty, crashed or timed out; give a crashed or empty slot one fresh run, and leave a timed-out one non-contributing (`// spec: RUN#wrap-up-retries-and-replacements`)
-- [ ] Write each result under the orchestrator's names through a temporary file and rename, as soon as the voter settles
-- [ ] On each process's finish, print its log, cache stats (via `formatCacheStats`) and outcome as one `::group::` block written in a single call
-- [ ] Append a job summary table to `GITHUB_STEP_SUMMARY`: agent, voter, attempt, turns, cache read share, outcome (`// spec: RUN#logs`)
-- [ ] Exit 0 when agents fail, since the orchestrator reports that; exit non-zero only for the driver's own errors
+- [x] Inputs from env: `AGENTS`, `VOTERS`, `MAX_TURNS`, `AGENT_MODEL`, `AGENT_PROVIDER`, `CONCURRENCY` (default 8, rejects non-positive), `RESULTS_DIR`, prompt inputs, and the Anthropic/OpenRouter variables
+- [x] Build each selected agent's prompt once with `buildReviewAgentPrompt`, reading custom agent prompts from `.caller-base` (`source` other than `base`), and write it to a file every run of that agent reads
+- [x] A FIFO slot pool of size `CONCURRENCY`; primers are queued before any voter, and retries and replacements queue behind whatever is waiting (`// spec: RUN#concurrency`)
+- [x] Async `spawnClaude` on `child_process.spawn`: the same flags as the workflow (`--permission-mode dontAsk`, `--output-format json`, `--allowedTools` read-only set, `--exclude-dynamic-system-prompt-sections`), stdin from the prompt file, stdout to the result file, stderr to a per-process log, a kill on timeout
+- [x] Spawn with an allowlisted environment (`PATH`, `HOME`, `ANTHROPIC_*`, `API_TIMEOUT_MS`, `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, and what the CLI needs to run) so no GitHub token reaches an agent (`// spec: RUN#credentials`)
+- [x] Primer per agent when voters > 1 and the provider is Anthropic: `--max-turns 1`, warn when it wrote nothing to the cache, and release the agent's voters however it ends (`// spec: RUN#prompt-cache-priming`)
+- [x] Voter run with the wrap-up resume ported from bash: resume on `error_max_turns` or a result with no `[`, keep the original if the resume fails
+- [x] Classify each finished voter as usable, empty, crashed or timed out; give a crashed or empty slot one fresh run, and leave a timed-out one non-contributing (`// spec: RUN#wrap-up-retries-and-replacements`)
+- [x] Write each result under the orchestrator's names through a temporary file and rename, as soon as the voter settles
+- [x] On each process's finish, print its log, cache stats (via `formatCacheStats`) and outcome as one `::group::` block written in a single call
+- [x] Append a job summary table to `GITHUB_STEP_SUMMARY`: agent, voter, attempt, turns, cache read share, outcome (`// spec: RUN#logs`)
+- [x] Exit 0 when agents fail, since the orchestrator reports that; exit non-zero only for the driver's own errors
 
 ### Driver tests: `scripts/run-agents.test.mjs`
 
-- [ ] Make `spawnClaude` injectable, so tests drive the scheduler with a fake that returns scripted results and records start order and overlap
-- [ ] At most `CONCURRENCY` runs overlap
-- [ ] An agent's voters start only after its primer settles, including when the primer fails
-- [ ] No primer with one voter, or on OpenRouter
-- [ ] Max-turns and no-array results get one resume; a failed resume keeps the original
-- [ ] A crashed slot and an empty slot each get one fresh run, and no slot gets two
-- [ ] A timed-out run is not retried
-- [ ] Spawned env holds no `GITHUB_TOKEN`, `GH_TOKEN` or `ACTIONS_*` variables even when the parent has them
-- [ ] Result file names match the orchestrator's `RESULT_PATTERN`, single voter and multi-voter
+- [x] Make `spawnClaude` injectable, so tests drive the scheduler with a fake that returns scripted results and records start order and overlap
+- [x] At most `CONCURRENCY` runs overlap
+- [x] An agent's voters start only after its primer settles, including when the primer fails
+- [x] No primer with one voter, or on OpenRouter
+- [x] Max-turns and no-array results get one resume; a failed resume keeps the original
+- [x] A crashed slot and an empty slot each get one fresh run, and no slot gets two
+- [x] A timed-out run is not retried
+- [x] Spawned env holds no `GITHUB_TOKEN`, `GH_TOKEN` or `ACTIONS_*` variables even when the parent has them
+- [x] Result file names match the orchestrator's `RESULT_PATTERN`, single voter and multi-voter
 
 ### Remove the cross-job pieces
 
-- [ ] Delete `scripts/wait-for-cache-prime.mjs` and `scripts/wait-for-cache-prime.test.mjs`
-- [ ] Fold `readUsage` and `cacheWriteTokens` from `scripts/cache-stats.mjs` into the driver (or `lib.mjs`), move their tests, and delete the CLI and its test
-- [ ] `scripts/orchestrate.mjs`: header says `VOTERS` comes from triage; `src/findings.mjs` header no longer names the matrix
+- [x] Delete `scripts/wait-for-cache-prime.mjs` and `scripts/wait-for-cache-prime.test.mjs`
+- [x] Delete `scripts/cache-stats.mjs` and its test: the driver reads the usage block from each envelope itself, and the primer's no-cache-write warning moved into it
+- [x] `scripts/orchestrate.mjs`: header says `VOTERS` comes from triage, and the result file pattern moved to `lib.mjs` (`RESULT_FILE_PATTERN`, `resultFileName`) so the driver and orchestrator share it
 
 ### Workflow: `.github/workflows/review.yml`
 
-- [ ] Inputs: `runner` default `ubuntu-latest`, described as the review job's runner; new `concurrency` number input, default 8; `voters` described as the count for 100 to 499 changed lines
-- [ ] One `review` job replacing `triage`, `review-agent` and `orchestrate-review`, with `timeout-minutes` set
-- [ ] Job-level `if:` that skips without a runner: `inputs.trigger == 'always'`, or an opened/reopened/edited action whose body `contains` the ticked checkbox text (`// spec: RUN#the-review-job` in a YAML comment)
-- [ ] Keep the exact regex check as the first step, and gate every later step on its output
-- [ ] Checkouts in order, all with `persist-credentials: false`: PR head at the root, trusted ref into `.caller-base`, a second `.caller-base` checkout at the bootstrap branch when the default branch has no config, review-hero into `.review-hero`
-- [ ] Setup once: `.node-version` from `.caller-base`, `setup-node`, `npm ci --prefix .review-hero`, Claude CLI install
-- [ ] Keep the caller config, PR diff, triage, suppressions and AI rules steps, pointed at the new paths, with no artifact upload or download between them
-- [ ] Run `run-agents.mjs` with the triage outputs and `concurrency`, and no GitHub token in the step's env
-- [ ] Run the orchestrator with `if: always()` and the should-run gate, `ARTIFACTS_DIR` set to the driver's results directory and `VOTERS` from triage
-- [ ] Upload the results directory and agent logs as one artifact with `if: always()`, for debugging
+- [x] Inputs: `runner` default `ubuntu-latest`, described as the review job's runner; new `concurrency` number input, default 8; `voters` described as the count for 100 to 499 changed lines
+- [x] One `review` job replacing `triage`, `review-agent` and `orchestrate-review`, with `timeout-minutes` set
+- [x] Job-level `if:` that skips without a runner: `inputs.trigger == 'always'`, or an opened/reopened/edited action whose body `contains` the ticked checkbox text (`// spec: RUN#the-review-job` in a YAML comment)
+- [x] Keep the exact regex check as the first step, and gate every later step on its output
+- [x] Checkouts in order, all with `persist-credentials: false`: PR head at the root, trusted ref into `.caller-base`, a second `.caller-base` checkout at the bootstrap branch when the default branch has no config, review-hero into `.review-hero`
+- [x] Setup once: `.node-version` from `.caller-base`, `setup-node`, `npm ci --prefix .review-hero`, Claude CLI install
+- [x] Keep the caller config, PR diff, triage, suppressions and AI rules steps, pointed at the new paths, with no artifact upload or download between them
+- [x] Run `run-agents.mjs` with the triage outputs and `concurrency`, and no GitHub token in the step's env
+- [x] Run the orchestrator with `if: always()` and the should-run gate, `ARTIFACTS_DIR` set to the driver's results directory and `VOTERS` from triage
+- [x] Upload the results directory and agent logs as one artifact with `if: always()`, for debugging
 
 ### Docs
 
-- [ ] `README.md`: architecture diagram and "how it works" for the single job; voter consensus section with the diff-size tiers; inputs table for `runner`, `concurrency` and `voters`; the `ubuntu-slim` 15-minute warning
-- [ ] `DEVELOPING.md`: env table rows that name triage/agents/orchestrate jobs
+- [x] `README.md`: architecture diagram and "how it works" for the single job; voter consensus section with the diff-size tiers; inputs table for `runner`, `concurrency` and `voters`; the `ubuntu-slim` 15-minute warning
+- [x] `DEVELOPING.md`: env table rows that name triage/agents/orchestrate jobs
 
 ### Verify
 
-- [ ] `npm test`
-- [ ] `go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/review.yml`
+- [x] `npm test`
+- [x] `go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/review.yml`
 - [ ] A real review on a PR in this repo (`ai-review.yml` runs the PR's own ref): one job, primers before voters, cache reads on the voters, the summary table, and a completion block whose `counts.voters` matches the tier
-- [ ] Tick the review agent runs spec (RUN) criteria the build meets

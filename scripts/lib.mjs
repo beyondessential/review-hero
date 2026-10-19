@@ -17,8 +17,28 @@ export { buildBasePromptSections, parseClaudeResult } from "../src/prompt.mjs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
+/** Maximum number of voters per agent, since voters multiply a review's API cost. */
 export const MAX_VOTERS = 10;
+
+/** Below this many changed diff lines, each agent runs a single voter. */
+export const SMALL_DIFF_LINES = 100;
+
+/** From this many changed diff lines, each agent runs two more voters than requested. */
+export const LARGE_DIFF_LINES = 500;
+
+/**
+ * The number of voters every agent runs for a review: one for a small diff,
+ * where voters converge and consensus buys little, the requested count for a
+ * typical diff, and two more for a large one, where voters sample more of it
+ * selectively and disagree more. Never more than `MAX_VOTERS`.
+ */
+// spec: RUN#voters
+export function voterCountForDiff(diffLines, requested) {
+  const base = Math.max(1, Math.trunc(Number(requested)) || 1);
+  if (diffLines < SMALL_DIFF_LINES) return 1;
+  const count = diffLines >= LARGE_DIFF_LINES ? base + 2 : base;
+  return Math.min(count, MAX_VOTERS);
+}
 
 /** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
 export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:nitro"];
@@ -54,6 +74,19 @@ export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
     };
   }
   return { model: id, provider: "openrouter", warning };
+}
+
+// ── Agent result files ───────────────────────────────────────────────────────
+
+/**
+ * Agent result files are named `{key}-result.json` when each agent runs one
+ * voter and `{key}-voter-{n}-result.json` otherwise. The agent runner writes
+ * them and the orchestrator scans for them.
+ */
+export const RESULT_FILE_PATTERN = /^(.+?)(?:-voter-(\d+))?-result\.json$/;
+
+export function resultFileName(key, voter, voters) {
+  return voters > 1 ? `${key}-voter-${voter}-result.json` : `${key}-result.json`;
 }
 
 // ── Environment ──────────────────────────────────────────────────────────────

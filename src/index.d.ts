@@ -168,6 +168,25 @@ export interface BasePromptOptions {
 }
 
 export function buildBasePromptSections(options: BasePromptOptions): string[];
+
+export interface ReviewAgentPromptOptions {
+  projectContext?: string;
+  /** The shared agent prompt (`prompts/agent-prompt.md`). */
+  basePrompt: string;
+  /** The agent's own specialisation prompt. */
+  agentPrompt: string;
+  /** The repository's AI rules, left out when empty. */
+  aiRules?: string;
+  /** The agent's hard turn cap; the prompt names a lower soft cap. */
+  maxTurns: number;
+  prTitle?: string;
+  diff: string;
+}
+
+/** The turn a review agent is told to stop exploring by, below its hard cap. */
+export function softTurnCap(maxTurns: number): number;
+/** Byte-identical for identical options, so an agent's voters share a cached prefix. */
+export function buildReviewAgentPrompt(options: ReviewAgentPromptOptions): string;
 export function parseClaudeResult(raw: string): unknown[];
 
 // ── Summary formatting ───────────────────────────────────────────────────────

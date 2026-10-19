@@ -44,7 +44,12 @@ export {
   filterDiff,
 } from "./scope.mjs";
 
-export { buildBasePromptSections, parseClaudeResult } from "./prompt.mjs";
+export {
+  buildBasePromptSections,
+  buildReviewAgentPrompt,
+  softTurnCap,
+  parseClaudeResult,
+} from "./prompt.mjs";
 
 export {
   SUMMARY_HEADER,

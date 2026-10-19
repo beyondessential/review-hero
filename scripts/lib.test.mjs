@@ -13,6 +13,8 @@ import {
   reviewHeroVersion,
   createCompletionReporter,
   mapWithConcurrency,
+  voterCountForDiff,
+  MAX_VOTERS,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -169,4 +171,28 @@ test("bounded concurrency preserves order and never exceeds the cap", async () =
 
 test("bounded concurrency copes with an empty list", async () => {
   assert.deepEqual(await mapWithConcurrency([], 6, async () => 1), []);
+});
+
+test("a small diff runs one voter per agent", () => {
+  assert.equal(voterCountForDiff(0, 3), 1);
+  assert.equal(voterCountForDiff(99, 3), 1);
+  assert.equal(voterCountForDiff(99, 7), 1);
+});
+
+test("a typical diff runs the requested voters", () => {
+  assert.equal(voterCountForDiff(100, 3), 3);
+  assert.equal(voterCountForDiff(499, 3), 3);
+  assert.equal(voterCountForDiff(250, 1), 1);
+});
+
+test("a large diff runs two more voters than requested", () => {
+  assert.equal(voterCountForDiff(500, 3), 5);
+  assert.equal(voterCountForDiff(5000, 1), 3);
+});
+
+test("the voter count stays between one and the cap", () => {
+  assert.equal(voterCountForDiff(500, 9), MAX_VOTERS);
+  assert.equal(voterCountForDiff(200, 50), MAX_VOTERS);
+  assert.equal(voterCountForDiff(200, 0), 1);
+  assert.equal(voterCountForDiff(200, "nonsense"), 1);
 });
