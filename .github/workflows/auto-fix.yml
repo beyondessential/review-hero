@@ -154,6 +154,16 @@ jobs:
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
+      # ── Install global Claude rules ──────────────────────────────────
+      # Override aggressive defaults in Claude Code's built-in system
+      # prompt (e.g. the one-line-max comment rule) that otherwise act as
+      # invisible "ghost rules" while fixing. Sourced from the trusted
+      # review-hero checkout, never the PR branch.
+      - name: Install global Claude rules
+        run: |
+          mkdir -p "$HOME/.claude"
+          cp .review-hero/prompts/global-claude-md.md "$HOME/.claude/CLAUDE.md"
+
       # ── Read project context from caller config (trusted ref) ────────
       - name: Read caller config
         id: config
