@@ -538,7 +538,7 @@ test("rate-limit retries reported by a run reach the scheduler and the row", asy
   const lines = [];
   const [row] = await review(fake, { voters: 1, runClaude, out: (text) => lines.push(text) }).rows;
   assert.equal(row.retries, 1);
-  assert.ok(lines.some((l) => l.includes("Provider throttled (HTTP 429)")));
+  assert.ok(lines.some((l) => l.includes("Provider throttling (HTTP 429)")));
 });
 
 test("a process past its time limit is stopped and reported as timed out", async () => {

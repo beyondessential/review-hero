@@ -225,12 +225,21 @@ export function createScheduler({
         work.retries++;
         if (!THROTTLE_STATUSES.has(event.error_status)) return;
         work.throttled = true;
+        const wasPaused = now() < pausedUntil;
         const pause = Math.max(MIN_THROTTLE_PAUSE_MS, Number(event.retry_delay_ms) || 0);
         pausedUntil = Math.max(pausedUntil, now() + pause);
-        providerLimit = Math.max(1, running.size - 1);
-        log(
-          `Provider throttled (HTTP ${event.error_status}); pausing new agent processes and lowering the limit to ${providerLimit}`,
-        );
+        // Running processes keep retrying while the provider throttles, so the
+        // same signal arrives many times. Only a lower limit or a fresh pause
+        // is news worth logging.
+        const lowered = Math.max(1, running.size - 1);
+        if (lowered < providerLimit) {
+          providerLimit = lowered;
+          log(
+            `Provider throttling (HTTP ${event.error_status}): no new agent processes for now, and none while ${providerLimit} or more are running`,
+          );
+        } else if (!wasPaused) {
+          log(`Provider throttling (HTTP ${event.error_status}): no new agent processes for now`);
+        }
       },
     };
     Promise.resolve()

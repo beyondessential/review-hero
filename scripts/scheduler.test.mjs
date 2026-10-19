@@ -128,7 +128,7 @@ test("a rate-limit retry pauses new starts and lowers the running limit", async 
 
   h.slots[0].onEvent({ type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 30_000 });
   assert.equal(scheduler.state().providerLimit, 2);
-  assert.ok(lines.some((l) => l.includes("Provider throttled (HTTP 429)")));
+  assert.ok(lines.some((l) => l.includes("Provider throttling (HTTP 429)")));
 
   const later = [h.submit("d"), h.submit("e")];
   // One finishes, but the pause still holds.
@@ -230,4 +230,24 @@ test("a provider pause holds new starts even once nothing is running", async () 
   assert.deepEqual(h.started, ["a", "b"]);
   h.releaseAll();
   await second;
+});
+
+test("repeated throttle retries from running work log once, not once per retry", async () => {
+  let clock = 0;
+  const lines = [];
+  const scheduler = createScheduler({ memory: null, pollMs: 1, now: () => clock, log: (l) => lines.push(l) });
+  const h = harness(scheduler);
+  const done = [h.submit("a"), h.submit("b"), h.submit("c")];
+  await tick();
+  const retry = { type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 10_000 };
+  for (let i = 0; i < 5; i++) h.slots[i % 3].onEvent(retry);
+  assert.equal(lines.filter((l) => l.includes("Provider throttling")).length, 1);
+  assert.equal(scheduler.state().providerLimit, 2);
+
+  // Once the pause has lapsed, a fresh throttle is news again.
+  clock = 20_000;
+  h.slots[0].onEvent(retry);
+  assert.equal(lines.filter((l) => l.includes("Provider throttling")).length, 2);
+  h.releaseAll();
+  await Promise.all(done);
 });
