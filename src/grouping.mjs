@@ -161,8 +161,9 @@ Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "
  * can be found.
  */
 export function parseConsensusReply(text) {
+  // Only integers count: coercing null, "" or false would read as index 0.
   const asIndices = (value) =>
-    Array.isArray(value) ? value.map(Number).filter(Number.isInteger) : [];
+    Array.isArray(value) ? value.filter((v) => Number.isInteger(v)) : [];
   const asAreas = (value) =>
     Array.isArray(value)
       ? value

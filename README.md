@@ -192,7 +192,7 @@ agents:
 
 ### Custom agents
 
-Drop a `.md` file into `.github/review-hero/prompts/` and it becomes an agent. The filename (minus `.md`) is the agent key, which must consist of **lowercase alphanumeric characters and hyphens only** (e.g. `project-conventions`, `my-rules`). Keys that don't match this pattern are ignored. Define the agent's display name and triage description in `config.yml` under `agents`.
+Drop a `.md` file into `.github/review-hero/prompts/` and it becomes an agent. The filename (minus `.md`) is the agent key, which must consist of **lowercase alphanumeric characters and hyphens only** (e.g. `project-conventions`, `my-rules`) and must not end in `-voter-` followed by a number, which names a voter's results. Keys that don't match are ignored. Define the agent's display name and triage description in `config.yml` under `agents`.
 
 Example — `.github/review-hero/prompts/project-conventions.md`:
 

@@ -56,6 +56,11 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A finding whose voters and confirming checkers reach the majority moves to kept, taking its group's other members out of dropped (verifies spec: RUN)
 - [x] With five voters a lone finding needs both checkers (verifies spec: RUN)
 - [x] No verdicts, or a checker that throws, leave consensus as it stood (verifies spec: RUN)
+- [x] Each area's verdicts are handed over as soon as it settles, so they are saved before a step time limit (verifies spec: RUN)
+- [x] A verdict whose finding is null, empty, false, a string or a fraction confirms nothing (verifies spec: RUN)
+- [x] Consensus replies only count integer indices, so junk entries never stand for finding 0
+- [x] Without a consensus outcome, every agent result is kept as it stands (verifies spec: RUN)
+- [x] An agent key ending in `-voter-<n>` is rejected
 - [x] Checkers start under the same limits as voters (verifies spec: RUN)
 - [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
 - [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
@@ -70,7 +75,9 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 ## The review job
 
 - [ ] A PR edit with no ticked checkbox shows the job as skipped, with no runner started (verifies spec: RUN)
-- [ ] A ticked checkbox with extra whitespace after `[x]` still runs a review (verifies spec: RUN)
+- [ ] A ticked checkbox with two spaces after `[x]` still runs a review (verifies spec: RUN)
+- [ ] A PR edit with only the template's unticked checkboxes shows the job as skipped (verifies spec: RUN)
+- [ ] A consensus step that fails still leaves the orchestrator posting every agent finding, with a warning (verifies spec: RUN)
 - [ ] Agents stopped at the step's time limit still leave the orchestrator posting from finished voters (verifies spec: RUN)
 - [ ] A ticked checkbox runs the whole review as one job and posts a summary (verifies spec: RUN)
 - [ ] An agent failure part way through still leaves the orchestrator posting from the finished voters (verifies spec: RUN)

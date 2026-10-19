@@ -24,7 +24,7 @@ import {
   applyConsensus,
   createAnthropicModelCaller,
   parseAgentResult,
-  VALID_AGENT_KEY,
+  isValidAgentKey,
 } from "../src/index.mjs";
 
 /** Every agent result file under `dir`, as `{ agentKey, voter, filePath }`. */
@@ -42,7 +42,7 @@ export function scanForResults(dir) {
       results.push(...scanForResults(fullPath));
     } else if (entry.isFile()) {
       const match = entry.name.match(RESULT_FILE_PATTERN);
-      if (match && VALID_AGENT_KEY.test(match[1])) {
+      if (match && isValidAgentKey(match[1])) {
         results.push({
           agentKey: match[1],
           voter: match[2] !== undefined ? parseInt(match[2]) : undefined,
@@ -128,6 +128,24 @@ export async function runConsensus({ findings, voters, callModel }) {
     }
   });
   return { kept, dropped, contested };
+}
+
+/**
+ * The outcome to post from when the consensus step left none: every agent
+ * result kept as it stands, since a review that skips consensus beats one that
+ * throws away results already paid for.
+ */
+export function outcomeWithoutConsensus(artifactsDir, voters) {
+  const { findings, agentsCompleted, agentsFailed } = collectFindings(scanForResults(artifactsDir));
+  return {
+    voters,
+    agentsCompleted,
+    agentsFailed,
+    kept: findings.map(({ voter, ...rest }) => rest),
+    dropped: [],
+    contested: [],
+    secondLook: 0,
+  };
 }
 
 /** Write through a temporary file, so a reader never sees half of it. */

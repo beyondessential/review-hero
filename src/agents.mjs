@@ -41,8 +41,14 @@ export const BASE_AGENTS = {
  */
 export const VALID_AGENT_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/**
+ * Result files name a voter with a `-voter-<n>` suffix, so a key ending in one
+ * would be read back as a different agent's voter.
+ */
+const RESERVED_KEY_SUFFIX = /-voter-\d+$/;
+
 export function isValidAgentKey(key) {
-  return VALID_AGENT_KEY.test(key);
+  return VALID_AGENT_KEY.test(key) && !RESERVED_KEY_SUFFIX.test(key);
 }
 
 /**
@@ -103,7 +109,7 @@ export function discoverCustomAgents(callerDir, config) {
 
     if (!isValidAgentKey(key)) {
       console.warn(
-        `Skipping custom agent prompt "${file}": key "${key}" is invalid (must match ${VALID_AGENT_KEY})`,
+        `Skipping custom agent prompt "${file}": key "${key}" is invalid (must match ${VALID_AGENT_KEY} and not end in -voter-<n>)`,
       );
       continue;
     }

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { collectFindings, runConsensus, scanForResults } from "./consensus.mjs";
+import { collectFindings, outcomeWithoutConsensus, runConsensus, scanForResults } from "./consensus.mjs";
 
 const envelope = (findings) => JSON.stringify({ type: "result", result: JSON.stringify(findings) });
 const finding = (line, comment) => ({ file: "a.ts", line, severity: "suggestion", comment });
@@ -61,4 +61,18 @@ test("contested groups point into the combined dropped list across agents", asyn
   assert.equal(contested[0].agent, "design");
   assert.equal(contested[0].groups[0].supporters, 2);
   assert.deepEqual(contested[0].groups[0].dropped.map((i) => dropped[i].line), [20, 21]);
+});
+
+test("without a consensus outcome, every agent finding is kept as it stands", () => {
+  const dir = mkdtempSync(join(tmpdir(), "consensus-fallback-"));
+  writeFileSync(join(dir, "bugs-voter-0-result.json"), envelope([finding(1, "x")]));
+  writeFileSync(join(dir, "bugs-voter-1-result.json"), envelope([finding(1, "x again")]));
+  writeFileSync(join(dir, "bugs-voter-2-result.json"), "{ truncated");
+  const outcome = outcomeWithoutConsensus(dir, 3);
+  assert.equal(outcome.voters, 3);
+  assert.equal(outcome.agentsCompleted, 2);
+  assert.equal(outcome.agentsFailed, 1);
+  assert.deepEqual(outcome.kept.map((f) => f.comment), ["x", "x again"]);
+  assert.ok(outcome.kept.every((f) => !("voter" in f)));
+  assert.deepEqual([outcome.dropped, outcome.contested, outcome.secondLook], [[], [], 0]);
 });

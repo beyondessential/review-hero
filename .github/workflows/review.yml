@@ -64,15 +64,18 @@ jobs:
   # happens once.
   review:
     # Evaluated without starting a runner, so a PR edit that cannot start a
-    # review costs nothing. It must match everything the exact check in the
-    # first step would, so it only looks for the checkbox label: a false match
-    # costs a runner start, a missed one costs a review.
+    # review costs nothing. Expressions have no regex, so it looks for a
+    # ticked box with one or two spaces before the label (contains() ignores
+    # case, so [X] matches too). The PR template always carries the label
+    # unticked, so looking for the label alone would start a runner on every
+    # PR edit. The exact check in the first step stays the authority.
     if: >-
       inputs.trigger == 'always' ||
       ((github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'edited') &&
-      contains(github.event.pull_request.body, '**Run Review Hero'))
+      (contains(github.event.pull_request.body, '[x] **Run Review Hero') ||
+      contains(github.event.pull_request.body, '[x]  **Run Review Hero')))
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 75
+    timeout-minutes: 80
     steps:
       # ── Trigger check ────────────────────────────────────────────────
       - id: check
@@ -342,6 +345,9 @@ jobs:
       - name: Apply consensus
         if: always() && steps.check.outputs.should_run == 'true'
         id: consensus
+        # Model calls only; bounded so a hung call cannot eat the orchestrator's
+        # time. If it fails, the orchestrator posts without consensus.
+        timeout-minutes: 8
         env:
           ARTIFACTS_DIR: /tmp/review-results
           VOTERS: ${{ steps.triage.outputs.voters }}
@@ -404,6 +410,9 @@ jobs:
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_HERO_REF: ${{ inputs.ref }}
           CONSENSUS_PATH: /tmp/consensus.json
+          # Posted from without consensus when the consensus step left no outcome.
+          ARTIFACTS_DIR: /tmp/review-results
+          VOTERS: ${{ steps.triage.outputs.voters }}
           AGENT_NAMES: ${{ steps.triage.outputs.agent_names }}
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}

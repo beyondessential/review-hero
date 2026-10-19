@@ -21,7 +21,7 @@
  *   PROJECT_CONTEXT     — Project context line (optional)
  *   PR_TITLE            — PR title
  *   CHECKER_MAX_TURNS   — Turn cap per checker (default 10)
- *   PROCESS_TIMEOUT_MS  — Time limit per checker process (default 10 minutes)
+ *   PROCESS_TIMEOUT_MS  — Time limit per checker process (default 6 minutes)
  *   GITHUB_STEP_SUMMARY — Job summary file (optional)
  */
 
@@ -43,7 +43,11 @@ import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs
 import { buildCheckerPrompt, extractJsonArray, isValidAgentKey } from "../src/index.mjs";
 
 export const DEFAULT_CHECKER_MAX_TURNS = 10;
-export const DEFAULT_CHECKER_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * Time limit per checker process. A checker and its wrap-up both fit inside
+ * the second-look step's own limit, so a slow one cannot outlast the step.
+ */
+export const DEFAULT_CHECKER_TIMEOUT_MS = 6 * 60 * 1000;
 
 const CHECKER_WRAP_UP_MESSAGE =
   "Stop exploring and reply with only your final JSON array of verdicts, one per finding, using what you have already checked. No other text.";
@@ -69,7 +73,9 @@ export function tallyConfirmations(answers, groupCount) {
     if (!verdicts) continue;
     const confirmed = new Set();
     for (const v of verdicts) {
-      const index = Number(v?.finding);
+      // Only an integer counts: coercing null, "" or false would read as
+      // finding 0 and confirm it.
+      const index = v?.finding;
       if (
         Number.isInteger(index) &&
         index >= 0 &&
@@ -118,6 +124,8 @@ export function applySecondLook(consensus, confirmationsByArea) {
  * Run every contested area's checkers and tally their verdicts. `prompts[i]` is
  * contested area `i`'s checker prompt, or undefined when it could not be built.
  * Resolves with the confirmations per area and one summary row per checker.
+ * `onProgress` receives the confirmations so far each time an area settles, so
+ * they can be saved before the step's time limit cuts the rest short.
  */
 export async function runSecondLook({
   consensus,
@@ -132,11 +140,13 @@ export async function runSecondLook({
   runClaude = spawnClaude,
   out = (text) => process.stdout.write(text),
   onRow = () => {},
+  onProgress = () => {},
   now = Date.now,
   scheduler = createScheduler({ ceiling: concurrency, memory, now, log: (line) => out(`${line}\n`) }),
 }) {
   const count = checkersPerArea(consensus.voters);
   const rows = [];
+  const settled = consensus.contested.map((area) => area.groups.map(() => 0));
 
   const confirmationsByArea = await Promise.all(
     consensus.contested.map(async (area, i) => {
@@ -200,7 +210,9 @@ export async function runSecondLook({
           }
         }),
       );
-      return tallyConfirmations(answers, area.groups.length);
+      settled[i] = tallyConfirmations(answers, area.groups.length);
+      onProgress(settled.map((tally) => [...tally]));
+      return settled[i];
     }),
   );
 
@@ -291,6 +303,9 @@ async function main() {
     env: agentEnv(process.env),
     timeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || "") || DEFAULT_CHECKER_TIMEOUT_MS,
     onRow: summaryPath ? (row) => appendFileSync(summaryPath, summaryRow(row)) : undefined,
+    // Each settled area's verdicts are saved straight away, so they count
+    // even when the step's time limit stops the areas still running.
+    onProgress: (partial) => writeConsensus(consensusPath, applySecondLook(consensus, partial)),
   });
 
   const updated = applySecondLook(consensus, confirmationsByArea);

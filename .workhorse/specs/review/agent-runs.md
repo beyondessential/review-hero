@@ -15,6 +15,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] The exact checkbox match runs as the job's first step, and a mismatch ends the job before any setup.
 - [ ] Checkouts, dependency installs and the Claude CLI install happen once per review.
 - [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
+- [ ] Consensus has a time limit of its own, and when it leaves no outcome the orchestrator posts every agent finding without consensus, with a warning in the job log.
 - [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
 - [ ] An agent whose prompt cannot be read is left out with a warning, and the other agents still run.
 
@@ -69,7 +70,9 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] A finding below the majority is kept when its voters and the checkers confirming it together reach the majority.
 - [ ] A review takes at most one second look.
 - [ ] Checkers start under the same memory, provider and `concurrency` limits as voters, use the same wrap-up, and have a time limit of their own inside the job's.
-- [ ] A second look that fails or runs out of time leaves consensus as it stood, and the orchestrator posts from that.
+- [ ] Each contested area's verdicts are saved as soon as its checkers finish, so areas settled before a second look fails or runs out of time still count, and the rest stand as consensus left them.
+- [ ] A checker and its wrap-up together fit inside the second look's time limit.
+- [ ] A verdict counts only when it names a finding by its number; anything else is a rejection.
 - [ ] The review summary's filtering line says how many findings a second look confirmed, when it confirmed any.
 - [ ] The completion block's `counts.secondLook` is the number of findings a second look confirmed (see `reporting/completion-comments.md`).
 

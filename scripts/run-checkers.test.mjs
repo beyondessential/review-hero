@@ -190,3 +190,42 @@ test("checker prompts use the area agent's prompt from the right checkout", () =
   assert.equal(prompts[2], undefined);
   assert.match(warnings.join("\n"), /No second look for missing/);
 });
+
+test("a verdict whose finding is not an integer confirms nothing", () => {
+  const answers = [JSON.stringify([
+    { finding: null, verdict: "confirm" },
+    { finding: "", verdict: "confirm" },
+    { finding: false, verdict: "confirm" },
+    { finding: "0", verdict: "confirm" },
+    { finding: 1.5, verdict: "confirm" },
+  ])];
+  assert.deepEqual(tallyConfirmations(answers, 2), [0, 0]);
+});
+
+test("each area's verdicts are handed over as soon as it settles", async () => {
+  const twoAreas = { ...consensus(3), contested: [...consensus(3).contested, { ...consensus(3).contested[0], area: "other" }] };
+  let releaseSecond;
+  const secondDone = new Promise((resolve) => (releaseSecond = resolve));
+  const runClaude = async ({ input }) => {
+    if (input === "area 1") await secondDone;
+    return { code: 0, timedOut: false, stdout: JSON.stringify({ result: answer([[0, "confirm"]]) }), stderr: "" };
+  };
+  const progress = [];
+  const running = runSecondLook({
+    consensus: twoAreas,
+    prompts: ["area 0", "area 1"],
+    model: "m",
+    maxTurns: 10,
+    memory: null,
+    logsDir: mkdtempSync(join(tmpdir(), "checkers-")),
+    env: {},
+    runClaude,
+    out: () => {},
+    onProgress: (partial) => progress.push(partial),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(progress, [[[1, 0], [0, 0]]]);
+  releaseSecond();
+  await running;
+  assert.deepEqual(progress.at(-1), [[1, 0], [1, 0]]);
+});

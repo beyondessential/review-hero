@@ -146,7 +146,7 @@ export function spawnClaude({ args, input, env, timeoutMs, onSpawn = () => {}, o
     let pending = "";
     let resultLine = null;
     let rawTail = "";
-    const stderr = [];
+    let stderr = "";
     let timedOut = false;
     let settled = false;
 
@@ -177,7 +177,7 @@ export function spawnClaude({ args, input, env, timeoutMs, onSpawn = () => {}, o
         code,
         timedOut,
         stdout: resultLine ?? rawTail,
-        stderr: Buffer.concat(stderr).toString("utf-8"),
+        stderr,
       });
     };
 
@@ -195,9 +195,14 @@ export function spawnClaude({ args, input, env, timeoutMs, onSpawn = () => {}, o
       pending = lines.pop();
       for (const line of lines) takeLine(line);
     });
-    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    // Only the tail of stderr is kept, so a CLI stuck logging cannot grow
+    // without bound before its time limit stops it.
+    child.stderr.setEncoding("utf-8");
+    child.stderr.on("data", (chunk) => {
+      stderr = (stderr + chunk).slice(-RAW_TAIL_BYTES);
+    });
     child.on("error", (err) => {
-      stderr.push(Buffer.from(String(err)));
+      stderr = (stderr + String(err)).slice(-RAW_TAIL_BYTES);
       finish(-1);
     });
     child.on("close", (code) => finish(code ?? -1));

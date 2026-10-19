@@ -85,3 +85,10 @@ test("the reply parser drops malformed areas and non-integer indices", () => {
   );
   assert.equal(parseConsensusReply("nothing here"), null);
 });
+
+test("only integer indices count, so junk entries never stand for finding 0", () => {
+  assert.deepEqual(
+    parseConsensusReply('{"keep": [null, "", false, true, "0", 2], "contested": [{"area": "a", "groups": [[null, 3]]}]}'),
+    { keep: [2], contested: [{ area: "a", groups: [[3]] }] },
+  );
+});

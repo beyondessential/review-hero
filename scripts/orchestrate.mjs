@@ -14,6 +14,9 @@
  *   REVIEWED_SHA        — PR head commit the agents reviewed
  *   REVIEW_HERO_REF     — Review Hero ref the caller asked for (optional)
  *   CONSENSUS_PATH      — Consensus outcome from the consensus step and any second look
+ *   ARTIFACTS_DIR       — Agent result files, posted from without consensus when
+ *                         there is no consensus outcome
+ *   VOTERS              — Voters each agent ran, reported when there is no consensus outcome
  *   AGENT_NAMES         — JSON map of agent key → display name
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
  *   SUPPRESSIONS_PATH   — Path to local suppressions YAML file (optional)
@@ -28,7 +31,8 @@ import {
   findRejectedFindings,
   generateSuppressions,
 } from "./learn-from-reactions.mjs";
-import { createCompletionReporter } from "./lib.mjs";
+import { MAX_VOTERS, createCompletionReporter } from "./lib.mjs";
+import { outcomeWithoutConsensus } from "./consensus.mjs";
 import {
   parseAgentResult,
   extractJsonArray,
@@ -298,14 +302,19 @@ async function main() {
 
   // ── Read the consensus outcome ────────────────────────────────────
   // The consensus step, and any second look after it, ran without the
-  // GitHub token. A missing or unreadable outcome means no agent result
-  // made it this far.
+  // GitHub token. When it left no outcome (it failed or ran out of time),
+  // post from the agents' result files with every finding kept.
   let consensus;
   try {
     consensus = JSON.parse(readFileSync(consensusPath, "utf-8"));
   } catch (err) {
-    console.warn(`Could not read the consensus outcome: ${err.message}`);
-    consensus = { voters: 1, agentsCompleted: 0, agentsFailed: 0, kept: [], dropped: [], secondLook: 0 };
+    console.log(
+      `::warning::No consensus outcome (${err.message}); posting every agent finding without consensus`,
+    );
+    consensus = outcomeWithoutConsensus(
+      process.env.ARTIFACTS_DIR || "",
+      Math.max(1, Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS)),
+    );
   }
   const { agentsCompleted, agentsFailed } = consensus;
   const voterCount = consensus.voters;
