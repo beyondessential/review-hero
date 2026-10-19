@@ -165,7 +165,7 @@ The first real run (3 agents × 5 voters on a 2,600-line diff, cap 8) showed the
 
 Decisions:
 
-- `scripts/scheduler.mjs` admits work while the runner stays under 80% memory, counting the largest process-tree footprint measured so far for the newcomer and for each running process still below it. Footprints come from `/proc` (VmRSS summed over the process tree, since the CLI runs ripgrep and git as children). 512 MB is assumed until one is measured.
+- `scripts/scheduler.mjs` admits work while the runner stays under 80% memory, counting the largest process-tree footprint measured so far for the newcomer and for each running process still below it. Footprints come from `/proc` (VmRSS summed over the process tree, since the CLI runs ripgrep and git as children). 250 MB is assumed until one is measured.
 - The CLI runs with `--output-format stream-json --verbose`, which emits `system`/`api_retry` events (attempt, retry delay, HTTP status). A 429 or 529 pauses new starts for at least the retry delay and drops the running limit to one below the count at that moment; each unthrottled finish raises it by one. The runner keeps the final `result` event as the envelope, so the result files and orchestrator are unchanged.
 - Provider limits apply per key or organisation, across every review running at once, so the job can only react to throttling, never plan around it.
 - `concurrency` defaults to 0, meaning no ceiling. One process always runs while work waits.

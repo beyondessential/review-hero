@@ -188,7 +188,7 @@ test("checker prompts use the area agent's prompt from the right checkout", () =
   assert.match(prompts[0], /^Check\.\n\n## Your specialisation\n\nBugs\./);
   assert.match(prompts[1], /## Your specialisation\n\nHouse\./);
   assert.equal(prompts[2], undefined);
-  assert.match(warnings.join("\n"), /No second look for missing/);
+  assert.match(warnings.join("\n"), /No second look for "missing"/);
 });
 
 test("a verdict whose finding is not an integer confirms nothing", () => {

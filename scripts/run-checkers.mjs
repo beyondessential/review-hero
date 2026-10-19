@@ -34,6 +34,7 @@ import { join } from "node:path";
 
 import {
   agentEnv,
+  agentPromptPath,
   cacheReadShare,
   createProcessRunner,
   deadlineFrom,
@@ -44,7 +45,7 @@ import {
   summaryRow,
 } from "./run-agents.mjs";
 import { writeConsensus } from "./consensus.mjs";
-import { agentPromptPath, getEnvOrThrow, readOptional } from "./lib.mjs";
+import { getEnvOrThrow, readOptional } from "./lib.mjs";
 import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
 import { buildCheckerPrompt, extractJsonArray } from "../src/index.mjs";
 

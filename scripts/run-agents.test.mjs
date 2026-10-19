@@ -490,7 +490,7 @@ test("an agent key that could escape the prompts directory is skipped", () => {
     out: (line) => warnings.push(line),
   });
   assert.deepEqual(Object.keys(prompts), ["bugs"]);
-  assert.match(warnings.join("\n"), /::warning::Skipping agent with invalid key/);
+  assert.match(warnings.join("\n"), /::warning::Skipping agent "\.\.\/\.\.\/etc\/passwd": cannot read its prompt \(invalid agent key/);
 });
 
 test("an agent whose prompt cannot be read is skipped, and the rest still run", () => {
@@ -505,7 +505,7 @@ test("an agent whose prompt cannot be read is skipped, and the rest still run", 
     out: (line) => warnings.push(line),
   });
   assert.deepEqual(Object.keys(prompts), ["bugs"]);
-  assert.match(warnings.join("\n"), /::warning::Skipping agent house: cannot read its prompt/);
+  assert.match(warnings.join("\n"), /::warning::Skipping agent "house": cannot read its prompt/);
 });
 
 // ── Spawning the CLI ─────────────────────────────────────────────────────────

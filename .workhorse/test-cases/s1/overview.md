@@ -43,6 +43,10 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A wrap-up sends the same system prompt flag as the voter it resumes
 - [x] A primer gets the short primer time limit (verifies spec: RUN)
 - [x] A wrap-up gets the short wrap-up limit, for voters and checkers alike (verifies spec: RUN)
+- [x] Every process's time limit is cut to what is left before the deadline (verifies spec: RUN)
+- [x] A crashed voter gets no fresh run with too little time left, and does with time to spare (verifies spec: RUN)
+- [x] A step budget becomes a deadline; no budget means none
+- [x] Work waiting out a provider pause keeps the process alive with nothing running (verifies spec: RUN)
 - [x] An unexpected error in one voter costs only that voter (verifies spec: RUN)
 - [x] An agent whose prompt cannot be read, or whose key is invalid, is skipped and the rest run (verifies spec: RUN)
 

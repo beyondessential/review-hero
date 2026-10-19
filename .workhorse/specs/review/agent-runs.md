@@ -18,6 +18,9 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
 - [ ] Consensus has a time limit of its own, and when it leaves no outcome the orchestrator posts every agent finding without consensus, with a warning in the job log.
 - [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
+- [ ] The agents and the second look each work to a deadline a little inside their time limit: every process stops by it, so its result is written before the limit is reached.
+- [ ] A fresh run for a crashed or empty voter starts only when enough time is left before the deadline for it to be useful.
+- [ ] The job keeps running while agent processes wait out a provider pause, even with none running.
 - [ ] An agent whose prompt cannot be read is left out with a warning, and the other agents still run.
 
 ## Voters
@@ -51,7 +54,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 
 - [ ] A voter that hits its turn cap, or answers without a findings array, is resumed once and asked for its findings.
 - [ ] A primer run has a much shorter time limit than a voter, since it only needs its first request.
-- [ ] A wrap-up has a short time limit of its own, so a voter and its wrap-up fit inside the agents' time limit.
+- [ ] A wrap-up has a short time limit of its own.
 - [ ] A voter whose process exits abnormally is retried once, from scratch.
 - [ ] A voter that still has no usable findings after its wrap-up is replaced once by a fresh voter.
 - [ ] A voter left without usable findings after its retry or replacement contributes nothing, and the review carries on.
@@ -73,7 +76,6 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] A review takes at most one second look.
 - [ ] Checkers start under the same memory, provider and `concurrency` limits as voters, use the same wrap-up, and have a time limit of their own inside the job's.
 - [ ] Each contested area's verdicts are saved as soon as its checkers finish, so areas settled before a second look fails or runs out of time still count, and the rest stand as consensus left them.
-- [ ] A checker and its wrap-up together fit inside the second look's time limit.
 - [ ] A verdict counts only when it names a finding by its number; anything else is a rejection.
 - [ ] The review summary's filtering line says how many findings a second look confirmed, when it confirmed any.
 - [ ] The completion block's `counts.secondLook` is the number of findings a second look confirmed (see `reporting/completion-comments.md`).

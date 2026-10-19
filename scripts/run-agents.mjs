@@ -51,11 +51,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { agentPromptPath, formatCacheStats, getEnvOrThrow, readOptional, resultFileName } from "./lib.mjs";
+import { formatCacheStats, getEnvOrThrow, readOptional, resultFileName } from "./lib.mjs";
 import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
 import {
   buildReviewAgentPrompt,
   extractJsonArray,
+  isValidAgentKey,
   parseAgentResult,
 } from "../src/index.mjs";
 
@@ -647,6 +648,19 @@ export async function runAgents({
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Where an agent's own prompt is read from. Base agents come from the
+ * review-hero checkout, and every other agent from the caller's checkout at
+ * the trusted ref, never the PR branch, so a pull request cannot inject an
+ * agent prompt. Throws for a key that is not safe in a path.
+ */
+export function agentPromptPath({ key, source }, { reviewHeroDir, callerBaseDir }) {
+  if (!isValidAgentKey(key)) throw new Error(`invalid agent key ${JSON.stringify(key)}`);
+  return source === "base"
+    ? join(reviewHeroDir, "prompts", `${key}.md`)
+    : join(callerBaseDir, ".github", "review-hero", "prompts", `${key}.md`);
+}
 
 /**
  * Build each agent's prompt once, so all its runs send the same bytes. An

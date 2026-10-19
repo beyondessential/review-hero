@@ -10,7 +10,6 @@ import { join } from "node:path";
 import * as core from "@actions/core";
 import { formatCommitLink } from "../src/summary.mjs";
 import { buildCompletionBlock } from "../src/completion.mjs";
-import { isValidAgentKey } from "../src/agents.mjs";
 
 // Prompt assembly and result parsing live in the shared library so the
 // Actions side and any external consumer share one implementation.
@@ -97,21 +96,6 @@ export function getEnvOrThrow(name) {
 export function readOptional(path) {
   if (!path || !existsSync(path)) return "";
   return readFileSync(path, "utf-8");
-}
-
-// ── Agent prompts ────────────────────────────────────────────────────────────
-
-/**
- * Where an agent's own prompt is read from. Base agents come from the
- * review-hero checkout, and every other agent from the caller's checkout at
- * the trusted ref, never the PR branch, so a pull request cannot inject an
- * agent prompt. Throws for a key that is not safe in a path.
- */
-export function agentPromptPath({ key, source }, { reviewHeroDir, callerBaseDir }) {
-  if (!isValidAgentKey(key)) throw new Error(`invalid agent key ${JSON.stringify(key)}`);
-  return source === "base"
-    ? join(reviewHeroDir, "prompts", `${key}.md`)
-    : join(callerBaseDir, ".github", "review-hero", "prompts", `${key}.md`);
 }
 
 // ── GitHub API ───────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ import { readFileSync, readdirSync } from "node:fs";
 export const MEMORY_FILL_TARGET = 0.8;
 
 /** Footprint assumed for an agent process tree before any has been measured. */
-export const DEFAULT_FOOTPRINT_BYTES = 512 * 1024 * 1024;
+export const DEFAULT_FOOTPRINT_BYTES = 250 * 1024 * 1024;
 
 /** How often running process trees are measured and waiting work re-checked. */
 export const POLL_MS = 2_000;
