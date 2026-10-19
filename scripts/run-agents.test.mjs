@@ -13,6 +13,8 @@ import {
   spawnClaude,
   summaryTable,
   WRAP_UP_TIMEOUT_MS,
+  MIN_FRESH_RUN_MS,
+  deadlineFrom,
   wrapUpReason,
 } from "./run-agents.mjs";
 import { RESULT_FILE_PATTERN, resultFileName } from "./lib.mjs";
@@ -371,6 +373,40 @@ test("a run that reports usage but no cache shows as none, not blank", () => {
   assert.equal(cacheReadShare(undefined), "");
   assert.equal(cacheReadShare({ input_tokens: 10 }), "none");
   assert.equal(cacheReadShare({ cache_read_input_tokens: 3, cache_creation_input_tokens: 1 }), "75%");
+});
+
+test("every process's time limit is cut to what is left before the deadline", async () => {
+  let clock = 0;
+  const fake = fakeClaude();
+  await review(fake, { voters: 1, timeoutMs: 20 * 60 * 1000, now: () => clock, deadline: 7 * 60 * 1000 }).rows;
+  assert.equal(fake.calls[0].timeoutMs, 7 * 60 * 1000);
+});
+
+test("a crashed voter gets no fresh run when too little time is left", async () => {
+  let clock = 0;
+  const fake = fakeClaude(() => {
+    clock = 10 * 60 * 1000;
+    return CRASH;
+  });
+  const { output, rows } = review(fake, { voters: 1, now: () => clock, deadline: 10 * 60 * 1000 + MIN_FRESH_RUN_MS - 1 });
+  const result = await rows;
+  assert.deepEqual(result.map((r) => r.outcome), ["crashed"]);
+  assert.ok(output.some((line) => line.includes("too little time left for a fresh run")));
+});
+
+test("a crashed voter still gets its fresh run with time to spare", async () => {
+  let clock = 0;
+  const fake = fakeClaude((call, calls) => (calls.length === 1 ? CRASH : USABLE));
+  const result = await review(fake, { voters: 1, now: () => clock, deadline: MIN_FRESH_RUN_MS + 1 }).rows;
+  assert.deepEqual(result.map((r) => r.outcome), ["crashed", "usable"]);
+});
+
+test("a step budget becomes a deadline, and no budget means none", () => {
+  const now = () => 1000;
+  assert.equal(deadlineFrom("60000", now), 61000);
+  assert.equal(deadlineFrom(undefined, now), Infinity);
+  assert.equal(deadlineFrom("", now), Infinity);
+  assert.equal(deadlineFrom("nonsense", now), Infinity);
 });
 
 // ── Environment ──────────────────────────────────────────────────────────────

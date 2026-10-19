@@ -201,8 +201,10 @@ export function createScheduler({
   function schedulePoll() {
     const busy = waiting.length > 0 || running.size > 0;
     if (busy && !timer) {
+      // Left ref'd on purpose: while work waits out a provider pause with
+      // nothing running, this timer is the only thing keeping the process
+      // alive. It is cleared as soon as nothing is running or waiting.
       timer = setInterval(pump, pollMs);
-      timer.unref?.();
     } else if (!busy && timer) {
       clearInterval(timer);
       timer = null;

@@ -75,13 +75,17 @@ jobs:
       (contains(github.event.pull_request.body, '[x] **Run Review Hero') ||
       contains(github.event.pull_request.body, '[x]  **Run Review Hero')))
     runs-on: ${{ inputs.runner }}
-    # Time budget. Each stage has its own limit, and each process limit fits
-    # inside its stage's, so a slow stage is cut short and the orchestrator
-    # always gets to post:
-    #   agents        40 min  (a voter 20, its wrap-up 5; primers 5)
+    # Time budget. Each stage has its own limit, so a slow stage is cut short
+    # and the orchestrator always gets to post:
+    #   agents        40 min
     #   consensus      8 min
-    #   second look   15 min  (a checker 6, its wrap-up 5)
+    #   second look   15 min
     #   setup, token and posting take the rest of the job's 80.
+    # The agent and checker drivers work to a deadline (TIME_BUDGET_MS) a
+    # minute inside their step's limit: every process is cut to the time left,
+    # and a retry only starts with enough left to be useful. So per-process
+    # limits (a voter 20 min, a checker 6, a wrap-up 5) need not add up to
+    # the step's, and results are written before the step would kill them.
     # Working files live under runner.temp, which is emptied for every job, so
     # a reused runner never feeds one review's files into the next.
     timeout-minutes: 80
@@ -330,6 +334,8 @@ jobs:
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           AGENT_PROVIDER: ${{ steps.triage.outputs.agent_provider }}
           CONCURRENCY: ${{ inputs.concurrency }}
+          # A minute inside the step's 40, so results land before it is killed.
+          TIME_BUDGET_MS: "2340000"
           RESULTS_DIR: ${{ runner.temp }}/review-results
           LOGS_DIR: ${{ runner.temp }}/review-logs
           REVIEW_HERO_DIR: .review-hero
@@ -377,6 +383,8 @@ jobs:
           AGENTS: ${{ steps.triage.outputs.agents }}
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           CONCURRENCY: ${{ inputs.concurrency }}
+          # A minute inside the step's 15, so verdicts land before it is killed.
+          TIME_BUDGET_MS: "840000"
           LOGS_DIR: ${{ runner.temp }}/review-logs
           REVIEW_HERO_DIR: .review-hero
           CALLER_BASE_DIR: .caller-base

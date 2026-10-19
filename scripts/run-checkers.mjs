@@ -22,17 +22,21 @@
  *   PR_TITLE            — PR title
  *   CHECKER_MAX_TURNS   — Turn cap per checker (default 10)
  *   PROCESS_TIMEOUT_MS  — Time limit per checker process (default 6 minutes)
+ *   TIME_BUDGET_MS      — Time the whole second look has, a little inside the
+ *                         step's limit; process limits are cut to what is left (optional)
  *   GITHUB_STEP_SUMMARY — Job summary file (optional)
  */
 
 // spec: RUN#second-look
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
   agentEnv,
   cacheReadShare,
+  createProcessRunner,
+  deadlineFrom,
   runWithWrapUp,
   WRAP_UP_TIMEOUT_MS,
   spawnClaude,
@@ -40,13 +44,14 @@ import {
   summaryRow,
 } from "./run-agents.mjs";
 import { writeConsensus } from "./consensus.mjs";
+import { agentPromptPath, getEnvOrThrow, readOptional } from "./lib.mjs";
 import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
-import { buildCheckerPrompt, extractJsonArray, isValidAgentKey } from "../src/index.mjs";
+import { buildCheckerPrompt, extractJsonArray } from "../src/index.mjs";
 
 export const DEFAULT_CHECKER_MAX_TURNS = 10;
 /**
- * Time limit per checker process. A checker and its wrap-up both fit inside
- * the second-look step's own limit, so a slow one cannot outlast the step.
+ * Time limit per checker process. Each is also cut to what is left of the
+ * second look's time budget, so none outlasts the step.
  */
 export const DEFAULT_CHECKER_TIMEOUT_MS = 6 * 60 * 1000;
 
@@ -143,8 +148,10 @@ export async function runSecondLook({
   onRow = () => {},
   onProgress = () => {},
   now = Date.now,
+  deadline = Infinity,
   scheduler = createScheduler({ ceiling: concurrency, memory, now, log: (line) => out(`${line}\n`) }),
 }) {
+  const { timed } = createProcessRunner({ scheduler, env, runClaude, timeoutMs, deadline, now, out });
   const count = checkersPerArea(consensus.voters);
   const rows = [];
   const settled = consensus.contested.map((area) => area.groups.map(() => 0));
@@ -156,19 +163,8 @@ export async function runSecondLook({
         Array.from({ length: count }, async (_, checker) => {
           const label = `${area.agent} area ${i} checker ${checker}`;
           try {
-            const { result: settled, waitedMs, ranMs, peakBytes, retries } = await scheduler.withSlot((slot) => {
-              out(`Started ${label}\n`);
-              const run = (args, input, limitMs = timeoutMs) =>
-                runClaude({
-                  args,
-                  input,
-                  env,
-                  timeoutMs: limitMs,
-                  onSpawn: slot.onSpawn,
-                  onExit: slot.onExit,
-                  onEvent: slot.onEvent,
-                });
-              return runWithWrapUp({
+            const { result: settled, waitedMs, ranMs, peakBytes, retries } = await timed(label, (run) =>
+              runWithWrapUp({
                 run,
                 prompt: prompts[i],
                 model,
@@ -177,8 +173,8 @@ export async function runSecondLook({
                 out,
                 wrapUpMessage: CHECKER_WRAP_UP_MESSAGE,
                 wrapUpTimeoutMs: Math.min(WRAP_UP_TIMEOUT_MS, timeoutMs),
-              });
-            });
+              }),
+            );
             const { result, envelope, stderr, wrappedUp } = settled;
             writeFileSync(join(logsDir, `${area.agent}-area-${i}-checker-${checker}.json`), result.stdout);
             const answer = typeof envelope?.result === "string" ? envelope.result : null;
@@ -221,17 +217,6 @@ export async function runSecondLook({
   return { confirmationsByArea, rows };
 }
 
-function requireEnv(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing ${name}`);
-  return value;
-}
-
-function readOptional(path) {
-  if (!path || !existsSync(path)) return "";
-  return readFileSync(path, "utf-8");
-}
-
 /**
  * Build each contested area's checker prompt from its agent's own prompt. An
  * area whose agent prompt cannot be read gets no checkers.
@@ -240,20 +225,12 @@ export function buildCheckerPrompts({ consensus, agents, reviewHeroDir, callerBa
   const checkerPrompt = readFileSync(join(reviewHeroDir, "prompts", "checker-prompt.md"), "utf-8");
   const sources = new Map(agents.map((a) => [a.key, a.source]));
   return consensus.contested.map((area) => {
-    if (!isValidAgentKey(area.agent)) {
-      out(`::warning::No second look for invalid agent key ${JSON.stringify(area.agent)}`);
-      return undefined;
-    }
-    // Custom prompts come from the trusted ref, so a PR cannot inject one.
-    const agentPromptPath =
-      sources.get(area.agent) === "base"
-        ? join(reviewHeroDir, "prompts", `${area.agent}.md`)
-        : join(callerBaseDir, ".github", "review-hero", "prompts", `${area.agent}.md`);
     let agentPrompt;
     try {
-      agentPrompt = readFileSync(agentPromptPath, "utf-8");
+      const path = agentPromptPath({ key: area.agent, source: sources.get(area.agent) }, { reviewHeroDir, callerBaseDir });
+      agentPrompt = readFileSync(path, "utf-8");
     } catch (err) {
-      out(`::warning::No second look for ${area.agent}: cannot read its prompt (${err.message})`);
+      out(`::warning::No second look for ${JSON.stringify(area.agent)}: cannot read its prompt (${err.message})`);
       return undefined;
     }
     return buildCheckerPrompt({
@@ -267,28 +244,28 @@ export function buildCheckerPrompts({ consensus, agents, reviewHeroDir, callerBa
 }
 
 async function main() {
-  const consensusPath = requireEnv("CONSENSUS_PATH");
+  const consensusPath = getEnvOrThrow("CONSENSUS_PATH");
   const consensus = JSON.parse(readFileSync(consensusPath, "utf-8"));
   if (consensus.contested.length === 0 || checkersPerArea(consensus.voters) === 0) {
     console.log("No contested areas; nothing to check");
     return;
   }
 
-  const logsDir = requireEnv("LOGS_DIR");
+  const logsDir = getEnvOrThrow("LOGS_DIR");
   mkdirSync(logsDir, { recursive: true });
   const maxTurns = parseInt(process.env.CHECKER_MAX_TURNS || "") || DEFAULT_CHECKER_MAX_TURNS;
 
   const prompts = buildCheckerPrompts({
     consensus,
-    agents: JSON.parse(requireEnv("AGENTS")),
-    reviewHeroDir: requireEnv("REVIEW_HERO_DIR"),
-    callerBaseDir: requireEnv("CALLER_BASE_DIR"),
+    agents: JSON.parse(getEnvOrThrow("AGENTS")),
+    reviewHeroDir: getEnvOrThrow("REVIEW_HERO_DIR"),
+    callerBaseDir: getEnvOrThrow("CALLER_BASE_DIR"),
     common: {
       projectContext: process.env.PROJECT_CONTEXT || "",
       aiRules: readOptional(process.env.AI_RULES_PATH),
       maxTurns,
       prTitle: process.env.PR_TITLE || "",
-      diff: readFileSync(requireEnv("DIFF_PATH"), "utf-8"),
+      diff: readFileSync(getEnvOrThrow("DIFF_PATH"), "utf-8"),
     },
   });
 
@@ -298,12 +275,13 @@ async function main() {
   const { confirmationsByArea } = await runSecondLook({
     consensus,
     prompts,
-    model: requireEnv("AGENT_MODEL"),
+    model: getEnvOrThrow("AGENT_MODEL"),
     maxTurns,
     concurrency: parseCeiling(process.env.CONCURRENCY),
     logsDir,
     env: agentEnv(process.env),
     timeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || "") || DEFAULT_CHECKER_TIMEOUT_MS,
+    deadline: deadlineFrom(process.env.TIME_BUDGET_MS),
     onRow: summaryPath ? (row) => appendFileSync(summaryPath, summaryRow(row)) : undefined,
     // Each settled area's verdicts are saved straight away, so they count
     // even when the step's time limit stops the areas still running.

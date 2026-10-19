@@ -33,6 +33,8 @@
  *   PROJECT_CONTEXT     — Project context line (optional)
  *   PR_TITLE            — PR title
  *   PROCESS_TIMEOUT_MS  — Time limit per agent process (default 20 minutes)
+ *   TIME_BUDGET_MS      — Time the whole run has, a little inside the step's
+ *                         limit; process limits are cut to what is left (optional)
  *   GITHUB_STEP_SUMMARY — Job summary file (optional)
  *
  * Agent processes inherit only an allowlisted environment, so no GitHub token
@@ -42,7 +44,6 @@
 import { spawn } from "node:child_process";
 import {
   appendFileSync,
-  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -50,12 +51,11 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { formatCacheStats, resultFileName } from "./lib.mjs";
+import { agentPromptPath, formatCacheStats, getEnvOrThrow, readOptional, resultFileName } from "./lib.mjs";
 import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
 import {
   buildReviewAgentPrompt,
   extractJsonArray,
-  isValidAgentKey,
   parseAgentResult,
 } from "../src/index.mjs";
 
@@ -413,6 +413,59 @@ function writeAtomic(path, contents) {
   renameSync(tmp, path);
 }
 
+// ── Admission and deadline ───────────────────────────────────────────────────
+
+/** A fresh run for a crashed or empty voter only starts with this much time left. */
+export const MIN_FRESH_RUN_MS = 5 * 60 * 1000;
+
+/**
+ * Turn the step's time budget into a deadline. The workflow passes a budget a
+ * little inside the step's own time limit, so processes stop, and their
+ * results and summary rows are written, before the step would be killed.
+ */
+export function deadlineFrom(budgetMs, now = Date.now) {
+  const budget = Number(budgetMs);
+  return Number.isFinite(budget) && budget > 0 ? now() + budget : Infinity;
+}
+
+/**
+ * Admission for agent processes, shared by the agent and checker drivers.
+ * `timed(label, fn)` waits for the scheduler to admit the work, logs the
+ * moment it starts, and hands `fn` a CLI runner `run(args, input, limitMs)`
+ * wired to the scheduler, so the processes it starts are measured and their
+ * rate-limit retries hold back further starts. Every process's time limit is
+ * cut to what is left before `deadline`, so no run outlasts the step.
+ * `timeLeft()` says how long remains.
+ */
+export function createProcessRunner({
+  scheduler,
+  env,
+  runClaude = spawnClaude,
+  timeoutMs,
+  deadline = Infinity,
+  now = Date.now,
+  out,
+}) {
+  const timeLeft = () => Math.max(0, deadline - now());
+  function timed(label, fn) {
+    return scheduler.withSlot((slot) => {
+      out(`Started ${label}\n`);
+      const run = (args, input, limitMs = timeoutMs) =>
+        runClaude({
+          args,
+          input,
+          env,
+          timeoutMs: Math.min(limitMs, timeLeft()),
+          onSpawn: slot.onSpawn,
+          onExit: slot.onExit,
+          onEvent: slot.onEvent,
+        });
+      return fn(run);
+    });
+  }
+  return { timed, timeLeft };
+}
+
 // ── The review ───────────────────────────────────────────────────────────────
 
 /**
@@ -437,6 +490,7 @@ export async function runAgents({
   out = (text) => process.stdout.write(text),
   onRow = () => {},
   now = Date.now,
+  deadline = Infinity,
   scheduler = createScheduler({ ceiling: concurrency, memory, now, log: (line) => out(`${line}\n`) }),
 }) {
   const rows = [];
@@ -444,31 +498,7 @@ export async function runAgents({
     rows.push(row);
     onRow(row);
   };
-
-  /**
-   * Run `fn` once the scheduler admits it, logging the moment it starts so the
-   * log shows the pool filling as it happens, not only as processes finish.
-   * `fn` gets a CLI runner wired to the scheduler, so the processes it starts
-   * are measured and their rate-limit retries hold back further starts.
-   * Resolves with the result, how long the work waited and ran, its peak
-   * memory, and how many API retries it saw.
-   */
-  function timed(label, fn) {
-    return scheduler.withSlot((slot) => {
-      out(`Started ${label}\n`);
-      const run = (args, input, limitMs = timeoutMs) =>
-        runClaude({
-          args,
-          input,
-          env,
-          timeoutMs: limitMs,
-          onSpawn: slot.onSpawn,
-          onExit: slot.onExit,
-          onEvent: slot.onEvent,
-        });
-      return fn(run);
-    });
-  }
+  const { timed, timeLeft } = createProcessRunner({ scheduler, env, runClaude, timeoutMs, deadline, now, out });
 
   // spec: RUN#prompt-cache-priming
   async function prime(agent) {
@@ -569,7 +599,9 @@ export async function runAgents({
     const name = `${agent.key}${voters > 1 ? ` voter ${voter}` : ""}`;
     try {
       const first = await attempt(agent, voter, 1);
-      if (first === "crashed" || first === "empty") {
+      if ((first === "crashed" || first === "empty") && timeLeft() < MIN_FRESH_RUN_MS) {
+        out(`::warning::Agent ${name} ${first}, with too little time left for a fresh run; it contributes nothing\n`);
+      } else if (first === "crashed" || first === "empty") {
         const what = first === "crashed" ? "retrying it" : "replacing it with a fresh voter";
         out(`::warning::Agent ${name} ${first}; ${what}\n`);
         const second = await attempt(agent, voter, 2);
@@ -616,17 +648,6 @@ export async function runAgents({
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-function requireEnv(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing ${name}`);
-  return value;
-}
-
-function readOptional(path) {
-  if (!path || !existsSync(path)) return "";
-  return readFileSync(path, "utf-8");
-}
-
 /**
  * Build each agent's prompt once, so all its runs send the same bytes. An
  * agent whose prompt cannot be read is left out with a warning, so one
@@ -636,20 +657,11 @@ export function buildPrompts({ agents, reviewHeroDir, callerBaseDir, common, out
   const basePrompt = readFileSync(join(reviewHeroDir, "prompts", "agent-prompt.md"), "utf-8");
   const prompts = {};
   for (const agent of agents) {
-    if (!isValidAgentKey(agent.key)) {
-      out(`::warning::Skipping agent with invalid key: ${JSON.stringify(agent.key)}`);
-      continue;
-    }
-    // Custom prompts come from the trusted ref, so a PR cannot inject one.
-    const agentPromptPath =
-      agent.source === "base"
-        ? join(reviewHeroDir, "prompts", `${agent.key}.md`)
-        : join(callerBaseDir, ".github", "review-hero", "prompts", `${agent.key}.md`);
     let agentPrompt;
     try {
-      agentPrompt = readFileSync(agentPromptPath, "utf-8");
+      agentPrompt = readFileSync(agentPromptPath(agent, { reviewHeroDir, callerBaseDir }), "utf-8");
     } catch (err) {
-      out(`::warning::Skipping agent ${agent.key}: cannot read its prompt (${err.message})`);
+      out(`::warning::Skipping agent ${JSON.stringify(agent.key)}: cannot read its prompt (${err.message})`);
       continue;
     }
     prompts[agent.key] = buildReviewAgentPrompt({ ...common, basePrompt, agentPrompt });
@@ -658,14 +670,14 @@ export function buildPrompts({ agents, reviewHeroDir, callerBaseDir, common, out
 }
 
 async function main() {
-  const agents = JSON.parse(requireEnv("AGENTS"));
+  const agents = JSON.parse(getEnvOrThrow("AGENTS"));
   const voters = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
-  const maxTurns = parseInt(requireEnv("MAX_TURNS"));
-  const model = requireEnv("AGENT_MODEL");
+  const maxTurns = parseInt(getEnvOrThrow("MAX_TURNS"));
+  const model = getEnvOrThrow("AGENT_MODEL");
   const provider = process.env.AGENT_PROVIDER || "anthropic";
   const concurrency = parseCeiling(process.env.CONCURRENCY);
-  const resultsDir = requireEnv("RESULTS_DIR");
-  const logsDir = requireEnv("LOGS_DIR");
+  const resultsDir = getEnvOrThrow("RESULTS_DIR");
+  const logsDir = getEnvOrThrow("LOGS_DIR");
   const timeoutMs =
     parseInt(process.env.PROCESS_TIMEOUT_MS || "") || DEFAULT_PROCESS_TIMEOUT_MS;
 
@@ -674,14 +686,14 @@ async function main() {
 
   const prompts = buildPrompts({
     agents,
-    reviewHeroDir: requireEnv("REVIEW_HERO_DIR"),
-    callerBaseDir: requireEnv("CALLER_BASE_DIR"),
+    reviewHeroDir: getEnvOrThrow("REVIEW_HERO_DIR"),
+    callerBaseDir: getEnvOrThrow("CALLER_BASE_DIR"),
     common: {
       projectContext: process.env.PROJECT_CONTEXT || "",
       aiRules: readOptional(process.env.AI_RULES_PATH),
       maxTurns,
       prTitle: process.env.PR_TITLE || "",
-      diff: readFileSync(requireEnv("DIFF_PATH"), "utf-8"),
+      diff: readFileSync(getEnvOrThrow("DIFF_PATH"), "utf-8"),
     },
   });
   const runnable = agents.filter((agent) => agent.key in prompts);
@@ -709,6 +721,7 @@ async function main() {
     logsDir,
     env: agentEnv(process.env),
     timeoutMs,
+    deadline: deadlineFrom(process.env.TIME_BUDGET_MS),
     onRow: summaryPath ? (row) => appendFileSync(summaryPath, summaryRow(row)) : undefined,
   });
 }

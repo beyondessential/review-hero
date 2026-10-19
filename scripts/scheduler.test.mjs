@@ -251,3 +251,19 @@ test("repeated throttle retries from running work log once, not once per retry",
   h.releaseAll();
   await Promise.all(done);
 });
+
+test("work waiting out a provider pause keeps the process alive with nothing running", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const script = `
+    import { createScheduler } from ${JSON.stringify(new URL("./scheduler.mjs", import.meta.url).href)};
+    const scheduler = createScheduler({ memory: null, pollMs: 20 });
+    await scheduler.withSlot(async (slot) => {
+      slot.onEvent({ type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 5100 });
+    });
+    const started = Date.now();
+    await scheduler.withSlot(async () => {});
+    console.log(Date.now() - started >= 5000 ? "waited" : "early");
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf-8", timeout: 15_000 });
+  assert.equal(result.stdout.trim(), "waited", result.stderr);
+});
