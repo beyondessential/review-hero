@@ -12,22 +12,36 @@
 
 import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 
+/** The most contested areas consensus names for one agent's findings. */
+export const MAX_CONTESTED_AREAS = 3;
+
 /**
  * Apply voter consensus to determine whether findings from different voters are
  * about the same issue. The model receives all findings and returns which ones
- * to keep — the deduplicated set that a majority of voters agree on.
+ * to keep — the deduplicated set that a majority of voters agree on — and the
+ * contested areas: groups below the majority that cluster where a second look
+ * is worth it.
  *
- * Falls back to keeping all findings (stripped of voter tags) on error or when
- * no `callModel` is supplied.
+ * Each contested group carries its member findings (voter tags intact), where
+ * they sit in `droppedFindings`, and the number of distinct voters behind it.
+ *
+ * Falls back to keeping all findings (stripped of voter tags) with no contested
+ * areas on error or when no `callModel` is supplied.
  */
+// spec: RUN#second-look
 export async function applyConsensus(findings, voterCount, callModel) {
-  if (voterCount <= 1) {
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
-  }
+  const keepAll = () => ({
+    kept: findings.map(({ voter, ...rest }) => rest),
+    dropped: 0,
+    droppedFindings: [],
+    contested: [],
+  });
+
+  if (voterCount <= 1) return keepAll();
 
   if (!callModel) {
     console.warn("No model caller for consensus — keeping all findings");
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
+    return keepAll();
   }
 
   const threshold = Math.floor(voterCount / 2) + 1;
@@ -46,7 +60,7 @@ export async function applyConsensus(findings, voterCount, callModel) {
   try {
     const text = await callModel({
       model: "claude-sonnet-5",
-      maxTokens: 2000,
+      maxTokens: 3000,
       // Mechanical grouping — no reasoning needed, and thinking would eat
       // into the token budget the JSON output needs.
       thinking: { type: "disabled" },
@@ -70,40 +84,111 @@ Two findings belong in DIFFERENT groups only if fixing one would NOT fix the oth
 
 For each group, count the number of distinct voters (use the voter= tag). If >= ${threshold} distinct voters flagged it, keep the single best-worded finding as the representative.
 
+## Contested areas
+
+Some groups fall below the threshold. Most of them are noise, but sometimes they cluster: several voters each flagged something different in the same part of the code, or a lone finding looks serious and well-founded. Such a cluster suggests a real problem the voters did not agree on, and is worth a second look by fresh reviewers.
+
+Name at most ${MAX_CONTESTED_AREAS} contested areas. Each is a short label for the part of the code, and the below-threshold groups in it, each group as the list of its member finding indices. Name none when the below-threshold groups look like ordinary noise.
+
 ## Findings
 ${findingsList}
 
-Output a JSON array of finding indices (0-based) — only the best-worded representative from each group that meets the ${threshold}-voter threshold.
+Output a single JSON object and nothing else:
+- "keep": the indices (0-based) of the best-worded representative from each group that meets the ${threshold}-voter threshold
+- "contested": the contested areas, each {"area": "<label>", "groups": [[<indices>], ...]}
 
-Example: [0, 3]`,
+Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "groups": [[5], [7, 9]]}]}`,
         },
       ],
     });
 
     const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < findings.length;
-
-    const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
-    if (!arrMatch) {
+    const parsed = parseConsensusReply(text);
+    if (!parsed) {
       console.warn("Consensus returned no parseable output — keeping all");
-      return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
+      return keepAll();
     }
-    const keptIndices = new Set(JSON.parse(arrMatch[0]).map(Number).filter(validIndex));
+    const keptIndices = new Set(parsed.keep.filter(validIndex));
 
     const kept = findings
       .filter((_, i) => keptIndices.has(i))
       .map(({ voter, ...rest }) => rest);
-    const droppedFindings = findings
-      .filter((_, i) => !keptIndices.has(i))
-      .map(({ voter, ...rest }) => rest);
+    const droppedFindings = [];
+    const droppedAt = new Map(); // input index → index in droppedFindings
+    findings.forEach(({ voter, ...rest }, i) => {
+      if (keptIndices.has(i)) return;
+      droppedAt.set(i, droppedFindings.length);
+      droppedFindings.push(rest);
+    });
+
+    // A contested group may only hold findings consensus dropped, and each
+    // finding belongs to one group at most.
+    const claimed = new Set();
+    const contested = [];
+    for (const area of parsed.contested.slice(0, MAX_CONTESTED_AREAS)) {
+      const groups = [];
+      for (const indices of area.groups) {
+        const members = indices.filter(
+          (i) => validIndex(i) && !keptIndices.has(i) && !claimed.has(i),
+        );
+        if (members.length === 0) continue;
+        for (const i of members) claimed.add(i);
+        const memberFindings = members.map((i) => findings[i]);
+        const { voter, ...representative } = memberFindings[0];
+        groups.push({
+          representative,
+          members: memberFindings,
+          dropped: members.map((i) => droppedAt.get(i)),
+          supporters: new Set(memberFindings.map((f) => f.voter)).size,
+        });
+      }
+      if (groups.length > 0) contested.push({ area: area.area, groups });
+    }
 
     console.log(
-      `Consensus: kept ${kept.length}, dropped ${droppedFindings.length} (${threshold}/${voterCount} voter threshold)`,
+      `Consensus: kept ${kept.length}, dropped ${droppedFindings.length} (${threshold}/${voterCount} voter threshold), ${contested.length} contested area(s)`,
     );
-    return { kept, dropped: droppedFindings.length, droppedFindings };
+    return { kept, dropped: droppedFindings.length, droppedFindings, contested };
   } catch (err) {
     console.warn(`Consensus filter failed, keeping all: ${err.message}`);
-    return { kept: findings.map(({ voter, ...rest }) => rest), dropped: 0, droppedFindings: [] };
+    return keepAll();
   }
+}
+
+/**
+ * Read the consensus model's reply: a `{ keep, contested }` object, or a bare
+ * array of kept indices, which names no contested areas. Null when neither
+ * can be found.
+ */
+export function parseConsensusReply(text) {
+  const asIndices = (value) =>
+    Array.isArray(value) ? value.map(Number).filter(Number.isInteger) : [];
+  const asAreas = (value) =>
+    Array.isArray(value)
+      ? value
+          .filter((a) => a && typeof a === "object" && Array.isArray(a.groups))
+          .map((a) => ({
+            area: String(a.area ?? "").slice(0, 200),
+            groups: a.groups.filter(Array.isArray).map(asIndices),
+          }))
+      : [];
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    try {
+      const parsed = JSON.parse(text.slice(start, end + 1));
+      if (parsed && Array.isArray(parsed.keep)) {
+        return { keep: asIndices(parsed.keep), contested: asAreas(parsed.contested) };
+      }
+    } catch {
+      // Not an object reply; try a bare array below
+    }
+  }
+
+  const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
+  if (!arrMatch) return null;
+  return { keep: asIndices(JSON.parse(arrMatch[0])), contested: [] };
 }
 
 /**

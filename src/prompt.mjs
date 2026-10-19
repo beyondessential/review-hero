@@ -8,6 +8,8 @@
 
 import { readFileSync, existsSync } from "node:fs";
 
+import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
+
 export function buildBasePromptSections({
   projectContext,
   promptPath,
@@ -96,6 +98,52 @@ export function buildReviewAgentPrompt({
   prompt += diff;
   if (diff && !diff.endsWith("\n")) prompt += "\n";
   prompt += "\`\`\`\n";
+  return prompt;
+}
+
+/**
+ * Assemble the prompt for a second-look checker: the checker instructions, the
+ * agent's own specialisation, the repository's AI rules, the turn budget, the
+ * PR title and diff, then the contested area and its findings, numbered.
+ *
+ * Every checker of an area sends these exact bytes. The findings quote the
+ * pull request, so their text is sanitised and fenced like any other quoted
+ * content.
+ */
+// spec: RUN#second-look
+export function buildCheckerPrompt({
+  projectContext = "",
+  checkerPrompt,
+  agentPrompt,
+  aiRules = "",
+  maxTurns,
+  prTitle = "",
+  diff,
+  area,
+  findings,
+}) {
+  let prompt = "";
+  if (projectContext) {
+    prompt += `## Project Context\n\n${projectContext}\n\n`;
+  }
+  prompt += checkerPrompt;
+  prompt += "\n\n## Your specialisation\n\n";
+  prompt += agentPrompt;
+  if (aiRules) {
+    prompt +=
+      "\n\n## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when judging findings.\n\n";
+    prompt += aiRules;
+  }
+  prompt += `\n\n## Turn budget\n\nYou have at most ${maxTurns} agent turns for this check, and every tool call spends one. Stop exploring by turn ${softTurnCap(maxTurns)} and make your final message the JSON array of verdicts.\n`;
+  prompt += `\n\n## PR Title\n\n${prTitle}\n\n## PR Diff\n\n\`\`\`diff\n`;
+  prompt += diff;
+  if (diff && !diff.endsWith("\n")) prompt += "\n";
+  prompt += "\`\`\`\n";
+  prompt += `\n## Findings to check\n\nArea: ${sanitizeForPrompt(area)}\n\n`;
+  findings.forEach((f, i) => {
+    const comment = sanitizeForPrompt(f.comment, { maxLength: COMMENT_LIMIT });
+    prompt += `${i}. [${sanitizeForPrompt(f.severity)}] ${sanitizeForPrompt(f.file)}:${sanitizeForPrompt(f.line)} — <comment>${comment}</comment>\n`;
+  });
   return prompt;
 }
 

@@ -121,8 +121,9 @@ This requires repo admin.
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | triage, run-agents, auto-fix | Resolved from the `REVIEW_HERO_` variant or the plain variant |
 | `ANTHROPIC_BASE_URL` | triage, run-agents, auto-fix | Custom API base URL (optional) |
-| `CONCURRENCY` | run-agents | The `concurrency` input: most agent processes running at once |
-| `VOTERS` | triage, run-agents, orchestrate | The `voters` input into triage; the scaled count triage sets, into run-agents and orchestrate |
+| `CONCURRENCY` | run-agents, run-checkers | The `concurrency` input: most agent or checker processes running at once |
+| `VOTERS` | triage, run-agents, consensus | The `voters` input into triage; the scaled count triage sets, into run-agents and consensus |
+| `CONSENSUS_PATH` | consensus, run-checkers, orchestrate | The consensus outcome: written by consensus, updated by the second look, read by the orchestrator |
 | `APP_SLUG` | orchestrate, auto-fix | GitHub App slug, used to derive `{slug}[bot]` for identity matching and git commits |
 | `GITHUB_TOKEN` | orchestrate, auto-fix | App installation token for GitHub API calls |
 | `GITHUB_ACTIONS_TOKEN` | orchestrate | Built-in `GITHUB_TOKEN` used to uncheck the checkbox without re-triggering the workflow |

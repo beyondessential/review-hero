@@ -63,13 +63,15 @@ export const DEFAULT_PROCESS_TIMEOUT_MS = 20 * 60 * 1000;
 /** A primer only has to send its first request, so it gets far less time. */
 export const PRIMER_TIMEOUT_MS = 5 * 60 * 1000;
 const KILL_GRACE_MS = 10_000;
-const WRAP_UP_MAX_TURNS = 3;
 
 const ALLOWED_TOOLS =
   "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)";
 
 const WRAP_UP_MESSAGE =
   "Stop exploring and reply with only your final JSON array of findings, using what you have already confirmed (exactly [] if none). No other text.";
+
+/** Wrap-up turns for a capped or array-less run. */
+export const WRAP_UP_MAX_TURNS = 3;
 
 // ── Environment for agent processes ──────────────────────────────────────────
 
@@ -213,7 +215,7 @@ export function spawnClaude({ args, input, env, timeoutMs }) {
   });
 }
 
-function claudeArgs({ model, maxTurns, resume }) {
+export function claudeArgs({ model, maxTurns, resume }) {
   const args = ["-p"];
   if (resume) args.push("--resume", resume);
   args.push(
@@ -236,7 +238,7 @@ function claudeArgs({ model, maxTurns, resume }) {
 
 // ── Classifying a run ────────────────────────────────────────────────────────
 
-function parseEnvelope(stdout) {
+export function parseEnvelope(stdout) {
   try {
     const parsed = JSON.parse(stdout);
     return parsed && typeof parsed === "object" ? parsed : null;
@@ -265,6 +267,43 @@ export function wrapUpReason(run, envelope, maxTurns) {
     return "answered without a findings array";
   }
   return null;
+}
+
+/**
+ * Run the CLI once, then resume it for its answer when it hit its turn cap or
+ * answered without an array. A failed wrap-up keeps the original result; a
+ * successful one is merged into it, so the envelope covers both runs.
+ */
+export async function runWithWrapUp({
+  run,
+  prompt,
+  model,
+  maxTurns,
+  label,
+  out,
+  wrapUpMessage = WRAP_UP_MESSAGE,
+}) {
+  let result = await run(claudeArgs({ model, maxTurns }), prompt);
+  let envelope = parseEnvelope(result.stdout);
+  let stderr = result.stderr;
+  let wrappedUp = false;
+
+  const reason = result.timedOut ? null : wrapUpReason(result, envelope, maxTurns);
+  if (reason && envelope?.session_id) {
+    out(`::notice::Agent ${label} ${reason}; resuming it to write up\n`);
+    const resumed = await run(
+      claudeArgs({ model, maxTurns: WRAP_UP_MAX_TURNS, resume: envelope.session_id }),
+      wrapUpMessage,
+    );
+    const resumedEnvelope = parseEnvelope(resumed.stdout);
+    stderr += resumed.stderr;
+    if (resumed.code === 0 && answeredWithArray(resumedEnvelope)) {
+      result = resumed;
+      envelope = mergeWrapUp(envelope, resumedEnvelope);
+      wrappedUp = true;
+    }
+  }
+  return { result, envelope, stderr, wrappedUp };
 }
 
 // ── Reporting ────────────────────────────────────────────────────────────────
@@ -335,13 +374,17 @@ function logGroup(out, { label, outcome, envelope, stderr }) {
   out(lines.join("\n") + "\n");
 }
 
-export const SUMMARY_HEADER = [
-  "### Review agent runs",
-  "",
-  "| Agent | Run | Attempt | Waited | Ran | Turns | Cache read | Outcome |",
-  "| --- | --- | --- | --- | --- | --- | --- | --- |",
-  "",
-].join("\n");
+export function summaryHeader(title) {
+  return [
+    `### ${title}`,
+    "",
+    "| Agent | Run | Attempt | Waited | Ran | Turns | Cache read | Outcome |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "",
+  ].join("\n");
+}
+
+export const SUMMARY_HEADER = summaryHeader("Review agent runs");
 
 export function summaryRow(row) {
   const secs = (ms) => (ms == null ? "" : `${Math.round(ms / 1000)}s`);
@@ -447,30 +490,16 @@ export async function runAgents({
       attemptNumber > 1 ? `${label} (attempt ${attemptNumber})` : label;
     const resultPath = join(resultsDir, resultFileName(agent.key, voter, voters));
 
-    const { result: settled, waitedMs, ranMs } = await timed(fullLabel, async () => {
-      let result = await run(claudeArgs({ model, maxTurns }), prompts[agent.key]);
-      let envelope = parseEnvelope(result.stdout);
-      let stderr = result.stderr;
-      let wrappedUp = false;
-
-      const reason = result.timedOut ? null : wrapUpReason(result, envelope, maxTurns);
-      if (reason && envelope?.session_id) {
-        out(`::notice::Agent ${fullLabel} ${reason}; resuming it to write up findings\n`);
-        const resumed = await run(
-          claudeArgs({ model, maxTurns: WRAP_UP_MAX_TURNS, resume: envelope.session_id }),
-          WRAP_UP_MESSAGE,
-        );
-        const resumedEnvelope = parseEnvelope(resumed.stdout);
-        stderr += resumed.stderr;
-        // A failed wrap-up keeps the original result.
-        if (resumed.code === 0 && answeredWithArray(resumedEnvelope)) {
-          result = resumed;
-          envelope = mergeWrapUp(envelope, resumedEnvelope);
-          wrappedUp = true;
-        }
-      }
-      return { result, envelope, stderr, wrappedUp };
-    });
+    const { result: settled, waitedMs, ranMs } = await timed(fullLabel, () =>
+      runWithWrapUp({
+        run,
+        prompt: prompts[agent.key],
+        model,
+        maxTurns,
+        label: fullLabel,
+        out,
+      }),
+    );
     const { result, envelope, stderr, wrappedUp } = settled;
 
     // spec: RUN#wrap-up-retries-and-replacements

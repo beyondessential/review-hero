@@ -28,7 +28,8 @@ All three stages run in a single job. The agents spend their time waiting on the
 
 1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
 2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt, at most `concurrency` at once. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
-3. **Orchestrator** — collects all agent outputs, applies voter consensus (when enabled), filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
+3. **Consensus and second look** — applies voter consensus per agent (when enabled). Where findings below the majority cluster in a part of the code, fresh checkers take a second look at them (see [Second look](#second-look)).
+4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table). Its GitHub token is only created once the agents and checkers have finished.
 
 ## Prerequisites (once per owner — user or org)
 
@@ -269,6 +270,14 @@ The consensus threshold is a strict majority of the review's voter count — for
 
 **Cost impact:** Voters multiply agent costs linearly. The default of 3 voters strikes a good balance between noise reduction and cost.
 
+### Second look
+
+Findings below the majority are usually noise, but sometimes several voters each flag something different in the same part of the code, or a lone finding looks serious. While grouping findings, the consensus model names up to three such contested areas per agent.
+
+Each contested area gets fresh checkers: runs of the same agent, given the diff and the area's findings, which read the code and confirm or reject each one. Every confirmation counts as a vote, and an area gets as many checkers as a finding from a single voter needs to reach the majority (one for 3 voters, two for 5). A finding whose voters and confirming checkers reach the majority is posted with the rest; the summary's filtering line says how many a second look confirmed.
+
+A review takes at most one second look, and none when it runs a single voter. If the second look fails or runs out of time, the review posts from consensus as it stood.
+
 ### Choosing the model
 
 Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with a flat 20-turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
@@ -352,7 +361,7 @@ Posted at the end of a review round, or when a review could not complete.
 | `outcome` | `completed` when at least one agent returned results, `failed` when every agent failed |
 | `reviewedSha` | The commit that was reviewed |
 | `model` | The model the review agents ran on |
-| `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed` |
+| `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, `secondLook` (findings below the majority a second look confirmed) |
 
 ### `auto-fix`
 

@@ -49,10 +49,28 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] Each voter's result is written as soon as it finishes, so results from finished voters survive a later failure in the job.
 - [ ] An unexpected error in one voter costs only that voter.
 
+## Second look
+
+Where voters disagree, the review takes a second look before posting: fresh checkers judge the contested findings, and their verdicts count as votes.
+
+- [ ] Consensus runs as its own step after the agents finish, before the GitHub App token is created.
+- [ ] While grouping an agent's findings, the consensus model names its contested areas: parts of the code where findings below the majority suggest a real problem worth a second look.
+- [ ] An agent has at most three contested areas.
+- [ ] A review that runs one voter per agent has no consensus, so no second look.
+- [ ] Each contested area gets as many checkers as a finding from a single voter needs to reach the majority.
+- [ ] A checker is a fresh run of the area's agent, given the diff and the area's findings, which reads the code with the same read-only tools and confirms or rejects each finding.
+- [ ] A checker sees each finding's text and location, not which voters reported it.
+- [ ] A finding below the majority is kept when its voters and the checkers confirming it together reach the majority.
+- [ ] A review takes at most one second look.
+- [ ] Checkers run under the same concurrency cap and wrap-up as voters, with a time limit of their own inside the job's.
+- [ ] A second look that fails or runs out of time leaves consensus as it stood, and the orchestrator posts from that.
+- [ ] The review summary's filtering line says how many findings a second look confirmed, when it confirmed any.
+- [ ] The completion block's `counts.secondLook` is the number of findings a second look confirmed (see `reporting/completion-comments.md`).
+
 ## Credentials
 
 - [ ] Agent processes run with no GitHub token in their environment.
-- [ ] The GitHub App token is created after the agents have finished, just before the orchestrator posts.
+- [ ] The GitHub App token is created after the agents and any second look have finished, just before the orchestrator posts.
 - [ ] The pull request checkout the agents read holds no stored credentials.
 
 ## Logs
@@ -65,5 +83,5 @@ The agents spend their time waiting on the model, so one runner carries them all
 
 ## Documentation
 
-- [ ] The README documents the single review job, the `runner` default, the `concurrency` input, and how the voter count follows the diff.
+- [ ] The README documents the single review job, the `runner` default, the `concurrency` input, how the voter count follows the diff, and the second look.
 - [ ] The README warns that `ubuntu-slim` caps a job at 15 minutes, which the whole review has to fit within.

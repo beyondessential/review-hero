@@ -72,7 +72,7 @@ jobs:
       ((github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'edited') &&
       contains(github.event.pull_request.body, '**Run Review Hero'))
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       # ── Trigger check ────────────────────────────────────────────────
       - id: check
@@ -309,7 +309,7 @@ jobs:
       # agents run long still leaves the orchestrator time to post.
       - name: Run review agents
         if: steps.check.outputs.should_run == 'true'
-        timeout-minutes: 45
+        timeout-minutes: 40
         env:
           AGENTS: ${{ steps.triage.outputs.agents }}
           VOTERS: ${{ steps.triage.outputs.voters }}
@@ -334,9 +334,52 @@ jobs:
           CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ steps.triage.outputs.agent_provider == 'openrouter' && '1000000' || '' }}
         run: node .review-hero/scripts/run-agents.mjs
 
+      # ── Consensus ────────────────────────────────────────────────────
+      # spec: RUN#second-look
+      # Voter consensus per agent, before the GitHub token exists. It also
+      # names the contested areas worth a second look.
+      - name: Apply consensus
+        if: always() && steps.check.outputs.should_run == 'true'
+        id: consensus
+        env:
+          ARTIFACTS_DIR: /tmp/review-results
+          VOTERS: ${{ steps.triage.outputs.voters }}
+          CONSENSUS_PATH: /tmp/consensus.json
+          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+        run: node .review-hero/scripts/consensus.mjs
+
+      # ── Second look ──────────────────────────────────────────────────
+      # Fresh checkers judge the contested findings, and confirmations count
+      # as votes. Its own time limit keeps time for posting; cut short, it
+      # leaves consensus as it stood.
+      - name: Second look
+        if: always() && steps.check.outputs.should_run == 'true' && steps.consensus.outputs.second_look == 'true'
+        timeout-minutes: 15
+        env:
+          CONSENSUS_PATH: /tmp/consensus.json
+          AGENTS: ${{ steps.triage.outputs.agents }}
+          AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          LOGS_DIR: /tmp/review-logs
+          REVIEW_HERO_DIR: .review-hero
+          CALLER_BASE_DIR: .caller-base
+          DIFF_PATH: /tmp/pr-filtered.diff
+          AI_RULES_PATH: /tmp/ai-rules.md
+          PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          ANTHROPIC_API_KEY: ${{ steps.triage.outputs.agent_provider != 'openrouter' && (secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY) || '' }}
+          ANTHROPIC_BASE_URL: ${{ steps.triage.outputs.agent_provider == 'openrouter' && 'https://openrouter.ai/api' || secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ steps.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
+          # OpenRouter requests occasionally stall; failing one fast lets the CLI retry it.
+          API_TIMEOUT_MS: ${{ steps.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
+          # Some CLI versions cap a model ID they do not know below its real window and refuse the prompt unsent.
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ steps.triage.outputs.agent_provider == 'openrouter' && '1000000' || '' }}
+        run: node .review-hero/scripts/run-checkers.mjs
+
       # ── Generate app token ───────────────────────────────────────────
       # Minted just before posting, so it is fresh however long the agents
-      # took, and never exists on the runner while they run.
+      # took, and never exists on the runner while agents or checkers run.
       - name: Generate app token
         if: always() && steps.check.outputs.should_run == 'true'
         id: app-token
@@ -359,11 +402,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_HERO_REF: ${{ inputs.ref }}
-          ARTIFACTS_DIR: /tmp/review-results
+          CONSENSUS_PATH: /tmp/consensus.json
           AGENT_NAMES: ${{ steps.triage.outputs.agent_names }}
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          VOTERS: ${{ steps.triage.outputs.voters }}
           SUPPRESSIONS_PATH: /tmp/suppressions.yml
           GLOBAL_SUPPRESSIONS_PATH: .review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
@@ -379,7 +421,8 @@ jobs:
             exit "$rc"
           fi
 
-      # Agent results, primer output and per-process logs, for debugging.
+      # Agent results, primer and checker output, per-process logs and the
+      # consensus outcome, for debugging.
       - name: Upload agent results and logs
         if: always() && steps.check.outputs.should_run == 'true'
         uses: actions/upload-artifact@v7
@@ -388,5 +431,6 @@ jobs:
           path: |
             /tmp/review-results
             /tmp/review-logs
+            /tmp/consensus.json
           retention-days: 1
           if-no-files-found: ignore

@@ -135,3 +135,26 @@ Recorded in the review agent runs spec (RUN):
 - [x] `npm test`
 - [x] `go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/review.yml`
 - [ ] A real review on a PR in this repo (`ai-review.yml` runs the PR's own ref): one job, primers before voters, cache reads on the voters, the summary table, and a completion block whose `counts.voters` matches the tier
+
+## Second look
+
+Replaces the large-diff voter bump. Where an agent's voters disagree, the consensus model names contested areas and fresh checkers judge the findings in them, each confirmation counting as a vote. Specced in the review agent runs spec (RUN, "Second look").
+
+Decisions:
+
+- Checkers are targeted: a fresh run of the area's agent with the checker prompt, the diff and the area's findings, confirming or rejecting each. Cheaper than more full voters, and aimed at the disagreement.
+- The consensus model groups contested areas and judges whether they are worth it, in the same call that already groups findings. At most three per agent.
+- An area gets `floor(voters / 2)` checkers: enough for unanimous confirmation to lift a lone finding to the majority. The majority stays that of the review's voter count.
+- Consensus moved out of the orchestrator into its own step, so checkers run before the GitHub App token exists. The consensus outcome is a JSON file the second look rewrites and the orchestrator reads; the orchestrator takes the voter count from it rather than from `VOTERS`.
+- The review result gains `counts.secondLook`, an added field, so the completion block stays at schema 1.
+
+Steps:
+
+- [x] `src/grouping.mjs`: `applyConsensus` asks for `{ keep, contested }` and returns contested groups with supporters and their place in `droppedFindings`; `parseConsensusReply` still reads a bare array
+- [x] `prompts/checker-prompt.md` and `buildCheckerPrompt` in `src/prompt.mjs`, finding text sanitised
+- [x] `scripts/consensus.mjs`: result scanning and collection moved from the orchestrator, consensus per agent, outcome file and `second_look` output
+- [x] `scripts/run-checkers.mjs`: checkers per area under the concurrency cap with the shared wrap-up (`runWithWrapUp`, extracted from the driver), verdict tally, promotion, outcome rewritten
+- [x] `scripts/orchestrate.mjs` reads the outcome; summary filtering line and `counts.secondLook`
+- [x] Workflow: consensus and second-look steps before the token, time limits 40 / 15 / 75 minutes
+- [x] README, DEVELOPING, completion comments spec
+- [ ] Observe a real second look on a PR

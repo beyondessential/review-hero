@@ -34,6 +34,23 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] An unexpected error in one voter costs only that voter (verifies spec: RUN)
 - [x] An agent whose prompt cannot be read, or whose key is invalid, is skipped and the rest run (verifies spec: RUN)
 
+## Second look
+
+- [x] Consensus names contested areas only from findings it dropped, each finding in one group at most (verifies spec: RUN)
+- [x] Consensus names at most three contested areas per agent (verifies spec: RUN)
+- [x] A bare array reply from the consensus model still works, with nothing contested
+- [x] A single voter has no consensus and nothing contested (verifies spec: RUN)
+- [x] An area gets `floor(voters / 2)` checkers (verifies spec: RUN)
+- [x] A confirmation counts once per checker; anything unclear is a rejection (verifies spec: RUN)
+- [x] A finding whose voters and confirming checkers reach the majority moves to kept, taking its group's other members out of dropped (verifies spec: RUN)
+- [x] With five voters a lone finding needs both checkers (verifies spec: RUN)
+- [x] No verdicts, or a checker that throws, leave consensus as it stood (verifies spec: RUN)
+- [x] Checkers run under the concurrency cap (verifies spec: RUN)
+- [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
+- [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
+- [ ] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
+- [ ] A second look stopped at its time limit leaves the orchestrator posting from consensus as it stood (verifies spec: RUN)
+
 ## Credentials
 
 - [x] Agent processes get no `GITHUB_TOKEN`, `GH_TOKEN` or `ACTIONS_*` variables (verifies spec: RUN)
