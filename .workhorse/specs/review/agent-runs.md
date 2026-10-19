@@ -37,7 +37,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] When an agent process reports that the provider is rate limiting or overloaded, no new process starts for the retry delay the provider asked for, and the number allowed to run drops below the number running at that moment.
 - [ ] Each agent process that finishes without having been rate limited raises that number by one.
 - [ ] `concurrency` is an optional workflow input capping how many agent processes run at once, with no cap by default.
-- [ ] One agent process always runs while work is waiting, whatever the limits say.
+- [ ] Outside a provider pause, one agent process always runs while work is waiting, whatever the other limits say.
 - [ ] Work starts in the order it was queued, so every primer starts ahead of any voter and every agent's cache is written early.
 
 ## Prompt cache priming

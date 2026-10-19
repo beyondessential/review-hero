@@ -92,3 +92,8 @@ test("only integer indices count, so junk entries never stand for finding 0", ()
     { keep: [2], contested: [{ area: "a", groups: [[3]] }] },
   );
 });
+
+test("an object reply without a keep array is unreadable, not mined for indices", () => {
+  assert.equal(parseConsensusReply('{"keep": "0, 1", "contested": [{"area": "a", "groups": [[4, 5]]}]}'), null);
+  assert.equal(parseConsensusReply('{"kept": [0]}'), null);
+});

@@ -15,8 +15,9 @@
  *   without having been throttled raises the limit by one
  * - Ceiling: an optional fixed maximum, from the `concurrency` input
  *
- * At least one process always runs while work is waiting, so the scheduler
- * never stalls on an estimate. Work starts in the order it was queued.
+ * At least one process always runs while work is waiting, outside a provider
+ * pause, so the scheduler never stalls on an estimate. Work starts in the
+ * order it was queued.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -165,8 +166,10 @@ export function createScheduler({
   /** Why the next piece of work cannot start yet, or null when it can. */
   function holdReason() {
     if (running.size >= ceiling) return "ceiling";
-    if (running.size === 0) return null;
+    // A provider pause holds even with nothing running: it ends on its own,
+    // so it cannot stall the review the way an estimate could.
     if (now() < pausedUntil) return "provider pause";
+    if (running.size === 0) return null;
     if (running.size >= providerLimit) return "provider limit";
     if (memory) {
       const estimate = footprint || defaultFootprint;

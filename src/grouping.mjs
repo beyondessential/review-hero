@@ -182,6 +182,9 @@ export function parseConsensusReply(text) {
       if (parsed && Array.isArray(parsed.keep)) {
         return { keep: asIndices(parsed.keep), contested: asAreas(parsed.contested) };
       }
+      // An object reply without a usable `keep` is unreadable. Its arrays are
+      // contested groups or junk, never the kept indices.
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return null;
     } catch {
       // Not an object reply; try a bare array below
     }

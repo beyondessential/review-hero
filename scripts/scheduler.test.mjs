@@ -212,3 +212,22 @@ test("the Linux probe measures this process's own tree", { skip: process.platfor
   const size = probe.treeRss([process.pid]).get(process.pid);
   assert.ok(size > 1024 * 1024, `expected this process to use over 1 MB, got ${size}`);
 });
+
+test("a provider pause holds new starts even once nothing is running", async () => {
+  let clock = 0;
+  const scheduler = createScheduler({ memory: null, pollMs: 1, now: () => clock });
+  const h = harness(scheduler);
+  const first = h.submit("a");
+  await tick();
+  h.slots[0].onEvent({ type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 30_000 });
+  const second = h.submit("b");
+  h.releaseOne();
+  await first;
+  await tick();
+  assert.deepEqual(h.started, ["a"]);
+  clock = 31_000;
+  await tick();
+  assert.deepEqual(h.started, ["a", "b"]);
+  h.releaseAll();
+  await second;
+});
