@@ -38,12 +38,12 @@ Setup (app token, checkouts, `npm ci`, Claude CLI install, rules detection) then
 - **Retries.** "Re-run failed jobs" no longer retries a single agent, so the driver retries a voter that crashes.
 - **`MAX_VOTERS`.** Its rationale cites the GitHub Actions matrix limit, which no longer applies; cost is still a reason to cap.
 
-## Open questions
+## Resolved questions
 
-The review agent runs spec (RUN) drafts an answer to each; these await confirmation.
+Recorded in the review agent runs spec (RUN):
 
 - Concurrency cap default: 8.
 - One retry for a crashed voter, one replacement for an empty one.
-- Voter count is review-wide and follows diff size only: the `voters` input below 500 changed lines (the Opus threshold), two more at 500 and above, capped at 10.
+- Voter count is review-wide and follows diff size only: one voter under 100 changed lines, the `voters` input up to 499, two more at 500 and above (the Opus threshold), capped at 10.
   Consensus stays a strict majority of that count, with non-contributing voters still counted, so `counts.voters` keeps its meaning.
-- `runner` stays one input, defaulting to `ubuntu-latest`; a job-level `if:` skips non-matching events without a runner.
+- `runner` stays one input, defaulting to `ubuntu-latest`; a job-level `if:` skips non-matching events without a runner, and the README warns about slim's 15-minute cap.
