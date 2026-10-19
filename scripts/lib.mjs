@@ -23,21 +23,16 @@ export const MAX_VOTERS = 10;
 /** Below this many changed diff lines, each agent runs a single voter. */
 export const SMALL_DIFF_LINES = 100;
 
-/** From this many changed diff lines, each agent runs two more voters than requested. */
-export const LARGE_DIFF_LINES = 500;
-
 /**
  * The number of voters every agent runs for a review: one for a small diff,
- * where voters converge and consensus buys little, the requested count for a
- * typical diff, and two more for a large one, where voters sample more of it
- * selectively and disagree more. Never more than `MAX_VOTERS`.
+ * where voters converge and consensus buys little, and the requested count
+ * otherwise. Never more than `MAX_VOTERS`.
  */
 // spec: RUN#voters
 export function voterCountForDiff(diffLines, requested) {
-  const base = Math.max(1, Math.trunc(Number(requested)) || 1);
   if (diffLines < SMALL_DIFF_LINES) return 1;
-  const count = diffLines >= LARGE_DIFF_LINES ? base + 2 : base;
-  return Math.min(count, MAX_VOTERS);
+  const base = Math.max(1, Math.trunc(Number(requested)) || 1);
+  return Math.min(base, MAX_VOTERS);
 }
 
 /** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */

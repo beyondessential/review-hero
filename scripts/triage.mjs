@@ -22,7 +22,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { chooseAgentModel, voterCountForDiff, LARGE_DIFF_LINES } from "./lib.mjs";
+import { chooseAgentModel, voterCountForDiff } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
@@ -88,7 +88,7 @@ const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
   /[\r\n]/g,
   "",
 );
-const OPUS_THRESHOLD = LARGE_DIFF_LINES;
+const OPUS_THRESHOLD = 500;
 const GLM_MAX_TURNS = 20;
 const sizeModel = diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
 const {
