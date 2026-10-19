@@ -7,6 +7,8 @@ import { join } from "node:path";
 import {
   agentEnv,
   buildPrompts,
+  cacheReadShare,
+  mergeWrapUp,
   createSlotPool,
   parseConcurrency,
   runAgents,
@@ -61,13 +63,15 @@ function fakeClaude(respond = () => USABLE) {
   let clock = 0;
   let active = 0;
   let peak = 0;
-  const runClaude = async ({ args, input, env }) => {
+  const runClaude = async ({ args, input, env, timeoutMs }) => {
     const maxTurns = args[args.indexOf("--max-turns") + 1];
     const resume = args.includes("--resume");
     const call = {
       agent: resume ? null : input,
       kind: resume ? "resume" : maxTurns === "1" ? "primer" : "voter",
       env,
+      args,
+      timeoutMs,
       start: clock++,
     };
     calls.push(call);
@@ -194,7 +198,7 @@ test("a capped voter is resumed for its findings, and the resumed answer is its 
   const { resultsDir, rows } = review(fake, { voters: 1 });
   const [row] = await rows;
   assert.deepEqual(fake.calls.map((c) => c.kind), ["voter", "resume"]);
-  assert.equal(row.outcome, "usable");
+  assert.equal(row.outcome, "usable after wrap-up");
   assert.equal(readFileSync(join(resultsDir, "bugs-result.json"), "utf-8"), USABLE.stdout);
 });
 
@@ -202,7 +206,7 @@ test("a voter that answers in prose is resumed for its findings", async () => {
   const fake = fakeClaude((call) => (call.kind === "resume" ? USABLE : PROSE));
   const [row] = await review(fake, { voters: 1 }).rows;
   assert.deepEqual(fake.calls.map((c) => c.kind), ["voter", "resume"]);
-  assert.equal(row.outcome, "usable");
+  assert.equal(row.outcome, "usable after wrap-up");
 });
 
 test("a failed wrap-up keeps the original result", async () => {
@@ -292,8 +296,8 @@ test("the job summary has a row per process", async () => {
   const rows = await review(fake).rows;
   const table = summaryTable(rows);
   assert.equal(table.split("\n").filter((line) => line.startsWith("| bugs |")).length, 4);
-  assert.match(table, /\| bugs \| primer \|  \| 4 \| 0% \| primed \|/);
-  assert.match(table, /\| bugs \| voter 0 \| 1 \| 4 \| 90% \| usable \|/);
+  assert.match(table, /\| bugs \| primer \|  \| \d+s \| \d+s \| 4 \| 0% \| primed \|/);
+  assert.match(table, /\| bugs \| voter 0 \| 1 \| \d+s \| \d+s \| 4 \| 90% \| usable \|/);
 });
 
 test("each process's log is written as one group", async () => {
@@ -303,6 +307,84 @@ test("each process's log is written as one group", async () => {
   const group = output.find((text) => text.startsWith("::group::bugs: usable"));
   assert.ok(group);
   assert.ok(group.trimEnd().endsWith("::endgroup::"));
+});
+
+test("a voter's row covers its wrap-up, with turns summed over both runs", async () => {
+  const fake = fakeClaude((call) => (call.kind === "resume" ? USABLE : CAPPED));
+  const [row] = await review(fake, { voters: 1 }).rows;
+  assert.equal(row.outcome, "usable after wrap-up");
+  assert.equal(row.turns, 8);
+});
+
+test("merging a wrap-up keeps its answer and sums the counters", () => {
+  const merged = mergeWrapUp(
+    { num_turns: 20, duration_ms: 1000, usage: { cache_read_input_tokens: 100, cache_creation_input_tokens: 50 } },
+    { result: "[]", num_turns: 1, duration_ms: 200, usage: { cache_read_input_tokens: 300 } },
+  );
+  assert.equal(merged.result, "[]");
+  assert.equal(merged.num_turns, 21);
+  assert.equal(merged.duration_ms, 1200);
+  assert.deepEqual(merged.usage, { cache_read_input_tokens: 400, cache_creation_input_tokens: 50 });
+});
+
+test("an answer with a stray bracket but no findings array still gets its wrap-up", async () => {
+  const stray = { code: 0, timedOut: false, stdout: envelope("I read [src/x.mjs] and it looks fine."), stderr: "" };
+  const fake = fakeClaude((call) => (call.kind === "resume" ? USABLE : stray));
+  const [row] = await review(fake, { voters: 1 }).rows;
+  assert.deepEqual(fake.calls.map((c) => c.kind), ["voter", "resume"]);
+  assert.equal(row.outcome, "usable after wrap-up");
+});
+
+test("a wrap-up sends the same system prompt flag as the voter it resumes", async () => {
+  const fake = fakeClaude((call) => (call.kind === "resume" ? USABLE : CAPPED));
+  await review(fake, { voters: 1 }).rows;
+  for (const call of fake.calls) {
+    assert.ok(call.args.includes("--exclude-dynamic-system-prompt-sections"));
+  }
+});
+
+test("a primer gets the short primer time limit, and voters the full one", async () => {
+  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
+  await review(fake, { timeoutMs: 1000, primerTimeoutMs: 10 }).rows;
+  assert.ok(fake.calls.filter((c) => c.kind === "primer").every((c) => c.timeoutMs === 10));
+  assert.ok(fake.calls.filter((c) => c.kind === "voter").every((c) => c.timeoutMs === 1000));
+});
+
+test("an unexpected error in one voter costs only that voter", async () => {
+  const fake = fakeClaude((call, calls) => {
+    if (call.agent === "bugs" && calls.filter((c) => c.agent === "bugs").length === 1) {
+      throw new Error("disk full");
+    }
+    return call.kind === "primer" ? PRIMED : USABLE;
+  });
+  const agents = ["bugs", "design"].map((key) => ({ key, source: "base" }));
+  const { output, rows } = review(fake, { agents });
+  const result = await rows;
+  assert.ok(output.some((line) => line.includes("failed unexpectedly")));
+  assert.equal(result.filter((r) => r.agent === "design" && r.outcome === "usable").length, 3);
+});
+
+test("each process logs when it starts, and its row says how long it waited", async () => {
+  let clock = 0;
+  const fake = fakeClaude();
+  const { output, rows } = review(fake, { voters: 1, now: () => (clock += 1000) });
+  const [row] = await rows;
+  assert.ok(output.includes("Started bugs\n"));
+  assert.equal(row.waitedMs, 1000);
+  assert.ok(row.ranMs > 0);
+});
+
+test("every row is handed over as it settles", async () => {
+  const seen = [];
+  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
+  const rows = await review(fake, { onRow: (row) => seen.push(row) }).rows;
+  assert.deepEqual(seen, rows);
+});
+
+test("a run that reports usage but no cache shows as none, not blank", () => {
+  assert.equal(cacheReadShare(undefined), "");
+  assert.equal(cacheReadShare({ input_tokens: 10 }), "none");
+  assert.equal(cacheReadShare({ cache_read_input_tokens: 3, cache_creation_input_tokens: 1 }), "75%");
 });
 
 // ── Environment ──────────────────────────────────────────────────────────────
@@ -365,15 +447,43 @@ test("custom agent prompts come from the trusted checkout", () => {
   assert.ok(prompts.house.startsWith("Base.\n\nHouse rules."));
 });
 
-test("an agent key that could escape the prompts directory is refused", () => {
-  assert.throws(() =>
-    buildPrompts({
-      agents: [{ key: "../../etc/passwd", source: "custom" }],
-      reviewHeroDir: "/nonexistent",
-      callerBaseDir: "/nonexistent",
-      common: { maxTurns: 20, diff: "" },
-    }),
-  );
+function promptDirs() {
+  const root = mkdtempSync(join(tmpdir(), "run-agents-prompts-"));
+  const reviewHeroDir = join(root, ".review-hero");
+  mkdirSync(join(reviewHeroDir, "prompts"), { recursive: true });
+  writeFileSync(join(reviewHeroDir, "prompts", "agent-prompt.md"), "Base.");
+  writeFileSync(join(reviewHeroDir, "prompts", "bugs.md"), "Bugs.");
+  return { reviewHeroDir, callerBaseDir: join(root, ".caller-base") };
+}
+
+test("an agent key that could escape the prompts directory is skipped", () => {
+  const warnings = [];
+  const prompts = buildPrompts({
+    ...promptDirs(),
+    agents: [
+      { key: "../../etc/passwd", source: "custom" },
+      { key: "bugs", source: "base" },
+    ],
+    common: { maxTurns: 20, diff: "" },
+    out: (line) => warnings.push(line),
+  });
+  assert.deepEqual(Object.keys(prompts), ["bugs"]);
+  assert.match(warnings.join("\n"), /::warning::Skipping agent with invalid key/);
+});
+
+test("an agent whose prompt cannot be read is skipped, and the rest still run", () => {
+  const warnings = [];
+  const prompts = buildPrompts({
+    ...promptDirs(),
+    agents: [
+      { key: "house", source: "custom" },
+      { key: "bugs", source: "base" },
+    ],
+    common: { maxTurns: 20, diff: "" },
+    out: (line) => warnings.push(line),
+  });
+  assert.deepEqual(Object.keys(prompts), ["bugs"]);
+  assert.match(warnings.join("\n"), /::warning::Skipping agent house: cannot read its prompt/);
 });
 
 // ── Spawning the CLI ─────────────────────────────────────────────────────────

@@ -252,8 +252,7 @@ The number of voters follows the size of the filtered diff:
 | Changed diff lines | Voters per agent |
 |--------------------|------------------|
 | Under 100          | 1 (no consensus) |
-| 100 to 499         | `voters`         |
-| 500 or more        | `voters` + 2     |
+| 100 or more        | `voters`         |
 
 Every agent in a review runs the same number of voters, never more than 10.
 
@@ -398,7 +397,7 @@ jobs:
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
 | `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job. |
-| `voters`  | `3`                | Independent voters per agent for a diff of 100 to 499 changed lines; smaller diffs run one, larger ones two more. `>=2` enables consensus filtering. Set to `1` to disable. |
+| `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
 | `concurrency` | `8`            | Most review agent processes running at once. |
 
 > [!NOTE]

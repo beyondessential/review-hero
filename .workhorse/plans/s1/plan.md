@@ -59,7 +59,8 @@ Recorded in the review agent runs spec (RUN):
 
 - Concurrency cap default: 8.
 - One retry for a crashed voter, one replacement for an empty one.
-- Voter count is review-wide and follows diff size only: one voter under 100 changed lines, the `voters` input up to 499, two more at 500 and above (the Opus threshold), capped at 10.
+- Voter count is review-wide and follows diff size only: one voter under 100 changed lines, the `voters` input otherwise, capped at 10.
+  The large-diff bump of two more voters was dropped after the first real run, in favour of the orchestrator calling an extra round where voters disagree (see below).
   Consensus stays a strict majority of that count, with non-contributing voters still counted, so `counts.voters` keeps its meaning.
 - `runner` stays one input, defaulting to `ubuntu-latest`; a job-level `if:` skips non-matching events without a runner, and the README warns about slim's 15-minute cap.
 
@@ -67,7 +68,7 @@ Recorded in the review agent runs spec (RUN):
 
 ### Triage
 
-- [x] `scripts/lib.mjs`: add `voterCountForDiff(diffLines, requested)` (one under 100 changed lines, `requested` from 100 to 499, `requested + 2` from 500, clamped to 1..`MAX_VOTERS`), with cases in `lib.test.mjs` at each boundary (`// spec: RUN#voters`)
+- [x] `scripts/lib.mjs`: add `voterCountForDiff(diffLines, requested)` (one under 100 changed lines, `requested` otherwise, clamped to 1..`MAX_VOTERS`), with cases in `lib.test.mjs` at each boundary (`// spec: RUN#voters`)
 - [x] `scripts/lib.mjs`: reword the `MAX_VOTERS` rationale to cost alone
 - [x] `scripts/triage.mjs`: replace the `matrix` output with `agents` (JSON array of `{ key, source }`) and `voters` (from `voterCountForDiff`); drop the primer and voter fields; update the header comment and the log lines
 - [x] `scripts/triage.mjs`: read the caller repo from `.caller-base` and review-hero from `.review-hero` via the existing `CALLER_REPO_DIR` / `REVIEW_HERO_DIR` env (workflow change only, but check nothing hard-codes `caller/`)

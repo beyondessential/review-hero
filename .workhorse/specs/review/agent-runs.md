@@ -15,13 +15,14 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] The exact checkbox match runs as the job's first step, and a mismatch ends the job before any setup.
 - [ ] Checkouts, dependency installs and the Claude CLI install happen once per review.
 - [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
+- [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
+- [ ] An agent whose prompt cannot be read is left out with a warning, and the other agents still run.
 
 ## Voters
 
 - [ ] Triage sets the number of voters each agent runs for the review, the same for every agent.
 - [ ] A diff under 100 changed lines runs one voter per agent, so its findings skip consensus.
-- [ ] The `voters` input is the voter count for a diff of 100 to 499 changed lines.
-- [ ] A diff of 500 or more changed lines runs two more voters than the `voters` input.
+- [ ] A diff of 100 or more changed lines runs the `voters` input's count of voters per agent.
 - [ ] The voter count never exceeds 10.
 - [ ] A finding survives consensus when a strict majority of the review's voter count reports it, with voters that contributed nothing still counting toward that number.
 - [ ] The completion block's `counts.voters` is the voter count the review ran with (see `reporting/completion-comments.md`).
@@ -41,20 +42,26 @@ The agents spend their time waiting on the model, so one runner carries them all
 ## Wrap-up, retries and replacements
 
 - [ ] A voter that hits its turn cap, or answers without a findings array, is resumed once and asked for its findings.
+- [ ] A primer run has a much shorter time limit than a voter, since it only needs its first request.
 - [ ] A voter whose process exits abnormally is retried once, from scratch.
 - [ ] A voter that still has no usable findings after its wrap-up is replaced once by a fresh voter.
 - [ ] A voter left without usable findings after its retry or replacement contributes nothing, and the review carries on.
 - [ ] Each voter's result is written as soon as it finishes, so results from finished voters survive a later failure in the job.
+- [ ] An unexpected error in one voter costs only that voter.
 
 ## Credentials
 
 - [ ] Agent processes run with no GitHub token in their environment.
+- [ ] The GitHub App token is created after the agents have finished, just before the orchestrator posts.
 - [ ] The pull request checkout the agents read holds no stored credentials.
 
 ## Logs
 
+- [ ] The job log has a line when each agent process starts.
 - [ ] Each agent process's output appears in the job log as its own collapsible group, written when that process finishes.
-- [ ] The job summary has a table of every agent process, with its agent, voter, turns used, prompt cache use and outcome.
+- [ ] The job summary has a table of every agent process, with its agent, voter, attempt, time waiting for a slot, time running, turns used, prompt cache use and outcome.
+- [ ] A voter's row covers its wrap-up as well, with turns and cache use summed over both.
+- [ ] The job summary gains each row as its process settles, so it survives the agents being stopped at their time limit.
 
 ## Documentation
 

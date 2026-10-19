@@ -53,12 +53,15 @@ import { join } from "node:path";
 import { formatCacheStats, resultFileName } from "./lib.mjs";
 import {
   buildReviewAgentPrompt,
+  extractJsonArray,
   isValidAgentKey,
   parseAgentResult,
 } from "../src/index.mjs";
 
 export const DEFAULT_CONCURRENCY = 8;
 export const DEFAULT_PROCESS_TIMEOUT_MS = 20 * 60 * 1000;
+/** A primer only has to send its first request, so it gets far less time. */
+export const PRIMER_TIMEOUT_MS = 5 * 60 * 1000;
 const KILL_GRACE_MS = 10_000;
 const WRAP_UP_MAX_TURNS = 3;
 
@@ -226,8 +229,8 @@ function claudeArgs({ model, maxTurns, resume }) {
     ALLOWED_TOOLS,
   );
   // Keeps per-machine detail out of the system prompt, so the cacheable
-  // prefix is the same for every voter.
-  if (!resume) args.push("--exclude-dynamic-system-prompt-sections");
+  // prefix is the same for every voter and for a voter's wrap-up.
+  args.push("--exclude-dynamic-system-prompt-sections");
   return args;
 }
 
@@ -243,7 +246,10 @@ function parseEnvelope(stdout) {
 }
 
 function answeredWithArray(envelope) {
-  return typeof envelope?.result === "string" && envelope.result.includes("[");
+  return (
+    typeof envelope?.result === "string" &&
+    extractJsonArray(envelope.result) !== null
+  );
 }
 
 /**
@@ -277,10 +283,41 @@ function sessionStats(envelope) {
   return stats;
 }
 
-function cacheReadShare(usage) {
-  const read = usage?.cache_read_input_tokens ?? 0;
-  const written = usage?.cache_creation_input_tokens ?? 0;
-  return read + written > 0 ? `${Math.round((read / (read + written)) * 100)}%` : "";
+/**
+ * The share of cacheable input read from the cache. A run that reported usage
+ * but touched no cache shows as "none", so a missed prefix stands out rather
+ * than reading like a blank cell.
+ */
+export function cacheReadShare(usage) {
+  if (!usage) return "";
+  const read = usage.cache_read_input_tokens ?? 0;
+  const written = usage.cache_creation_input_tokens ?? 0;
+  return read + written > 0 ? `${Math.round((read / (read + written)) * 100)}%` : "none";
+}
+
+/**
+ * One envelope standing for a voter and its wrap-up: the wrap-up's answer,
+ * with turns, duration, cost and cache use summed over both runs, so the
+ * summary reflects the whole voter rather than the short resume.
+ */
+export function mergeWrapUp(original, wrapUp) {
+  const sum = (a, b) => (a == null && b == null ? undefined : (a ?? 0) + (b ?? 0));
+  const usage = {};
+  for (const key of new Set([
+    ...Object.keys(original?.usage ?? {}),
+    ...Object.keys(wrapUp?.usage ?? {}),
+  ])) {
+    const a = original?.usage?.[key];
+    const b = wrapUp?.usage?.[key];
+    usage[key] = typeof a === "number" || typeof b === "number" ? sum(a, b) : (b ?? a);
+  }
+  return {
+    ...wrapUp,
+    num_turns: sum(original?.num_turns, wrapUp?.num_turns),
+    duration_ms: sum(original?.duration_ms, wrapUp?.duration_ms),
+    total_cost_usd: sum(original?.total_cost_usd, wrapUp?.total_cost_usd),
+    usage,
+  };
 }
 
 /**
@@ -298,19 +335,21 @@ function logGroup(out, { label, outcome, envelope, stderr }) {
   out(lines.join("\n") + "\n");
 }
 
+export const SUMMARY_HEADER = [
+  "### Review agent runs",
+  "",
+  "| Agent | Run | Attempt | Waited | Ran | Turns | Cache read | Outcome |",
+  "| --- | --- | --- | --- | --- | --- | --- | --- |",
+  "",
+].join("\n");
+
+export function summaryRow(row) {
+  const secs = (ms) => (ms == null ? "" : `${Math.round(ms / 1000)}s`);
+  return `| ${row.agent} | ${row.run} | ${row.attempt ?? ""} | ${secs(row.waitedMs)} | ${secs(row.ranMs)} | ${row.turns ?? ""} | ${row.cacheRead ?? ""} | ${row.outcome} |\n`;
+}
+
 export function summaryTable(rows) {
-  const lines = [
-    "### Review agent runs",
-    "",
-    "| Agent | Run | Attempt | Turns | Cache read | Outcome |",
-    "| --- | --- | --- | --- | --- | --- |",
-  ];
-  for (const row of rows) {
-    lines.push(
-      `| ${row.agent} | ${row.run} | ${row.attempt ?? ""} | ${row.turns ?? ""} | ${row.cacheRead ?? ""} | ${row.outcome} |`,
-    );
-  }
-  return lines.join("\n") + "\n";
+  return SUMMARY_HEADER + rows.map(summaryRow).join("");
 }
 
 /** Write through a temporary file, so a reader never sees half a result. */
@@ -338,19 +377,42 @@ export async function runAgents({
   logsDir,
   env,
   timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS,
+  primerTimeoutMs = PRIMER_TIMEOUT_MS,
   runClaude = spawnClaude,
   out = (text) => process.stdout.write(text),
+  onRow = () => {},
+  now = Date.now,
 }) {
   const withSlot = createSlotPool(concurrency);
   const rows = [];
+  const record = (row) => {
+    rows.push(row);
+    onRow(row);
+  };
 
-  const run = (args, input) => runClaude({ args, input, env, timeoutMs });
+  const run = (args, input, limitMs = timeoutMs) =>
+    runClaude({ args, input, env, timeoutMs: limitMs });
+
+  /**
+   * Run `fn` in a slot, logging the moment it starts so the log shows the
+   * pool filling as it happens, not only as processes finish. Resolves with
+   * the result and how long the work waited for its slot and then ran.
+   */
+  async function timed(label, fn) {
+    const queuedAt = now();
+    return withSlot(async () => {
+      const startedAt = now();
+      out(`Started ${label}\n`);
+      const result = await fn();
+      return { result, waitedMs: startedAt - queuedAt, ranMs: now() - startedAt };
+    });
+  }
 
   // spec: RUN#prompt-cache-priming
   async function prime(agent) {
     const label = `${agent.key} (primer)`;
-    const result = await withSlot(() =>
-      run(claudeArgs({ model, maxTurns: 1 }), prompts[agent.key]),
+    const { result, waitedMs, ranMs } = await timed(label, () =>
+      run(claudeArgs({ model, maxTurns: 1 }), prompts[agent.key], primerTimeoutMs),
     );
     writeFileSync(join(logsDir, `${agent.key}-primer.json`), result.stdout);
     const envelope = parseEnvelope(result.stdout);
@@ -364,9 +426,11 @@ export async function runAgents({
       );
     }
     logGroup(out, { label, outcome, envelope, stderr: result.stderr });
-    rows.push({
+    record({
       agent: agent.key,
       run: "primer",
+      waitedMs,
+      ranMs,
       turns: envelope?.num_turns,
       cacheRead: cacheReadShare(envelope?.usage),
       outcome,
@@ -383,13 +447,11 @@ export async function runAgents({
       attemptNumber > 1 ? `${label} (attempt ${attemptNumber})` : label;
     const resultPath = join(resultsDir, resultFileName(agent.key, voter, voters));
 
-    return withSlot(async () => {
-      let result = await run(
-        claudeArgs({ model, maxTurns }),
-        prompts[agent.key],
-      );
+    const { result: settled, waitedMs, ranMs } = await timed(fullLabel, async () => {
+      let result = await run(claudeArgs({ model, maxTurns }), prompts[agent.key]);
       let envelope = parseEnvelope(result.stdout);
       let stderr = result.stderr;
+      let wrappedUp = false;
 
       const reason = result.timedOut ? null : wrapUpReason(result, envelope, maxTurns);
       if (reason && envelope?.session_id) {
@@ -403,59 +465,76 @@ export async function runAgents({
         // A failed wrap-up keeps the original result.
         if (resumed.code === 0 && answeredWithArray(resumedEnvelope)) {
           result = resumed;
-          envelope = resumedEnvelope;
+          envelope = mergeWrapUp(envelope, resumedEnvelope);
+          wrappedUp = true;
         }
       }
-
-      // spec: RUN#wrap-up-retries-and-replacements
-      // Written as soon as the attempt settles, so a later failure in the job
-      // still leaves the orchestrator this result.
-      writeAtomic(resultPath, result.stdout);
-
-      let outcome;
-      if (result.timedOut) {
-        outcome = "timed out";
-      } else if (!envelope) {
-        outcome = "crashed";
-      } else if (parseAgentResult(resultPath, agent.key, voters > 1 ? voter : undefined) !== null) {
-        outcome = "usable";
-      } else if (result.code !== 0 && envelope.subtype !== "error_max_turns") {
-        outcome = "crashed";
-      } else {
-        outcome = "empty";
-      }
-
-      writeFileSync(
-        join(logsDir, `${resultFileName(agent.key, voter, voters).replace(/-result\.json$/, "")}-attempt-${attemptNumber}.log`),
-        stderr,
-      );
-      logGroup(out, { label: fullLabel, outcome, envelope, stderr });
-      rows.push({
-        agent: agent.key,
-        run: voters > 1 ? `voter ${voter}` : "voter",
-        attempt: attemptNumber,
-        turns: envelope?.num_turns,
-        cacheRead: cacheReadShare(envelope?.usage),
-        outcome,
-      });
-      return outcome;
+      return { result, envelope, stderr, wrappedUp };
     });
+    const { result, envelope, stderr, wrappedUp } = settled;
+
+    // spec: RUN#wrap-up-retries-and-replacements
+    // Written as soon as the attempt settles, so a later failure in the job
+    // still leaves the orchestrator this result.
+    writeAtomic(resultPath, result.stdout);
+
+    let outcome;
+    if (result.timedOut) {
+      outcome = "timed out";
+    } else if (!envelope) {
+      outcome = "crashed";
+    } else if (parseAgentResult(resultPath, agent.key, voters > 1 ? voter : undefined) !== null) {
+      outcome = "usable";
+    } else if (result.code !== 0 && envelope.subtype !== "error_max_turns") {
+      outcome = "crashed";
+    } else {
+      outcome = "empty";
+    }
+
+    writeFileSync(
+      join(logsDir, `${resultFileName(agent.key, voter, voters).replace(/-result\.json$/, "")}-attempt-${attemptNumber}.log`),
+      stderr,
+    );
+    const shown = wrappedUp ? `${outcome} after wrap-up` : outcome;
+    logGroup(out, { label: fullLabel, outcome: shown, envelope, stderr });
+    record({
+      agent: agent.key,
+      run: voters > 1 ? `voter ${voter}` : "voter",
+      attempt: attemptNumber,
+      waitedMs,
+      ranMs,
+      turns: envelope?.num_turns,
+      cacheRead: cacheReadShare(envelope?.usage),
+      outcome: shown,
+    });
+    return outcome;
   }
 
   // A slot gets one fresh run after its first, whether that first run crashed
   // or came back empty. A timed-out run is not retried, so one slow voter
   // cannot double the length of the review.
   async function voterSlot(agent, voter) {
-    const first = await attempt(agent, voter, 1);
-    if (first === "crashed" || first === "empty") {
-      const what = first === "crashed" ? "retrying it" : "replacing it with a fresh voter";
-      out(`::warning::Agent ${agent.key}${voters > 1 ? ` voter ${voter}` : ""} ${first}; ${what}\n`);
-      const second = await attempt(agent, voter, 2);
-      if (second !== "usable") {
-        out(`::warning::Agent ${agent.key}${voters > 1 ? ` voter ${voter}` : ""} contributes nothing (${second})\n`);
+    const name = `${agent.key}${voters > 1 ? ` voter ${voter}` : ""}`;
+    try {
+      const first = await attempt(agent, voter, 1);
+      if (first === "crashed" || first === "empty") {
+        const what = first === "crashed" ? "retrying it" : "replacing it with a fresh voter";
+        out(`::warning::Agent ${name} ${first}; ${what}\n`);
+        const second = await attempt(agent, voter, 2);
+        if (second !== "usable") {
+          out(`::warning::Agent ${name} contributes nothing (${second})\n`);
+        }
+      } else if (first === "timed out") {
+        out(`::warning::Agent ${name} timed out and contributes nothing\n`);
       }
-    } else if (first === "timed out") {
-      out(`::warning::Agent ${agent.key}${voters > 1 ? ` voter ${voter}` : ""} timed out and contributes nothing\n`);
+    } catch (err) {
+      // An unexpected error costs this voter, never the rest of the review.
+      out(`::warning::Agent ${name} failed unexpectedly and contributes nothing: ${err.message}\n`);
+      record({
+        agent: agent.key,
+        run: voters > 1 ? `voter ${voter}` : "voter",
+        outcome: "error",
+      });
     }
   }
 
@@ -469,7 +548,11 @@ export async function runAgents({
   await Promise.all(
     agents.map(async (agent) => {
       // A primer that fails still releases its voters.
-      await primed.get(agent.key)?.catch(() => {});
+      try {
+        await primed.get(agent.key);
+      } catch (err) {
+        out(`::warning::${agent.key} (primer) failed unexpectedly: ${err.message}\n`);
+      }
       await Promise.all(
         Array.from({ length: voters }, (_, voter) => voterSlot(agent, voter)),
       );
@@ -492,24 +575,32 @@ function readOptional(path) {
   return readFileSync(path, "utf-8");
 }
 
-/** Build each agent's prompt once, so all its runs send the same bytes. */
-export function buildPrompts({ agents, reviewHeroDir, callerBaseDir, common }) {
+/**
+ * Build each agent's prompt once, so all its runs send the same bytes. An
+ * agent whose prompt cannot be read is left out with a warning, so one
+ * misconfigured custom agent costs only itself.
+ */
+export function buildPrompts({ agents, reviewHeroDir, callerBaseDir, common, out = console.log }) {
   const basePrompt = readFileSync(join(reviewHeroDir, "prompts", "agent-prompt.md"), "utf-8");
   const prompts = {};
   for (const agent of agents) {
     if (!isValidAgentKey(agent.key)) {
-      throw new Error(`Invalid agent key: ${agent.key}`);
+      out(`::warning::Skipping agent with invalid key: ${JSON.stringify(agent.key)}`);
+      continue;
     }
     // Custom prompts come from the trusted ref, so a PR cannot inject one.
     const agentPromptPath =
       agent.source === "base"
         ? join(reviewHeroDir, "prompts", `${agent.key}.md`)
         : join(callerBaseDir, ".github", "review-hero", "prompts", `${agent.key}.md`);
-    prompts[agent.key] = buildReviewAgentPrompt({
-      ...common,
-      basePrompt,
-      agentPrompt: readFileSync(agentPromptPath, "utf-8"),
-    });
+    let agentPrompt;
+    try {
+      agentPrompt = readFileSync(agentPromptPath, "utf-8");
+    } catch (err) {
+      out(`::warning::Skipping agent ${agent.key}: cannot read its prompt (${err.message})`);
+      continue;
+    }
+    prompts[agent.key] = buildReviewAgentPrompt({ ...common, basePrompt, agentPrompt });
   }
   return prompts;
 }
@@ -541,15 +632,21 @@ async function main() {
       diff: readFileSync(requireEnv("DIFF_PATH"), "utf-8"),
     },
   });
-  for (const agent of agents) {
+  const runnable = agents.filter((agent) => agent.key in prompts);
+  for (const agent of runnable) {
     console.log(`Prompt for ${agent.key}: ${Buffer.byteLength(prompts[agent.key])} bytes`);
   }
   console.log(
-    `Running ${agents.length} agent(s) × ${voters} voter(s), at most ${concurrency} at once`,
+    `Running ${runnable.length} agent(s) × ${voters} voter(s), at most ${concurrency} at once`,
   );
 
-  const rows = await runAgents({
-    agents,
+  // The summary is written a row at a time, so it survives the step being
+  // stopped at its time limit.
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (summaryPath) appendFileSync(summaryPath, SUMMARY_HEADER);
+
+  await runAgents({
+    agents: runnable,
     prompts,
     voters,
     maxTurns,
@@ -560,11 +657,8 @@ async function main() {
     logsDir,
     env: agentEnv(process.env),
     timeoutMs,
+    onRow: summaryPath ? (row) => appendFileSync(summaryPath, summaryRow(row)) : undefined,
   });
-
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryTable(rows));
-  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

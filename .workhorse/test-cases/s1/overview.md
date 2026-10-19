@@ -5,8 +5,8 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 ## Voter count
 
 - [x] A diff under 100 changed lines runs one voter per agent (verifies spec: RUN)
-- [x] A diff of 100 to 499 changed lines runs the `voters` input (verifies spec: RUN)
-- [x] A diff of 500 or more changed lines runs two more voters than the input (verifies spec: RUN)
+- [x] A diff of 100 or more changed lines runs the `voters` input, however large (verifies spec: RUN)
+- [x] `voters: 1` runs one voter whatever the diff size (verifies spec: RUN)
 - [x] The voter count never exceeds 10, and a nonsense input falls back to one (verifies spec: RUN)
 
 ## Concurrency and priming
@@ -28,6 +28,11 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A slot never gets more than one fresh run (verifies spec: RUN)
 - [x] A timed-out voter is not retried and gets no wrap-up
 - [x] Each slot's result is written under the name the orchestrator scans for (verifies spec: RUN)
+- [x] A prose answer with a stray bracket but no findings array still gets its wrap-up (verifies spec: RUN)
+- [x] A wrap-up sends the same system prompt flag as the voter it resumes
+- [x] A primer gets the short primer time limit (verifies spec: RUN)
+- [x] An unexpected error in one voter costs only that voter (verifies spec: RUN)
+- [x] An agent whose prompt cannot be read, or whose key is invalid, is skipped and the rest run (verifies spec: RUN)
 
 ## Credentials
 
@@ -37,12 +42,20 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 ## The review job
 
 - [ ] A PR edit with no ticked checkbox shows the job as skipped, with no runner started (verifies spec: RUN)
+- [ ] A ticked checkbox with extra whitespace after `[x]` still runs a review (verifies spec: RUN)
+- [ ] Agents stopped at the step's time limit still leave the orchestrator posting from finished voters (verifies spec: RUN)
 - [ ] A ticked checkbox runs the whole review as one job and posts a summary (verifies spec: RUN)
 - [ ] An agent failure part way through still leaves the orchestrator posting from the finished voters (verifies spec: RUN)
 - [ ] A caller with no config on the default branch and a bootstrap branch set reads config from the bootstrap branch
 - [ ] The completion block's `counts.voters` matches the voter tier for the diff (verifies spec: RUN)
 
 ## Logs
+
+- [x] Each process logs a line when it starts (verifies spec: RUN)
+- [x] Each row records how long the process waited for a slot and how long it ran (verifies spec: RUN)
+- [x] A voter's row covers its wrap-up, with turns summed (verifies spec: RUN)
+- [x] Rows reach the job summary as each process settles (verifies spec: RUN)
+- [x] A run that reports usage but touched no cache shows "none" in the cache column
 
 - [x] Each process's log is one collapsible group (verifies spec: RUN)
 - [x] The job summary has a row per process with agent, run, attempt, turns, cache read and outcome (verifies spec: RUN)

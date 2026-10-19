@@ -16,7 +16,7 @@ on:
         type: string
         default: ubuntu-latest
       voters:
-        description: "Voters per agent for a diff of 100 to 499 changed lines (>=2 enables consensus filtering to reduce noise). Smaller diffs run one voter, larger ones two more"
+        description: "Voters per agent for a diff of 100 or more changed lines (>=2 enables consensus filtering to reduce noise). Smaller diffs run one voter"
         type: number
         default: 3
       concurrency:
@@ -64,12 +64,13 @@ jobs:
   # happens once.
   review:
     # Evaluated without starting a runner, so a PR edit that cannot start a
-    # review costs nothing. It approximates the checkbox match; the exact check
-    # is the first step.
+    # review costs nothing. It must match everything the exact check in the
+    # first step would, so it only looks for the checkbox label: a false match
+    # costs a runner start, a missed one costs a review.
     if: >-
       inputs.trigger == 'always' ||
       ((github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'edited') &&
-      contains(github.event.pull_request.body, '[x] **Run Review Hero'))
+      contains(github.event.pull_request.body, '**Run Review Hero'))
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 60
     steps:
@@ -92,16 +93,6 @@ jobs:
             }
             const body = context.payload.pull_request?.body ?? '';
             core.setOutput('should_run', /\[x\]\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(-claude)? -->/.test(body));
-
-      # ── Generate app token ───────────────────────────────────────────
-      - name: Generate app token
-        if: steps.check.outputs.should_run == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.REVIEW_HERO_APP_ID }}
-          private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
 
       # ── Checkouts ────────────────────────────────────────────────────
       # spec: RUN#credentials
@@ -314,8 +305,11 @@ jobs:
       # Every agent and voter runs here as a Claude CLI process, at most
       # `concurrency` at once. Agent processes get an allowlisted environment,
       # and this step carries no GitHub token in the first place.
+      # The step's own time limit sits inside the job's, so a review whose
+      # agents run long still leaves the orchestrator time to post.
       - name: Run review agents
         if: steps.check.outputs.should_run == 'true'
+        timeout-minutes: 45
         env:
           AGENTS: ${{ steps.triage.outputs.agents }}
           VOTERS: ${{ steps.triage.outputs.voters }}
@@ -340,9 +334,22 @@ jobs:
           CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ steps.triage.outputs.agent_provider == 'openrouter' && '1000000' || '' }}
         run: node .review-hero/scripts/run-agents.mjs
 
+      # ── Generate app token ───────────────────────────────────────────
+      # Minted just before posting, so it is fresh however long the agents
+      # took, and never exists on the runner while they run.
+      - name: Generate app token
+        if: always() && steps.check.outputs.should_run == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.REVIEW_HERO_APP_ID }}
+          private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       # ── Orchestrate ──────────────────────────────────────────────────
-      # Runs even when agents failed, and posts from whatever results were
-      # written: each voter's result lands as soon as it settles.
+      # Runs even when agents failed or ran out of time, and posts from
+      # whatever results were written: each voter's result lands as soon as it
+      # settles.
       - name: Run orchestrator
         if: always() && steps.check.outputs.should_run == 'true'
         env:
