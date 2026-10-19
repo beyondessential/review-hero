@@ -15,12 +15,13 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] `concurrency` 0 or unset means no ceiling; anything but a whole number is rejected (verifies spec: RUN)
 - [x] With no ceiling and memory to spare, everything starts at once (verifies spec: RUN)
 - [x] Processes fill memory up to 80%, leaving room for running ones to grow to the largest footprint (verifies spec: RUN)
-- [x] A measured process-tree footprint replaces the assumed one (verifies spec: RUN)
+- [x] A measured process-tree footprint larger than the assumed one replaces it (verifies spec: RUN)
+- [x] A small early measurement does not shrink the estimate below the assumed footprint (verifies spec: RUN)
 - [x] One process always runs, however full memory is (verifies spec: RUN)
 - [x] A 429 or 529 retry pauses new starts for its delay and lowers the running limit (verifies spec: RUN)
 - [x] Each unthrottled finish raises a lowered limit by one (verifies spec: RUN)
 - [x] Other API retries are counted but do not throttle
-- [x] The CLI streams events; the runner keeps the result event as the envelope, or the raw tail when there is none
+- [x] The CLI streams events; the runner keeps the result event as the envelope, and the raw tail apart from it when there is none
 - [x] Rate-limit retries from a run reach the scheduler and the summary row (verifies spec: RUN)
 - [x] The Linux probe measures a real process tree
 - [ ] On a real review, the summary shows peak memory per process and the pool fills past the old cap of 8 (verifies spec: RUN)
@@ -38,6 +39,8 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] An empty voter is replaced once by a fresh voter (verifies spec: RUN)
 - [x] A slot never gets more than one fresh run (verifies spec: RUN)
 - [x] A timed-out voter is not retried and gets no wrap-up
+- [x] A run with no result event writes a result marked failed, never its raw output, so it counts as a failed run (verifies spec: RUN)
+- [x] A process past its time limit is stopped along with the processes it spawned (verifies spec: RUN)
 - [x] Each slot's result is written under the name the orchestrator scans for (verifies spec: RUN)
 - [x] A prose answer with a stray bracket but no findings array still gets its wrap-up (verifies spec: RUN)
 - [x] A wrap-up sends the same system prompt flag as the voter it resumes
@@ -45,14 +48,17 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A wrap-up gets the short wrap-up limit, for voters and checkers alike (verifies spec: RUN)
 - [x] Every process's time limit is cut to what is left before the deadline (verifies spec: RUN)
 - [x] A crashed voter gets no fresh run with too little time left, and does with time to spare (verifies spec: RUN)
+- [x] A fresh run queued with time to spare but admitted with too little left starts no process (verifies spec: RUN)
+- [x] Work admitted after the deadline starts no process and is recorded as not started (verifies spec: RUN)
 - [x] A step budget becomes a deadline; no budget means none
 - [x] Work waiting out a provider pause keeps the process alive with nothing running (verifies spec: RUN)
-- [x] An unexpected error in one voter costs only that voter (verifies spec: RUN)
+- [x] An unexpected error in one voter costs only that voter, and writes a result marked failed (verifies spec: RUN)
 - [x] An agent whose prompt cannot be read, or whose key is invalid, is skipped and the rest run (verifies spec: RUN)
 
 ## Second look
 
 - [x] Consensus names contested areas only from findings it dropped, each finding in one group at most (verifies spec: RUN)
+- [x] A group the model names as contested but already at the majority is left out (verifies spec: RUN)
 - [x] Consensus names at most three contested areas per agent (verifies spec: RUN)
 - [x] A bare array reply from the consensus model still works, with nothing contested
 - [x] A single voter has no consensus and nothing contested (verifies spec: RUN)

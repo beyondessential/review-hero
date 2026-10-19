@@ -105,6 +105,20 @@ test("a measured footprint replaces the assumed one", async () => {
   await Promise.all([first, second, ...rest]);
 });
 
+test("a small early measurement does not shrink the assumed footprint", async () => {
+  // Measured moments after starting, the first tree is tiny. 2 GB used of 10
+  // with 2 GB assumed per tree still admits only three, as with no measurement.
+  const memory = fakeMemory({ sizes: { 101: 0.1 * GB } });
+  const h = harness(createScheduler({ memory, defaultFootprint: 2 * GB, pollMs: 1 }));
+  const done = [h.submit("first", 101), ...Array.from({ length: 4 }, (_, i) => h.submit(i))];
+  await tick();
+  assert.equal(h.active(), 3);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all(done);
+});
+
 test("one piece of work always runs, however full memory is", async () => {
   const h = harness(createScheduler({ memory: fakeMemory({ used: 9.5 * GB }), pollMs: 1 }));
   const done = [h.submit("a"), h.submit("b")];

@@ -6,9 +6,9 @@
  * the provider's rate limits, not a fixed count:
  *
  * - Memory: a process starts while the runner's memory use, plus the largest
- *   footprint any agent process tree has reached so far for the newcomer, plus
- *   room for running processes still to grow to that footprint, stays at or
- *   under the fill target
+ *   footprint any agent process tree has reached so far (never less than an
+ *   assumed allowance) for the newcomer, plus room for running processes
+ *   still to grow to that footprint, stays at or under the fill target
  * - Provider: when a running process reports a rate-limit or overload retry,
  *   no process starts for the delay the provider asked for, and the running
  *   limit drops below the count at that moment. Each process that finishes
@@ -25,7 +25,7 @@ import { readFileSync, readdirSync } from "node:fs";
 /** Fill the runner up to this share of its memory. */
 export const MEMORY_FILL_TARGET = 0.8;
 
-/** Footprint assumed for an agent process tree before any has been measured. */
+/** The least footprint assumed for an agent process tree, measured or not. */
 export const DEFAULT_FOOTPRINT_BYTES = 250 * 1024 * 1024;
 
 /** How often running process trees are measured and waiting work re-checked. */
@@ -74,6 +74,41 @@ function parentPids() {
   return parents;
 }
 
+function childPids() {
+  const children = new Map();
+  for (const [pid, ppid] of parentPids()) {
+    if (!children.has(ppid)) children.set(ppid, []);
+    children.get(ppid).push(pid);
+  }
+  return children;
+}
+
+function treeOf(children, root) {
+  const tree = [];
+  const stack = [root];
+  const seen = new Set();
+  while (stack.length > 0) {
+    const pid = stack.pop();
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    tree.push(pid);
+    stack.push(...(children.get(pid) ?? []));
+  }
+  return tree;
+}
+
+/**
+ * A process and everything it has spawned, root first. Just the root where
+ * there is no `/proc` to read.
+ */
+export function processTree(root) {
+  try {
+    return treeOf(childPids(), root);
+  } catch {
+    return [root];
+  }
+}
+
 /**
  * Memory readings from `/proc`, or null where there is no `/proc` to read.
  * `treeRss` sums the resident memory of each root process and everything it
@@ -92,24 +127,11 @@ export function linuxMemoryProbe() {
       return { total: MemTotal, used: MemTotal - MemAvailable };
     },
     treeRss(roots) {
-      const parents = parentPids();
-      const children = new Map();
-      for (const [pid, ppid] of parents) {
-        if (!children.has(ppid)) children.set(ppid, []);
-        children.get(ppid).push(pid);
-      }
+      const children = childPids();
       const sizes = new Map();
       for (const root of roots) {
         let total = 0;
-        const stack = [root];
-        const seen = new Set();
-        while (stack.length > 0) {
-          const pid = stack.pop();
-          if (seen.has(pid)) continue;
-          seen.add(pid);
-          total += rssBytes(pid);
-          stack.push(...(children.get(pid) ?? []));
-        }
+        for (const pid of treeOf(children, root)) total += rssBytes(pid);
         sizes.set(root, total);
       }
       return sizes;
@@ -172,7 +194,9 @@ export function createScheduler({
     if (running.size === 0) return null;
     if (running.size >= providerLimit) return "provider limit";
     if (memory) {
-      const estimate = footprint || defaultFootprint;
+      // Never below the assumed footprint: the first measurement comes moments
+      // after a process starts, long before it has grown to its working size.
+      const estimate = Math.max(footprint, defaultFootprint);
       const { total, used } = memory.usage();
       let growth = 0;
       for (const work of running) growth += Math.max(0, estimate - (work.current ?? 0));

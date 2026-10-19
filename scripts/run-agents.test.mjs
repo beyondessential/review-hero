@@ -18,6 +18,7 @@ import {
   wrapUpReason,
 } from "./run-agents.mjs";
 import { RESULT_FILE_PATTERN, resultFileName } from "./lib.mjs";
+import { parseAgentResult } from "../src/index.mjs";
 
 // ── Fake Claude CLI ──────────────────────────────────────────────────────────
 
@@ -401,6 +402,56 @@ test("a crashed voter still gets its fresh run with time to spare", async () => 
   assert.deepEqual(result.map((r) => r.outcome), ["crashed", "usable"]);
 });
 
+test("work admitted after the deadline starts no process", async () => {
+  let clock = 0;
+  const fake = fakeClaude();
+  const { resultsDir, output, rows } = review(fake, { voters: 1, now: () => clock, deadline: 0 });
+  const result = await rows;
+  assert.equal(fake.calls.length, 0);
+  assert.deepEqual(result.map((r) => r.outcome), ["not started"]);
+  assert.ok(output.includes("Not starting bugs: too little time left\n"));
+  assert.equal(parseAgentResult(join(resultsDir, "bugs-result.json"), "bugs"), null);
+});
+
+test("a fresh run admitted with too little time left does not start", async () => {
+  // One slot: bugs crashes with time to spare, so its fresh run is queued,
+  // but design's run uses up the time before the fresh run is admitted.
+  let clock = 0;
+  const deadline = 20 * 60 * 1000;
+  const fake = fakeClaude((call) => {
+    if (call.agent === "bugs") return CRASH;
+    clock = deadline - MIN_FRESH_RUN_MS + 1;
+    return USABLE;
+  });
+  const agents = ["bugs", "design"].map((key) => ({ key, source: "base" }));
+  const result = await review(fake, { agents, voters: 1, concurrency: 1, now: () => clock, deadline }).rows;
+  assert.equal(fake.calls.length, 2);
+  assert.deepEqual(result.map((r) => `${r.agent} ${r.outcome}`), ["bugs crashed", "design usable", "bugs not started"]);
+});
+
+test("a run with no result writes one marked failed, never its raw output", async () => {
+  // Cut part way through a line, a stream's tail can still hold an array that
+  // would read as an empty set of findings.
+  const rawTail = 'ool_use"}]}}\n{"type":"assistant","message":{"content":[{"type":"text","text":"Reading"}]}}\n';
+  const fake = fakeClaude(() => ({ code: 143, timedOut: true, stdout: "", rawTail, stderr: "" }));
+  const { resultsDir, rows } = review(fake, { voters: 1 });
+  const [row] = await rows;
+  assert.equal(row.outcome, "timed out");
+  const resultPath = join(resultsDir, "bugs-result.json");
+  assert.equal(JSON.parse(readFileSync(resultPath, "utf-8")).is_error, true);
+  assert.equal(parseAgentResult(resultPath, "bugs"), null);
+});
+
+test("a voter that fails unexpectedly writes a result marked failed", async () => {
+  const runClaude = () => {
+    throw new Error("unexpected");
+  };
+  const { resultsDir, rows } = review(fakeClaude(), { voters: 1, runClaude });
+  const [row] = await rows;
+  assert.equal(row.outcome, "error");
+  assert.equal(parseAgentResult(join(resultsDir, "bugs-result.json"), "bugs"), null);
+});
+
 test("a step budget becomes a deadline, and no budget means none", () => {
   const now = () => 1000;
   assert.equal(deadlineFrom("60000", now), 61000);
@@ -522,7 +573,7 @@ function stubClaude(body) {
 test("spawning the CLI feeds it the prompt and collects its output and exit code", async () => {
   const env = stubClaude('cat; echo "$1" >&2; exit 3');
   const result = await spawnClaude({ args: ["-p"], input: "the prompt", env, timeoutMs: 10_000 });
-  assert.deepEqual(result, { code: 3, timedOut: false, stdout: "the prompt", stderr: "-p\n" });
+  assert.deepEqual(result, { code: 3, timedOut: false, stdout: "", rawTail: "the prompt", stderr: "-p\n" });
 });
 
 test("spawning the CLI hands over each streamed event and keeps the result event as its output", async () => {
@@ -550,11 +601,12 @@ test("spawning the CLI hands over each streamed event and keeps the result event
   assert.equal(pids[1], -pids[0]);
 });
 
-test("a run that never reaches a result event keeps the tail of its raw output", async () => {
+test("a run that never reaches a result event keeps the tail of its raw output apart from its result", async () => {
   const env = stubClaude("cat > /dev/null; echo 'Error: something broke'; exit 1");
   const result = await spawnClaude({ args: [], input: "", env, timeoutMs: 10_000 });
   assert.equal(result.code, 1);
-  assert.equal(result.stdout, "Error: something broke\n");
+  assert.equal(result.stdout, "");
+  assert.equal(result.rawTail, "Error: something broke\n");
 });
 
 test("the CLI streams its output so retries can be seen", async () => {
@@ -581,6 +633,15 @@ test("a process past its time limit is stopped and reported as timed out", async
   const env = stubClaude("exec sleep 30");
   const result = await spawnClaude({ args: [], input: "", env, timeoutMs: 100 });
   assert.equal(result.timedOut, true);
+});
+
+test("a process past its time limit is stopped along with the processes it spawned", async () => {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "run-agents-child-")), "pid");
+  const env = stubClaude(`cat > /dev/null; sleep 30 & echo $! > ${pidFile}; wait`);
+  const result = await spawnClaude({ args: [], input: "", env, timeoutMs: 200 });
+  assert.equal(result.timedOut, true);
+  const child = Number(readFileSync(pidFile, "utf-8"));
+  assert.throws(() => process.kill(child, 0));
 });
 
 test("a CLI that cannot be found reports a failed run rather than throwing", async () => {

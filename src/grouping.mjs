@@ -121,8 +121,9 @@ Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "
       droppedFindings.push(rest);
     });
 
-    // A contested group may only hold findings consensus dropped, and each
-    // finding belongs to one group at most.
+    // A contested group may only hold findings consensus dropped, each
+    // finding belongs to one group at most, and the group must be below the
+    // majority: one at it is a duplicate of a kept finding, not a dispute.
     const claimed = new Set();
     const contested = [];
     for (const area of parsed.contested.slice(0, MAX_CONTESTED_AREAS)) {
@@ -132,14 +133,16 @@ Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "
           (i) => validIndex(i) && !keptIndices.has(i) && !claimed.has(i),
         );
         if (members.length === 0) continue;
-        for (const i of members) claimed.add(i);
         const memberFindings = members.map((i) => findings[i]);
+        const supporters = new Set(memberFindings.map((f) => f.voter)).size;
+        if (supporters >= threshold) continue;
+        for (const i of members) claimed.add(i);
         const { voter, ...representative } = memberFindings[0];
         groups.push({
           representative,
           members: memberFindings,
           dropped: members.map((i) => droppedAt.get(i)),
-          supporters: new Set(memberFindings.map((f) => f.voter)).size,
+          supporters,
         });
       }
       if (groups.length > 0) contested.push({ area: area.area, groups });

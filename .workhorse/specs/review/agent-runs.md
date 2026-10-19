@@ -19,7 +19,9 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] Consensus has a time limit of its own, and when it leaves no outcome the orchestrator posts every agent finding without consensus, with a warning in the job log.
 - [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
 - [ ] The agents and the second look each work to a deadline a little inside their time limit: every process stops by it, so its result is written before the limit is reached.
-- [ ] A fresh run for a crashed or empty voter starts only when enough time is left before the deadline for it to be useful.
+- [ ] A fresh run for a crashed or empty voter starts only when enough time is left before the deadline for it to be useful, judged when it would start.
+- [ ] An agent process due to start with no time left before its deadline does not start, and is recorded as not started.
+- [ ] An agent process stopped at its time limit is stopped along with every process it spawned.
 - [ ] The job keeps running while agent processes wait out a provider pause, even with none running.
 - [ ] An agent whose prompt cannot be read is left out with a warning, and the other agents still run.
 
@@ -36,7 +38,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 
 - [ ] Agent processes start while the runner's memory use stays at or under 80%, counting for the next process, and for each running one still below it, the largest footprint an agent process has reached so far in the review.
 - [ ] An agent process's footprint is the memory of its whole process tree, measured while it runs.
-- [ ] Until a footprint has been measured, an agent process is assumed to need a fixed allowance.
+- [ ] An agent process is assumed to need at least a fixed allowance, whatever has been measured so far, since the first measurement comes before a process has grown.
 - [ ] When an agent process reports that the provider is rate limiting or overloaded, no new process starts for the retry delay the provider asked for, and the number allowed to run drops below the number running at that moment.
 - [ ] Each agent process that finishes without having been rate limited raises that number by one.
 - [ ] `concurrency` is an optional workflow input capping how many agent processes run at once, with no cap by default.
@@ -58,6 +60,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] A voter whose process exits abnormally is retried once, from scratch.
 - [ ] A voter that still has no usable findings after its wrap-up is replaced once by a fresh voter.
 - [ ] A voter left without usable findings after its retry or replacement contributes nothing, and the review carries on.
+- [ ] A voter that produced no result of its own, whether it timed out, crashed, failed unexpectedly or never started, has its result recorded as failed, so it counts as a failed agent run.
 - [ ] Each voter's result is written as soon as it finishes, so results from finished voters survive a later failure in the job.
 - [ ] An unexpected error in one voter costs only that voter.
 
@@ -68,6 +71,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] Consensus runs as its own step after the agents finish, before the GitHub App token is created.
 - [ ] While grouping an agent's findings, the consensus model names its contested areas: parts of the code where findings below the majority suggest a real problem worth a second look.
 - [ ] An agent has at most three contested areas.
+- [ ] Every finding in a contested area belongs to a group below the majority.
 - [ ] A review that runs one voter per agent has no consensus, so no second look.
 - [ ] Each contested area gets as many checkers as a finding from a single voter needs to reach the majority.
 - [ ] A checker is a fresh run of the area's agent, given the diff and the area's findings, which reads the code with the same read-only tools and confirms or rejects each finding.

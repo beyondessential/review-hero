@@ -38,6 +38,7 @@ import {
   cacheReadShare,
   createProcessRunner,
   deadlineFrom,
+  runOutput,
   runWithWrapUp,
   WRAP_UP_TIMEOUT_MS,
   spawnClaude,
@@ -155,7 +156,7 @@ export async function runSecondLook({
   const { timed } = createProcessRunner({ scheduler, env, runClaude, timeoutMs, deadline, now, out });
   const count = checkersPerArea(consensus.voters);
   const rows = [];
-  const settled = consensus.contested.map((area) => area.groups.map(() => 0));
+  const tallies = consensus.contested.map((area) => area.groups.map(() => 0));
 
   const confirmationsByArea = await Promise.all(
     consensus.contested.map(async (area, i) => {
@@ -164,7 +165,7 @@ export async function runSecondLook({
         Array.from({ length: count }, async (_, checker) => {
           const label = `${area.agent} area ${i} checker ${checker}`;
           try {
-            const { result: settled, waitedMs, ranMs, peakBytes, retries } = await timed(label, (run) =>
+            const { result: checked, waitedMs, ranMs, peakBytes, retries } = await timed(label, (run) =>
               runWithWrapUp({
                 run,
                 prompt: prompts[i],
@@ -176,11 +177,17 @@ export async function runSecondLook({
                 wrapUpTimeoutMs: Math.min(WRAP_UP_TIMEOUT_MS, timeoutMs),
               }),
             );
-            const { result, envelope, stderr, wrappedUp } = settled;
-            writeFileSync(join(logsDir, `${area.agent}-area-${i}-checker-${checker}.json`), result.stdout);
+            const { result, envelope, stderr, wrappedUp } = checked;
+            writeFileSync(join(logsDir, `${area.agent}-area-${i}-checker-${checker}.json`), runOutput(result));
             const answer = typeof envelope?.result === "string" ? envelope.result : null;
             const verdicts = answer === null ? null : extractJsonArray(answer);
-            let outcome = result.timedOut ? "timed out" : verdicts ? "answered" : "no verdicts";
+            let outcome = result.notStarted
+              ? "not started"
+              : result.timedOut
+                ? "timed out"
+                : verdicts
+                  ? "answered"
+                  : "no verdicts";
             if (wrappedUp) outcome += " after wrap-up";
             out(
               `::group::${label}: ${outcome}\n${stderr.trim() ? `${stderr.trimEnd()}\n` : ""}${answer ?? ""}\n::endgroup::\n`,
@@ -209,9 +216,9 @@ export async function runSecondLook({
           }
         }),
       );
-      settled[i] = tallyConfirmations(answers, area.groups.length);
-      onProgress(settled.map((tally) => [...tally]));
-      return settled[i];
+      tallies[i] = tallyConfirmations(answers, area.groups.length);
+      onProgress(tallies.map((tally) => [...tally]));
+      return tallies[i];
     }),
   );
 

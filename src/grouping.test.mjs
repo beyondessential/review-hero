@@ -25,7 +25,8 @@ test("consensus names contested areas from groups below the majority", async () 
     keep: [0],
     contested: [{ area: "retry loop", groups: [[2, 3]] }],
   });
-  const { kept, droppedFindings, contested } = await applyConsensus(findings, 3, async () => reply);
+  // Five voters, so the two behind the retry findings fall short of the three needed.
+  const { kept, droppedFindings, contested } = await applyConsensus(findings, 5, async () => reply);
   assert.deepEqual(kept.map((f) => f.line), [10]);
   assert.equal(contested.length, 1);
   const [area] = contested;
@@ -47,6 +48,17 @@ test("a contested group cannot hold a kept finding or one already claimed", asyn
   });
   const { contested } = await applyConsensus(findings, 3, async () => reply);
   assert.deepEqual(contested.map((a) => a.groups.map((g) => g.members.map((m) => m.line))), [[[40]], [[90]]]);
+});
+
+test("a group already at the majority is not contested", async () => {
+  // Two of three voters is the majority: such a group duplicates a finding
+  // consensus kept, and a second look must not promote it unchecked.
+  const reply = JSON.stringify({
+    keep: [0],
+    contested: [{ area: "retry loop", groups: [[2, 3], [4]] }],
+  });
+  const { contested } = await applyConsensus(findings, 3, async () => reply);
+  assert.deepEqual(contested.map((a) => a.groups.map((g) => g.members.map((m) => m.line))), [[[90]]]);
 });
 
 test("consensus names at most the cap of contested areas", async () => {

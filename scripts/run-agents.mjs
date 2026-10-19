@@ -44,6 +44,7 @@
 import { spawn } from "node:child_process";
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -52,7 +53,7 @@ import {
 import { join } from "node:path";
 
 import { formatCacheStats, getEnvOrThrow, readOptional, resultFileName } from "./lib.mjs";
-import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
+import { createScheduler, linuxMemoryProbe, parseCeiling, processTree } from "./scheduler.mjs";
 import {
   buildReviewAgentPrompt,
   extractJsonArray,
@@ -136,8 +137,11 @@ const RAW_TAIL_BYTES = 64 * 1024;
  * The CLI streams JSON events, one per line. Each is handed to `onEvent` as it
  * arrives (rate-limit retries among them), and `stdout` resolves to the final
  * result event: the same envelope `--output-format json` would print. A run
- * that never reached a result resolves with the tail of its raw output.
+ * that never reached a result has an empty `stdout`, and the tail of its raw
+ * output in `rawTail` for diagnosis. That tail is never a result: cut part way
+ * through a line, it can still hold a JSON array that reads as findings.
  * `onSpawn` and `onExit` report the process id, so its memory can be measured.
+ * A run past its time limit is stopped along with every process it spawned.
  */
 export function spawnClaude({ args, input, env, timeoutMs, onSpawn = () => {}, onExit = () => {}, onEvent = () => {} }) {
   return new Promise((resolve) => {
@@ -183,16 +187,28 @@ export function spawnClaude({ args, input, env, timeoutMs, onSpawn = () => {}, o
       resolve({
         code,
         timedOut,
-        stdout: resultLine ?? rawTail,
+        stdout: resultLine ?? "",
+        ...(resultLine === null && { rawTail }),
         stderr,
       });
     };
 
+    // The CLI runs ripgrep and git as children, which would otherwise outlive
+    // it and hold its output open.
+    const killTree = (signal) => {
+      for (const pid of processTree(child.pid)) {
+        try {
+          process.kill(pid, signal);
+        } catch {
+          // Already gone.
+        }
+      }
+    };
     let killTimer;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+      killTree("SIGTERM");
+      killTimer = setTimeout(() => killTree("SIGKILL"), KILL_GRACE_MS);
     }, timeoutMs);
 
     child.stdout.setEncoding("utf-8");
@@ -414,6 +430,19 @@ function writeAtomic(path, contents) {
   renameSync(tmp, path);
 }
 
+/**
+ * The result written for a run that left no envelope of its own, so whoever
+ * reads it later counts the run as failed.
+ */
+export function failedEnvelope(subtype) {
+  return JSON.stringify({ type: "result", subtype, is_error: true });
+}
+
+/** What a run left behind for diagnosis: its result, or its raw output. */
+export function runOutput(result) {
+  return result.stdout || result.rawTail || "";
+}
+
 // ── Admission and deadline ───────────────────────────────────────────────────
 
 /** A fresh run for a crashed or empty voter only starts with this much time left. */
@@ -429,13 +458,18 @@ export function deadlineFrom(budgetMs, now = Date.now) {
   return Number.isFinite(budget) && budget > 0 ? now() + budget : Infinity;
 }
 
+/** What a run resolves with when there was no time left to start it. */
+export const NOT_STARTED = Object.freeze({ code: -1, timedOut: false, notStarted: true, stdout: "", stderr: "" });
+
 /**
  * Admission for agent processes, shared by the agent and checker drivers.
- * `timed(label, fn)` waits for the scheduler to admit the work, logs the
- * moment it starts, and hands `fn` a CLI runner `run(args, input, limitMs)`
- * wired to the scheduler, so the processes it starts are measured and their
- * rate-limit retries hold back further starts. Every process's time limit is
- * cut to what is left before `deadline`, so no run outlasts the step.
+ * `timed(label, fn, { minTimeMs })` waits for the scheduler to admit the work,
+ * logs the moment it starts, and hands `fn` a CLI runner
+ * `run(args, input, limitMs)` wired to the scheduler, so the processes it
+ * starts are measured and their rate-limit retries hold back further starts.
+ * Every process's time limit is cut to what is left before `deadline`, so no
+ * run outlasts the step. Work admitted with no time left, or less than
+ * `minTimeMs`, starts no process: its runner resolves with `NOT_STARTED`.
  * `timeLeft()` says how long remains.
  */
 export function createProcessRunner({
@@ -448,19 +482,24 @@ export function createProcessRunner({
   out,
 }) {
   const timeLeft = () => Math.max(0, deadline - now());
-  function timed(label, fn) {
+  function timed(label, fn, { minTimeMs = 0 } = {}) {
     return scheduler.withSlot((slot) => {
-      out(`Started ${label}\n`);
-      const run = (args, input, limitMs = timeoutMs) =>
-        runClaude({
+      const left = timeLeft();
+      const admitted = left > 0 && left >= minTimeMs;
+      out(admitted ? `Started ${label}\n` : `Not starting ${label}: too little time left\n`);
+      const run = (args, input, limitMs = timeoutMs) => {
+        const limit = Math.min(limitMs, timeLeft());
+        if (!admitted || limit <= 0) return Promise.resolve(NOT_STARTED);
+        return runClaude({
           args,
           input,
           env,
-          timeoutMs: Math.min(limitMs, timeLeft()),
+          timeoutMs: limit,
           onSpawn: slot.onSpawn,
           onExit: slot.onExit,
           onEvent: slot.onEvent,
         });
+      };
       return fn(run);
     });
   }
@@ -507,13 +546,13 @@ export async function runAgents({
     const { result, waitedMs, ranMs, peakBytes, retries } = await timed(label, (run) =>
       run(claudeArgs({ model, maxTurns: 1 }), prompts[agent.key], primerTimeoutMs),
     );
-    writeFileSync(join(logsDir, `${agent.key}-primer.json`), result.stdout);
+    writeFileSync(join(logsDir, `${agent.key}-primer.json`), runOutput(result));
     const envelope = parseEnvelope(result.stdout);
     const written = envelope?.usage?.cache_creation_input_tokens ?? 0;
     // Hitting the one-turn cap is the expected way for a primer to end. What
     // matters is whether the first request wrote the prefix.
-    const outcome = written > 0 ? "primed" : "wrote no cache";
-    if (written === 0) {
+    const outcome = result.notStarted ? "not started" : written > 0 ? "primed" : "wrote no cache";
+    if (outcome === "wrote no cache") {
       out(
         `::warning::${label} wrote no cache tokens; its voters will not share a prefix\n`,
       );
@@ -535,32 +574,47 @@ export async function runAgents({
   // One attempt at a voter slot: the run itself, then its wrap-up resume when
   // it needs one. The slot is held across both, so a resume does not queue
   // behind fresh work while its session is still warm.
-  async function attempt(agent, voter, attemptNumber) {
+  async function attempt(agent, voter, attemptNumber, { minTimeMs } = {}) {
     const label =
       voters > 1 ? `${agent.key} voter ${voter}` : agent.key;
     const fullLabel =
       attemptNumber > 1 ? `${label} (attempt ${attemptNumber})` : label;
     const resultPath = join(resultsDir, resultFileName(agent.key, voter, voters));
+    const logBase = join(logsDir, `${resultFileName(agent.key, voter, voters).replace(/-result\.json$/, "")}-attempt-${attemptNumber}`);
 
-    const { result: settled, waitedMs, ranMs, peakBytes, retries } = await timed(fullLabel, (run) =>
-      runWithWrapUp({
-        run,
-        prompt: prompts[agent.key],
-        model,
-        maxTurns,
-        label: fullLabel,
-        out,
-      }),
+    const { result: settled, waitedMs, ranMs, peakBytes, retries } = await timed(
+      fullLabel,
+      (run) =>
+        runWithWrapUp({
+          run,
+          prompt: prompts[agent.key],
+          model,
+          maxTurns,
+          label: fullLabel,
+          out,
+        }),
+      { minTimeMs },
     );
     const { result, envelope, stderr, wrappedUp } = settled;
 
     // spec: RUN#wrap-up-retries-and-replacements
     // Written as soon as the attempt settles, so a later failure in the job
-    // still leaves the orchestrator this result.
-    writeAtomic(resultPath, result.stdout);
+    // still leaves the orchestrator this result. A run with no envelope
+    // writes one marking it failed; its raw output goes to the logs.
+    if (envelope) {
+      writeAtomic(resultPath, result.stdout);
+    } else {
+      writeAtomic(
+        resultPath,
+        failedEnvelope(result.notStarted ? "not_started" : result.timedOut ? "timed_out" : "no_result"),
+      );
+      if (result.rawTail) writeFileSync(`${logBase}.out`, result.rawTail);
+    }
 
     let outcome;
-    if (result.timedOut) {
+    if (result.notStarted) {
+      outcome = "not started";
+    } else if (result.timedOut) {
       outcome = "timed out";
     } else if (!envelope) {
       outcome = "crashed";
@@ -572,10 +626,7 @@ export async function runAgents({
       outcome = "empty";
     }
 
-    writeFileSync(
-      join(logsDir, `${resultFileName(agent.key, voter, voters).replace(/-result\.json$/, "")}-attempt-${attemptNumber}.log`),
-      stderr,
-    );
+    writeFileSync(`${logBase}.log`, stderr);
     const shown = wrappedUp ? `${outcome} after wrap-up` : outcome;
     logGroup(out, { label: fullLabel, outcome: shown, envelope, stderr });
     record({
@@ -594,8 +645,9 @@ export async function runAgents({
   }
 
   // A slot gets one fresh run after its first, whether that first run crashed
-  // or came back empty. A timed-out run is not retried, so one slow voter
-  // cannot double the length of the review.
+  // or came back empty, as long as it is admitted with enough time left to be
+  // useful. A timed-out run is not retried, so one slow voter cannot double
+  // the length of the review.
   async function voterSlot(agent, voter) {
     const name = `${agent.key}${voters > 1 ? ` voter ${voter}` : ""}`;
     try {
@@ -605,16 +657,24 @@ export async function runAgents({
       } else if (first === "crashed" || first === "empty") {
         const what = first === "crashed" ? "retrying it" : "replacing it with a fresh voter";
         out(`::warning::Agent ${name} ${first}; ${what}\n`);
-        const second = await attempt(agent, voter, 2);
+        const second = await attempt(agent, voter, 2, { minTimeMs: MIN_FRESH_RUN_MS });
         if (second !== "usable") {
           out(`::warning::Agent ${name} contributes nothing (${second})\n`);
         }
-      } else if (first === "timed out") {
-        out(`::warning::Agent ${name} timed out and contributes nothing\n`);
+      } else if (first === "timed out" || first === "not started") {
+        out(`::warning::Agent ${name} ${first} and contributes nothing\n`);
       }
     } catch (err) {
       // An unexpected error costs this voter, never the rest of the review.
+      // A voter that wrote no result gets one marked failed, so it counts as
+      // a failed run.
       out(`::warning::Agent ${name} failed unexpectedly and contributes nothing: ${err.message}\n`);
+      const resultPath = join(resultsDir, resultFileName(agent.key, voter, voters));
+      try {
+        if (!existsSync(resultPath)) writeAtomic(resultPath, failedEnvelope("error"));
+      } catch {
+        // Nothing more to do: the voter already contributes nothing.
+      }
       record({
         agent: agent.key,
         run: voters > 1 ? `voter ${voter}` : "voter",

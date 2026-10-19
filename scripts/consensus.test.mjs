@@ -48,13 +48,14 @@ test("contested groups point into the combined dropped list across agents", asyn
     tag("design", 1, 20),
     tag("design", 2, 21),
   ];
-  // Each agent keeps its first finding, and design contests its last two.
+  // Each agent keeps its first finding, and design contests its last two,
+  // whose two voters fall short of the three of five needed.
   const callModel = async ({ messages }) =>
     messages[0].content.includes("design")
       ? JSON.stringify({ keep: [0], contested: [{ area: "the loop", groups: [[1, 2]] }] })
       : JSON.stringify({ keep: [0], contested: [] });
 
-  const { kept, dropped, contested } = await runConsensus({ findings, voters: 3, callModel });
+  const { kept, dropped, contested } = await runConsensus({ findings, voters: 5, callModel });
   assert.deepEqual(kept.map((f) => f.line), [1, 10]);
   assert.deepEqual(dropped.map((f) => f.line), [2, 20, 21]);
   assert.equal(contested.length, 1);
