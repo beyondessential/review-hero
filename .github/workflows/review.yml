@@ -75,6 +75,15 @@ jobs:
       (contains(github.event.pull_request.body, '[x] **Run Review Hero') ||
       contains(github.event.pull_request.body, '[x]  **Run Review Hero')))
     runs-on: ${{ inputs.runner }}
+    # Time budget. Each stage has its own limit, and each process limit fits
+    # inside its stage's, so a slow stage is cut short and the orchestrator
+    # always gets to post:
+    #   agents        40 min  (a voter 20, its wrap-up 5; primers 5)
+    #   consensus      8 min
+    #   second look   15 min  (a checker 6, its wrap-up 5)
+    #   setup, token and posting take the rest of the job's 80.
+    # Working files live under runner.temp, which is emptied for every job, so
+    # a reused runner never feeds one review's files into the next.
     timeout-minutes: 80
     steps:
       # ── Trigger check ────────────────────────────────────────────────
@@ -259,15 +268,15 @@ jobs:
         run: |
           gh api \
             -H "Accept: application/vnd.github.diff" \
-            "repos/${{ github.repository }}/compare/${BASE_SHA}...${HEAD_SHA}" > /tmp/pr.diff
+            "repos/${{ github.repository }}/compare/${BASE_SHA}...${HEAD_SHA}" > "$RUNNER_TEMP/pr.diff"
 
       # ── Triage ───────────────────────────────────────────────────────
       - name: Triage
         if: steps.check.outputs.should_run == 'true'
         id: triage
         env:
-          DIFF_PATH: /tmp/pr.diff
-          FILTERED_DIFF_PATH: /tmp/pr-filtered.diff
+          DIFF_PATH: ${{ runner.temp }}/pr.diff
+          FILTERED_DIFF_PATH: ${{ runner.temp }}/pr-filtered.diff
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           REVIEW_HERO_DIR: .review-hero
@@ -279,7 +288,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          node .review-hero/scripts/triage.mjs 2>&1 | tee /tmp/triage-run.log
+          node .review-hero/scripts/triage.mjs 2>&1 | tee "$RUNNER_TEMP/triage-run.log"
           rc=${PIPESTATUS[0]}
           set -e
           if [ "$rc" -ne 0 ]; then
@@ -292,17 +301,17 @@ jobs:
         run: |
           SUPP=".caller-base/.github/review-hero/suppressions.yml"
           if [ -f "$SUPP" ]; then
-            cp "$SUPP" /tmp/suppressions.yml
+            cp "$SUPP" "$RUNNER_TEMP/suppressions.yml"
             echo "Suppressions file found"
           else
-            echo "[]" > /tmp/suppressions.yml
+            echo "[]" > "$RUNNER_TEMP/suppressions.yml"
             echo "No suppressions file"
           fi
 
       # ── Detect AI rules (from trusted ref) ──────────────────────────
       - name: Detect AI rules
         if: steps.check.outputs.should_run == 'true'
-        run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
+        run: sh .review-hero/scripts/detect-ai-rules.sh "$RUNNER_TEMP/ai-rules.md" .caller-base
 
       # ── Run agents ───────────────────────────────────────────────────
       # Every agent and voter runs here as a Claude CLI process. Processes
@@ -321,12 +330,12 @@ jobs:
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           AGENT_PROVIDER: ${{ steps.triage.outputs.agent_provider }}
           CONCURRENCY: ${{ inputs.concurrency }}
-          RESULTS_DIR: /tmp/review-results
-          LOGS_DIR: /tmp/review-logs
+          RESULTS_DIR: ${{ runner.temp }}/review-results
+          LOGS_DIR: ${{ runner.temp }}/review-logs
           REVIEW_HERO_DIR: .review-hero
           CALLER_BASE_DIR: .caller-base
-          DIFF_PATH: /tmp/pr-filtered.diff
-          AI_RULES_PATH: /tmp/ai-rules.md
+          DIFF_PATH: ${{ runner.temp }}/pr-filtered.diff
+          AI_RULES_PATH: ${{ runner.temp }}/ai-rules.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           ANTHROPIC_API_KEY: ${{ steps.triage.outputs.agent_provider != 'openrouter' && (secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY) || '' }}
@@ -349,9 +358,9 @@ jobs:
         # time. If it fails, the orchestrator posts without consensus.
         timeout-minutes: 8
         env:
-          ARTIFACTS_DIR: /tmp/review-results
+          ARTIFACTS_DIR: ${{ runner.temp }}/review-results
           VOTERS: ${{ steps.triage.outputs.voters }}
-          CONSENSUS_PATH: /tmp/consensus.json
+          CONSENSUS_PATH: ${{ runner.temp }}/consensus.json
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
         run: node .review-hero/scripts/consensus.mjs
@@ -364,15 +373,15 @@ jobs:
         if: always() && steps.check.outputs.should_run == 'true' && steps.consensus.outputs.second_look == 'true'
         timeout-minutes: 15
         env:
-          CONSENSUS_PATH: /tmp/consensus.json
+          CONSENSUS_PATH: ${{ runner.temp }}/consensus.json
           AGENTS: ${{ steps.triage.outputs.agents }}
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           CONCURRENCY: ${{ inputs.concurrency }}
-          LOGS_DIR: /tmp/review-logs
+          LOGS_DIR: ${{ runner.temp }}/review-logs
           REVIEW_HERO_DIR: .review-hero
           CALLER_BASE_DIR: .caller-base
-          DIFF_PATH: /tmp/pr-filtered.diff
-          AI_RULES_PATH: /tmp/ai-rules.md
+          DIFF_PATH: ${{ runner.temp }}/pr-filtered.diff
+          AI_RULES_PATH: ${{ runner.temp }}/ai-rules.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           ANTHROPIC_API_KEY: ${{ steps.triage.outputs.agent_provider != 'openrouter' && (secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY) || '' }}
@@ -409,21 +418,21 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_HERO_REF: ${{ inputs.ref }}
-          CONSENSUS_PATH: /tmp/consensus.json
+          CONSENSUS_PATH: ${{ runner.temp }}/consensus.json
           # Posted from without consensus when the consensus step left no outcome.
-          ARTIFACTS_DIR: /tmp/review-results
+          ARTIFACTS_DIR: ${{ runner.temp }}/review-results
           VOTERS: ${{ steps.triage.outputs.voters }}
           AGENT_NAMES: ${{ steps.triage.outputs.agent_names }}
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          SUPPRESSIONS_PATH: /tmp/suppressions.yml
+          SUPPRESSIONS_PATH: ${{ runner.temp }}/suppressions.yml
           GLOBAL_SUPPRESSIONS_PATH: .review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
         run: |
           set -euo pipefail
           set +e
-          node .review-hero/scripts/orchestrate.mjs 2>&1 | tee /tmp/orchestrate-run.log
+          node .review-hero/scripts/orchestrate.mjs 2>&1 | tee "$RUNNER_TEMP/orchestrate-run.log"
           rc=${PIPESTATUS[0]}
           set -e
           if [ "$rc" -ne 0 ]; then
@@ -439,8 +448,8 @@ jobs:
         with:
           name: review-agent-runs-${{ github.run_attempt }}
           path: |
-            /tmp/review-results
-            /tmp/review-logs
-            /tmp/consensus.json
+            ${{ runner.temp }}/review-results
+            ${{ runner.temp }}/review-logs
+            ${{ runner.temp }}/consensus.json
           retention-days: 1
           if-no-files-found: ignore

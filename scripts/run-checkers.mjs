@@ -34,6 +34,7 @@ import {
   agentEnv,
   cacheReadShare,
   runWithWrapUp,
+  WRAP_UP_TIMEOUT_MS,
   spawnClaude,
   summaryHeader,
   summaryRow,
@@ -157,12 +158,12 @@ export async function runSecondLook({
           try {
             const { result: settled, waitedMs, ranMs, peakBytes, retries } = await scheduler.withSlot((slot) => {
               out(`Started ${label}\n`);
-              const run = (args, input) =>
+              const run = (args, input, limitMs = timeoutMs) =>
                 runClaude({
                   args,
                   input,
                   env,
-                  timeoutMs,
+                  timeoutMs: limitMs,
                   onSpawn: slot.onSpawn,
                   onExit: slot.onExit,
                   onEvent: slot.onEvent,
@@ -175,6 +176,7 @@ export async function runSecondLook({
                 label,
                 out,
                 wrapUpMessage: CHECKER_WRAP_UP_MESSAGE,
+                wrapUpTimeoutMs: Math.min(WRAP_UP_TIMEOUT_MS, timeoutMs),
               });
             });
             const { result, envelope, stderr, wrappedUp } = settled;

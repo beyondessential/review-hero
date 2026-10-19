@@ -14,6 +14,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] An event that cannot start a review skips the job without starting a runner: a pull request action other than opened, reopened or edited in checkbox mode, or a description with no ticked Review Hero checkbox.
 - [ ] The exact checkbox match runs as the job's first step, and a mismatch ends the job before any setup.
 - [ ] Checkouts, dependency installs and the Claude CLI install happen once per review.
+- [ ] A review keeps its working files where the runner empties them for every job, so a reused runner never reads one review's results, consensus or rules into the next.
 - [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
 - [ ] Consensus has a time limit of its own, and when it leaves no outcome the orchestrator posts every agent finding without consensus, with a warning in the job log.
 - [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
@@ -50,6 +51,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 
 - [ ] A voter that hits its turn cap, or answers without a findings array, is resumed once and asked for its findings.
 - [ ] A primer run has a much shorter time limit than a voter, since it only needs its first request.
+- [ ] A wrap-up has a short time limit of its own, so a voter and its wrap-up fit inside the agents' time limit.
 - [ ] A voter whose process exits abnormally is retried once, from scratch.
 - [ ] A voter that still has no usable findings after its wrap-up is replaced once by a fresh voter.
 - [ ] A voter left without usable findings after its retry or replacement contributes nothing, and the review carries on.

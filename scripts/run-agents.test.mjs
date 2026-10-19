@@ -12,6 +12,7 @@ import {
   runAgents,
   spawnClaude,
   summaryTable,
+  WRAP_UP_TIMEOUT_MS,
   wrapUpReason,
 } from "./run-agents.mjs";
 import { RESULT_FILE_PATTERN, resultFileName } from "./lib.mjs";
@@ -317,6 +318,15 @@ test("a wrap-up sends the same system prompt flag as the voter it resumes", asyn
   for (const call of fake.calls) {
     assert.ok(call.args.includes("--exclude-dynamic-system-prompt-sections"));
   }
+});
+
+test("a wrap-up gets the short wrap-up limit, not the voter's full one", async () => {
+  const fake = fakeClaude((call) => (call.kind === "resume" ? USABLE : CAPPED));
+  await review(fake, { voters: 1, timeoutMs: 20 * 60 * 1000 }).rows;
+  const [voter, resume] = fake.calls;
+  assert.equal(voter.timeoutMs, 20 * 60 * 1000);
+  assert.equal(resume.timeoutMs, WRAP_UP_TIMEOUT_MS);
+  assert.ok(WRAP_UP_TIMEOUT_MS < voter.timeoutMs);
 });
 
 test("a primer gets the short primer time limit, and voters the full one", async () => {

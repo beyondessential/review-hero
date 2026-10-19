@@ -42,6 +42,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A prose answer with a stray bracket but no findings array still gets its wrap-up (verifies spec: RUN)
 - [x] A wrap-up sends the same system prompt flag as the voter it resumes
 - [x] A primer gets the short primer time limit (verifies spec: RUN)
+- [x] A wrap-up gets the short wrap-up limit, for voters and checkers alike (verifies spec: RUN)
 - [x] An unexpected error in one voter costs only that voter (verifies spec: RUN)
 - [x] An agent whose prompt cannot be read, or whose key is invalid, is skipped and the rest run (verifies spec: RUN)
 
@@ -82,6 +83,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [ ] A ticked checkbox runs the whole review as one job and posts a summary (verifies spec: RUN)
 - [ ] An agent failure part way through still leaves the orchestrator posting from the finished voters (verifies spec: RUN)
 - [ ] A caller with no config on the default branch and a bootstrap branch set reads config from the bootstrap branch
+- [ ] On a self-hosted runner, a second review reads none of the first review's results or consensus outcome (verifies spec: RUN)
 - [ ] The completion block's `counts.voters` matches the voter tier for the diff (verifies spec: RUN)
 
 ## Logs

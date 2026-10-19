@@ -229,3 +229,31 @@ test("each area's verdicts are handed over as soon as it settles", async () => {
   await running;
   assert.deepEqual(progress.at(-1), [[1, 0], [1, 0]]);
 });
+
+test("a checker's wrap-up gets the shorter of the wrap-up and checker limits", async () => {
+  const calls = [];
+  const capped = JSON.stringify({ subtype: "error_max_turns", session_id: "s" });
+  const runClaude = async ({ args, timeoutMs }) => {
+    const resume = args.includes("--resume");
+    calls.push({ resume, timeoutMs });
+    return resume
+      ? { code: 0, timedOut: false, stdout: JSON.stringify({ result: answer([[0, "confirm"]]) }), stderr: "" }
+      : { code: 1, timedOut: false, stdout: capped, stderr: "" };
+  };
+  await runSecondLook({
+    consensus: consensus(3),
+    prompts: ["area 0"],
+    model: "m",
+    maxTurns: 10,
+    memory: null,
+    logsDir: mkdtempSync(join(tmpdir(), "checkers-")),
+    env: {},
+    timeoutMs: 60_000,
+    runClaude,
+    out: () => {},
+  });
+  assert.deepEqual(calls, [
+    { resume: false, timeoutMs: 60_000 },
+    { resume: true, timeoutMs: 60_000 },
+  ]);
+});

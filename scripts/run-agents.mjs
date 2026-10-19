@@ -62,6 +62,12 @@ import {
 export const DEFAULT_PROCESS_TIMEOUT_MS = 20 * 60 * 1000;
 /** A primer only has to send its first request, so it gets far less time. */
 export const PRIMER_TIMEOUT_MS = 5 * 60 * 1000;
+/**
+ * A wrap-up only writes up what the run already found, in a few turns, so it
+ * gets far less time than a run. Its own limit keeps a run and its wrap-up
+ * inside the step that holds them.
+ */
+export const WRAP_UP_TIMEOUT_MS = 5 * 60 * 1000;
 const KILL_GRACE_MS = 10_000;
 
 const ALLOWED_TOOLS =
@@ -274,6 +280,7 @@ export function wrapUpReason(run, envelope, maxTurns) {
  * Run the CLI once, then resume it for its answer when it hit its turn cap or
  * answered without an array. A failed wrap-up keeps the original result; a
  * successful one is merged into it, so the envelope covers both runs.
+ * `run(args, input, limitMs)` runs the CLI; the wrap-up gets `wrapUpTimeoutMs`.
  */
 export async function runWithWrapUp({
   run,
@@ -283,6 +290,7 @@ export async function runWithWrapUp({
   label,
   out,
   wrapUpMessage = WRAP_UP_MESSAGE,
+  wrapUpTimeoutMs = WRAP_UP_TIMEOUT_MS,
 }) {
   let result = await run(claudeArgs({ model, maxTurns }), prompt);
   let envelope = parseEnvelope(result.stdout);
@@ -295,6 +303,7 @@ export async function runWithWrapUp({
     const resumed = await run(
       claudeArgs({ model, maxTurns: WRAP_UP_MAX_TURNS, resume: envelope.session_id }),
       wrapUpMessage,
+      wrapUpTimeoutMs,
     );
     const resumedEnvelope = parseEnvelope(resumed.stdout);
     stderr += resumed.stderr;
