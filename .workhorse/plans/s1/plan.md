@@ -15,7 +15,7 @@ Setup (app token, checkouts, `npm ci`, Claude CLI install, rules detection) then
 - Cache priming happens in-process: each agent's primer runs first, and its voters start when the primer returns.
   `wait-for-cache-prime.mjs`, its test and the marker artefacts go.
 - Results are written to disk as each voter finishes, so a timeout or crash part way through still leaves the orchestrator something to post.
-- A fixed cap limits how many `claude` processes run at once, settable through a new workflow input.
+- Processes start by memory and provider back-pressure, with `concurrency` as an optional ceiling (see "Concurrency by memory and provider" below). A fixed default cap of 8 came first and was dropped after the first real run.
 - The driver makes three runtime decisions:
   - a voter whose process exits abnormally is retried;
   - a voter that returns nothing usable, even after the wrap-up resume, is replaced by a fresh voter, so consensus keeps its quorum;
@@ -57,7 +57,7 @@ Setup (app token, checkouts, `npm ci`, Claude CLI install, rules detection) then
 
 Recorded in the review agent runs spec (RUN):
 
-- Concurrency cap default: 8.
+- Concurrency: no fixed default; memory and provider limits decide, with `concurrency` as an optional ceiling.
 - One retry for a crashed voter, one replacement for an empty one.
 - Voter count is review-wide and follows diff size only: one voter under 100 changed lines, the `voters` input otherwise, capped at 10.
   The large-diff bump of two more voters was dropped after the first real run, in favour of the orchestrator calling an extra round where voters disagree (see below).
@@ -158,3 +158,23 @@ Steps:
 - [x] Workflow: consensus and second-look steps before the token, time limits 40 / 15 / 75 minutes
 - [x] README, DEVELOPING, completion comments spec
 - [ ] Observe a real second look on a PR
+
+## Concurrency by memory and provider
+
+The first real run (3 agents × 5 voters on a 2,600-line diff, cap 8) showed the pool refilling at once, but five bugs voters ran 16 to 20 minutes on GLM and held five of the eight slots, so ten runs shared three. The work is wait-bound, so a count cap is the wrong limit. Specced in the review agent runs spec (RUN, "Concurrency").
+
+Decisions:
+
+- `scripts/scheduler.mjs` admits work while the runner stays under 80% memory, counting the largest process-tree footprint measured so far for the newcomer and for each running process still below it. Footprints come from `/proc` (VmRSS summed over the process tree, since the CLI runs ripgrep and git as children). 512 MB is assumed until one is measured.
+- The CLI runs with `--output-format stream-json --verbose`, which emits `system`/`api_retry` events (attempt, retry delay, HTTP status). A 429 or 529 pauses new starts for at least the retry delay and drops the running limit to one below the count at that moment; each unthrottled finish raises it by one. The runner keeps the final `result` event as the envelope, so the result files and orchestrator are unchanged.
+- Provider limits apply per key or organisation, across every review running at once, so the job can only react to throttling, never plan around it.
+- `concurrency` defaults to 0, meaning no ceiling. One process always runs while work waits.
+
+Steps:
+
+- [x] `scripts/scheduler.mjs`: Linux memory probe, scheduler with memory, provider and ceiling limits, `parseCeiling`, tests
+- [x] `spawnClaude` streams events to `onEvent`, reports its pid through `onSpawn`/`onExit`, and keeps the result event (or the raw tail) as its output
+- [x] Driver and checkers on the scheduler; the old slot pool and `parseConcurrency` removed
+- [x] Summary table gains peak memory and API retries; the log says why starts are held back
+- [x] Workflow input, README, DEVELOPING, spec and test cases
+- [ ] Watch a real review: pool fill, peak memory per process, any throttling

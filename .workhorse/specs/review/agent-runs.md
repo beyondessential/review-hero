@@ -29,8 +29,14 @@ The agents spend their time waiting on the model, so one runner carries them all
 
 ## Concurrency
 
-- [ ] At most `concurrency` agent processes run at once, where `concurrency` is a workflow input defaulting to 8.
-- [ ] A primer run takes a free slot ahead of any voter, so every agent's cache is written early.
+- [ ] Agent processes start while the runner's memory use stays at or under 80%, counting for the next process, and for each running one still below it, the largest footprint an agent process has reached so far in the review.
+- [ ] An agent process's footprint is the memory of its whole process tree, measured while it runs.
+- [ ] Until a footprint has been measured, an agent process is assumed to need a fixed allowance.
+- [ ] When an agent process reports that the provider is rate limiting or overloaded, no new process starts for the retry delay the provider asked for, and the number allowed to run drops below the number running at that moment.
+- [ ] Each agent process that finishes without having been rate limited raises that number by one.
+- [ ] `concurrency` is an optional workflow input capping how many agent processes run at once, with no cap by default.
+- [ ] One agent process always runs while work is waiting, whatever the limits say.
+- [ ] Work starts in the order it was queued, so every primer starts ahead of any voter and every agent's cache is written early.
 
 ## Prompt cache priming
 
@@ -62,7 +68,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] A checker sees each finding's text and location, not which voters reported it.
 - [ ] A finding below the majority is kept when its voters and the checkers confirming it together reach the majority.
 - [ ] A review takes at most one second look.
-- [ ] Checkers run under the same concurrency cap and wrap-up as voters, with a time limit of their own inside the job's.
+- [ ] Checkers start under the same memory, provider and `concurrency` limits as voters, use the same wrap-up, and have a time limit of their own inside the job's.
 - [ ] A second look that fails or runs out of time leaves consensus as it stood, and the orchestrator posts from that.
 - [ ] The review summary's filtering line says how many findings a second look confirmed, when it confirmed any.
 - [ ] The completion block's `counts.secondLook` is the number of findings a second look confirmed (see `reporting/completion-comments.md`).
@@ -77,7 +83,8 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 
 - [ ] The job log has a line when each agent process starts.
 - [ ] Each agent process's output appears in the job log as its own collapsible group, written when that process finishes.
-- [ ] The job summary has a table of every agent process, with its agent, voter, attempt, time waiting for a slot, time running, turns used, prompt cache use and outcome.
+- [ ] The job summary has a table of every agent process, with its agent, voter, attempt, time waiting to start, time running, peak memory, API retries, turns used, prompt cache use and outcome.
+- [ ] The job log says why further agent processes are being held back whenever the reason changes.
 - [ ] A voter's row covers its wrap-up as well, with turns and cache use summed over both.
 - [ ] The job summary gains each row as its process settles, so it survives the agents being stopped at their time limit.
 

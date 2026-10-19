@@ -98,6 +98,7 @@ test("checkers run under the cap, see their area's prompt, and their verdicts ar
     model: "m",
     maxTurns: 10,
     concurrency: 3,
+    memory: null,
     logsDir: mkdtempSync(join(tmpdir(), "checkers-")),
     env: {},
     runClaude,
@@ -124,6 +125,7 @@ test("a checker that throws only withholds its votes", async () => {
     model: "m",
     maxTurns: 10,
     concurrency: 1,
+    memory: null,
     logsDir: mkdtempSync(join(tmpdir(), "checkers-")),
     env: {},
     runClaude,
@@ -140,6 +142,7 @@ test("an area without a prompt gets no checkers", async () => {
     model: "m",
     maxTurns: 10,
     concurrency: 1,
+    memory: null,
     logsDir: mkdtempSync(join(tmpdir(), "checkers-")),
     env: {},
     runClaude: async () => {

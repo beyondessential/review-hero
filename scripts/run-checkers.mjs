@@ -12,7 +12,7 @@
  *   CONSENSUS_PATH      — Consensus outcome, read and rewritten
  *   AGENTS              — JSON array of { key, source } from triage
  *   AGENT_MODEL         — Model the checkers run on
- *   CONCURRENCY         — Most checker processes running at once (default 8)
+ *   CONCURRENCY         — Most checker processes running at once (0 or unset: no ceiling)
  *   LOGS_DIR            — Where per-checker output goes
  *   REVIEW_HERO_DIR     — review-hero checkout (checker and base prompts)
  *   CALLER_BASE_DIR     — Caller checkout at the trusted ref (custom prompts)
@@ -33,14 +33,13 @@ import { join } from "node:path";
 import {
   agentEnv,
   cacheReadShare,
-  createSlotPool,
-  parseConcurrency,
   runWithWrapUp,
   spawnClaude,
   summaryHeader,
   summaryRow,
 } from "./run-agents.mjs";
 import { writeConsensus } from "./consensus.mjs";
+import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
 import { buildCheckerPrompt, extractJsonArray, isValidAgentKey } from "../src/index.mjs";
 
 export const DEFAULT_CHECKER_MAX_TURNS = 10;
@@ -125,7 +124,8 @@ export async function runSecondLook({
   prompts,
   model,
   maxTurns,
-  concurrency,
+  concurrency = Infinity,
+  memory = linuxMemoryProbe(),
   logsDir,
   env,
   timeoutMs = DEFAULT_CHECKER_TIMEOUT_MS,
@@ -133,9 +133,8 @@ export async function runSecondLook({
   out = (text) => process.stdout.write(text),
   onRow = () => {},
   now = Date.now,
+  scheduler = createScheduler({ ceiling: concurrency, memory, now, log: (line) => out(`${line}\n`) }),
 }) {
-  const withSlot = createSlotPool(concurrency);
-  const run = (args, input) => runClaude({ args, input, env, timeoutMs });
   const count = checkersPerArea(consensus.voters);
   const rows = [];
 
@@ -146,11 +145,19 @@ export async function runSecondLook({
         Array.from({ length: count }, async (_, checker) => {
           const label = `${area.agent} area ${i} checker ${checker}`;
           try {
-            const queuedAt = now();
-            const { settled, waitedMs, ranMs } = await withSlot(async () => {
-              const startedAt = now();
+            const { result: settled, waitedMs, ranMs, peakBytes, retries } = await scheduler.withSlot((slot) => {
               out(`Started ${label}\n`);
-              const settled = await runWithWrapUp({
+              const run = (args, input) =>
+                runClaude({
+                  args,
+                  input,
+                  env,
+                  timeoutMs,
+                  onSpawn: slot.onSpawn,
+                  onExit: slot.onExit,
+                  onEvent: slot.onEvent,
+                });
+              return runWithWrapUp({
                 run,
                 prompt: prompts[i],
                 model,
@@ -159,7 +166,6 @@ export async function runSecondLook({
                 out,
                 wrapUpMessage: CHECKER_WRAP_UP_MESSAGE,
               });
-              return { settled, waitedMs: startedAt - queuedAt, ranMs: now() - startedAt };
             });
             const { result, envelope, stderr, wrappedUp } = settled;
             writeFileSync(join(logsDir, `${area.agent}-area-${i}-checker-${checker}.json`), result.stdout);
@@ -175,6 +181,8 @@ export async function runSecondLook({
               run: `area ${i} checker ${checker}`,
               waitedMs,
               ranMs,
+              peakBytes,
+              retries,
               turns: envelope?.num_turns,
               cacheRead: cacheReadShare(envelope?.usage),
               outcome,
@@ -278,7 +286,7 @@ async function main() {
     prompts,
     model: requireEnv("AGENT_MODEL"),
     maxTurns,
-    concurrency: parseConcurrency(process.env.CONCURRENCY),
+    concurrency: parseCeiling(process.env.CONCURRENCY),
     logsDir,
     env: agentEnv(process.env),
     timeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || "") || DEFAULT_CHECKER_TIMEOUT_MS,

@@ -27,7 +27,7 @@ PR checkbox checked
 All three stages run in a single job. The agents spend their time waiting on the model, so one runner carries them all, and checkouts and installs happen once per review.
 
 1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
-2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt, at most `concurrency` at once. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
+2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
 3. **Consensus and second look** — applies voter consensus per agent (when enabled). Where findings below the majority cluster in a part of the code, fresh checkers take a second look at them (see [Second look](#second-look)).
 4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table). Its GitHub token is only created once the agents and checkers have finished.
 
@@ -397,7 +397,7 @@ jobs:
       model: claude-sonnet-5   # Claude model for the Claude checkbox (auto-upgrades to Opus for large PRs)
       runner: ubuntu-latest    # Runner for the review job
       voters: 3                # Voters per agent on a typical diff (1 to disable consensus)
-      concurrency: 8           # Most agent processes running at once
+      concurrency: 0           # Most agent processes at once (0 = limited by memory and the provider only)
     secrets: inherit
 ```
 
@@ -407,7 +407,7 @@ jobs:
 | `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job. |
 | `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
-| `concurrency` | `8`            | Most review agent processes running at once. |
+| `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits. |
 
 > [!NOTE]
 > `ubuntu-slim` caps a job at 15 minutes, and the whole review (setup, every agent, and posting) runs in one job, so it has to fit within that.

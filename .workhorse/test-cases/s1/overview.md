@@ -11,8 +11,19 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 
 ## Concurrency and priming
 
-- [x] No more than `concurrency` agent processes overlap (verifies spec: RUN)
-- [x] `concurrency` defaults to 8 and rejects anything but a positive integer (verifies spec: RUN)
+- [x] No more than `concurrency` agent processes overlap when it is set (verifies spec: RUN)
+- [x] `concurrency` 0 or unset means no ceiling; anything but a whole number is rejected (verifies spec: RUN)
+- [x] With no ceiling and memory to spare, everything starts at once (verifies spec: RUN)
+- [x] Processes fill memory up to 80%, leaving room for running ones to grow to the largest footprint (verifies spec: RUN)
+- [x] A measured process-tree footprint replaces the assumed one (verifies spec: RUN)
+- [x] One process always runs, however full memory is (verifies spec: RUN)
+- [x] A 429 or 529 retry pauses new starts for its delay and lowers the running limit (verifies spec: RUN)
+- [x] Each unthrottled finish raises a lowered limit by one (verifies spec: RUN)
+- [x] Other API retries are counted but do not throttle
+- [x] The CLI streams events; the runner keeps the result event as the envelope, or the raw tail when there is none
+- [x] Rate-limit retries from a run reach the scheduler and the summary row (verifies spec: RUN)
+- [x] The Linux probe measures a real process tree
+- [ ] On a real review, the summary shows peak memory per process and the pool fills past the old cap of 8 (verifies spec: RUN)
 - [x] Every primer starts before any voter, and an agent's voters start after its primer ends (verifies spec: RUN)
 - [x] A failed primer still releases its voters, with a warning that it wrote no cache (verifies spec: RUN)
 - [x] One voter, or OpenRouter, runs without a primer (verifies spec: RUN)
@@ -45,7 +56,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A finding whose voters and confirming checkers reach the majority moves to kept, taking its group's other members out of dropped (verifies spec: RUN)
 - [x] With five voters a lone finding needs both checkers (verifies spec: RUN)
 - [x] No verdicts, or a checker that throws, leave consensus as it stood (verifies spec: RUN)
-- [x] Checkers run under the concurrency cap (verifies spec: RUN)
+- [x] Checkers start under the same limits as voters (verifies spec: RUN)
 - [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
 - [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
 - [ ] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)

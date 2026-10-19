@@ -6,8 +6,8 @@
  * waiting on the model, so one runner carries them all; what this script adds
  * over firing them off at once is:
  *
- * 1. A concurrency cap, so a large custom-agent setup cannot exhaust the
- *    runner or the API rate limit
+ * 1. Admission by the runner's free memory and the provider's rate limits,
+ *    with the `concurrency` input as an optional ceiling (see scheduler.mjs)
  * 2. Prompt cache priming: with several voters on Anthropic, each agent first
  *    makes a single-turn run that writes the shared prompt prefix, and its
  *    voters start once it returns
@@ -23,7 +23,7 @@
  *   MAX_TURNS           — Turn cap per voter run, from triage
  *   AGENT_MODEL         — Model the agents run on
  *   AGENT_PROVIDER      — "anthropic" or "openrouter"
- *   CONCURRENCY         — Most agent processes running at once (default 8)
+ *   CONCURRENCY         — Most agent processes running at once (0 or unset: no ceiling)
  *   RESULTS_DIR         — Where voter results go, for the orchestrator
  *   LOGS_DIR            — Where primer output and per-process logs go
  *   REVIEW_HERO_DIR     — review-hero checkout (base prompts)
@@ -51,6 +51,7 @@ import {
 import { join } from "node:path";
 
 import { formatCacheStats, resultFileName } from "./lib.mjs";
+import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
 import {
   buildReviewAgentPrompt,
   extractJsonArray,
@@ -58,7 +59,6 @@ import {
   parseAgentResult,
 } from "../src/index.mjs";
 
-export const DEFAULT_CONCURRENCY = 8;
 export const DEFAULT_PROCESS_TIMEOUT_MS = 20 * 60 * 1000;
 /** A primer only has to send its first request, so it gets far less time. */
 export const PRIMER_TIMEOUT_MS = 5 * 60 * 1000;
@@ -117,50 +117,22 @@ export function agentEnv(parentEnv) {
   return env;
 }
 
-// ── Concurrency ──────────────────────────────────────────────────────────────
-
-/**
- * A first-in, first-out pool of `limit` slots. A finishing task hands its slot
- * straight to the longest waiter, so the order work is queued in is the order
- * it starts. Primers are queued before any voter exists, which is what gives
- * them the first slots.
- */
-// spec: RUN#concurrency
-export function createSlotPool(limit) {
-  let active = 0;
-  const waiting = [];
-  return async function withSlot(fn) {
-    if (active < limit) {
-      active++;
-    } else {
-      await new Promise((resolve) => waiting.push(resolve));
-    }
-    try {
-      return await fn();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else active--;
-    }
-  };
-}
-
-export function parseConcurrency(raw) {
-  if (raw === undefined || raw === "") return DEFAULT_CONCURRENCY;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`CONCURRENCY must be a positive integer, got "${raw}"`);
-  }
-  return value;
-}
-
 // ── Claude CLI ───────────────────────────────────────────────────────────────
+
+/** Raw output kept for a run that never produced a result, for diagnosis. */
+const RAW_TAIL_BYTES = 64 * 1024;
 
 /**
  * Run the Claude CLI once. Resolves with its exit code and output, never
  * rejects for a failed run: a process that cannot start reports code -1.
+ *
+ * The CLI streams JSON events, one per line. Each is handed to `onEvent` as it
+ * arrives (rate-limit retries among them), and `stdout` resolves to the final
+ * result event: the same envelope `--output-format json` would print. A run
+ * that never reached a result resolves with the tail of its raw output.
+ * `onSpawn` and `onExit` report the process id, so its memory can be measured.
  */
-export function spawnClaude({ args, input, env, timeoutMs }) {
+export function spawnClaude({ args, input, env, timeoutMs, onSpawn = () => {}, onExit = () => {}, onEvent = () => {} }) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -169,17 +141,44 @@ export function spawnClaude({ args, input, env, timeoutMs }) {
       resolve({ code: -1, timedOut: false, stdout: "", stderr: String(err) });
       return;
     }
+    onSpawn(child.pid);
 
-    const stdout = [];
+    let pending = "";
+    let resultLine = null;
+    let rawTail = "";
     const stderr = [];
     let timedOut = false;
     let settled = false;
-    const finish = (result) => {
+
+    const takeLine = (line) => {
+      if (!line.trim()) return;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (event?.type === "result") resultLine = line;
+      try {
+        onEvent(event);
+      } catch {
+        // Reporting must never break the run.
+      }
+    };
+
+    const finish = (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(killTimer);
-      resolve(result);
+      takeLine(pending);
+      onExit(child.pid);
+      resolve({
+        code,
+        timedOut,
+        stdout: resultLine ?? rawTail,
+        stderr: Buffer.concat(stderr).toString("utf-8"),
+      });
     };
 
     let killTimer;
@@ -189,25 +188,19 @@ export function spawnClaude({ args, input, env, timeoutMs }) {
       killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stdout.setEncoding("utf-8");
+    child.stdout.on("data", (chunk) => {
+      rawTail = (rawTail + chunk).slice(-RAW_TAIL_BYTES);
+      const lines = (pending + chunk).split("\n");
+      pending = lines.pop();
+      for (const line of lines) takeLine(line);
+    });
     child.stderr.on("data", (chunk) => stderr.push(chunk));
     child.on("error", (err) => {
       stderr.push(Buffer.from(String(err)));
-      finish({
-        code: -1,
-        timedOut,
-        stdout: Buffer.concat(stdout).toString("utf-8"),
-        stderr: Buffer.concat(stderr).toString("utf-8"),
-      });
+      finish(-1);
     });
-    child.on("close", (code) => {
-      finish({
-        code: code ?? -1,
-        timedOut,
-        stdout: Buffer.concat(stdout).toString("utf-8"),
-        stderr: Buffer.concat(stderr).toString("utf-8"),
-      });
-    });
+    child.on("close", (code) => finish(code ?? -1));
 
     // A process that exits before reading its prompt closes stdin under us.
     child.stdin.on("error", () => {});
@@ -221,8 +214,11 @@ export function claudeArgs({ model, maxTurns, resume }) {
   args.push(
     "--permission-mode",
     "dontAsk",
+    // Streamed so rate-limit retries are seen as they happen; the runner
+    // keeps the final result event as the run's envelope.
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--model",
     model,
     "--max-turns",
@@ -378,8 +374,8 @@ export function summaryHeader(title) {
   return [
     `### ${title}`,
     "",
-    "| Agent | Run | Attempt | Waited | Ran | Turns | Cache read | Outcome |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Agent | Run | Attempt | Waited | Ran | Peak memory | API retries | Turns | Cache read | Outcome |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     "",
   ].join("\n");
 }
@@ -388,7 +384,8 @@ export const SUMMARY_HEADER = summaryHeader("Review agent runs");
 
 export function summaryRow(row) {
   const secs = (ms) => (ms == null ? "" : `${Math.round(ms / 1000)}s`);
-  return `| ${row.agent} | ${row.run} | ${row.attempt ?? ""} | ${secs(row.waitedMs)} | ${secs(row.ranMs)} | ${row.turns ?? ""} | ${row.cacheRead ?? ""} | ${row.outcome} |\n`;
+  const mb = (bytes) => (bytes == null ? "" : `${Math.round(bytes / (1024 * 1024))} MB`);
+  return `| ${row.agent} | ${row.run} | ${row.attempt ?? ""} | ${secs(row.waitedMs)} | ${secs(row.ranMs)} | ${mb(row.peakBytes)} | ${row.retries ?? ""} | ${row.turns ?? ""} | ${row.cacheRead ?? ""} | ${row.outcome} |\n`;
 }
 
 export function summaryTable(rows) {
@@ -415,7 +412,8 @@ export async function runAgents({
   maxTurns,
   model,
   provider,
-  concurrency,
+  concurrency = Infinity,
+  memory = linuxMemoryProbe(),
   resultsDir,
   logsDir,
   env,
@@ -425,36 +423,43 @@ export async function runAgents({
   out = (text) => process.stdout.write(text),
   onRow = () => {},
   now = Date.now,
+  scheduler = createScheduler({ ceiling: concurrency, memory, now, log: (line) => out(`${line}\n`) }),
 }) {
-  const withSlot = createSlotPool(concurrency);
   const rows = [];
   const record = (row) => {
     rows.push(row);
     onRow(row);
   };
 
-  const run = (args, input, limitMs = timeoutMs) =>
-    runClaude({ args, input, env, timeoutMs: limitMs });
-
   /**
-   * Run `fn` in a slot, logging the moment it starts so the log shows the
-   * pool filling as it happens, not only as processes finish. Resolves with
-   * the result and how long the work waited for its slot and then ran.
+   * Run `fn` once the scheduler admits it, logging the moment it starts so the
+   * log shows the pool filling as it happens, not only as processes finish.
+   * `fn` gets a CLI runner wired to the scheduler, so the processes it starts
+   * are measured and their rate-limit retries hold back further starts.
+   * Resolves with the result, how long the work waited and ran, its peak
+   * memory, and how many API retries it saw.
    */
-  async function timed(label, fn) {
-    const queuedAt = now();
-    return withSlot(async () => {
-      const startedAt = now();
+  function timed(label, fn) {
+    return scheduler.withSlot((slot) => {
       out(`Started ${label}\n`);
-      const result = await fn();
-      return { result, waitedMs: startedAt - queuedAt, ranMs: now() - startedAt };
+      const run = (args, input, limitMs = timeoutMs) =>
+        runClaude({
+          args,
+          input,
+          env,
+          timeoutMs: limitMs,
+          onSpawn: slot.onSpawn,
+          onExit: slot.onExit,
+          onEvent: slot.onEvent,
+        });
+      return fn(run);
     });
   }
 
   // spec: RUN#prompt-cache-priming
   async function prime(agent) {
     const label = `${agent.key} (primer)`;
-    const { result, waitedMs, ranMs } = await timed(label, () =>
+    const { result, waitedMs, ranMs, peakBytes, retries } = await timed(label, (run) =>
       run(claudeArgs({ model, maxTurns: 1 }), prompts[agent.key], primerTimeoutMs),
     );
     writeFileSync(join(logsDir, `${agent.key}-primer.json`), result.stdout);
@@ -474,6 +479,8 @@ export async function runAgents({
       run: "primer",
       waitedMs,
       ranMs,
+      peakBytes,
+      retries,
       turns: envelope?.num_turns,
       cacheRead: cacheReadShare(envelope?.usage),
       outcome,
@@ -490,7 +497,7 @@ export async function runAgents({
       attemptNumber > 1 ? `${label} (attempt ${attemptNumber})` : label;
     const resultPath = join(resultsDir, resultFileName(agent.key, voter, voters));
 
-    const { result: settled, waitedMs, ranMs } = await timed(fullLabel, () =>
+    const { result: settled, waitedMs, ranMs, peakBytes, retries } = await timed(fullLabel, (run) =>
       runWithWrapUp({
         run,
         prompt: prompts[agent.key],
@@ -532,6 +539,8 @@ export async function runAgents({
       attempt: attemptNumber,
       waitedMs,
       ranMs,
+      peakBytes,
+      retries,
       turns: envelope?.num_turns,
       cacheRead: cacheReadShare(envelope?.usage),
       outcome: shown,
@@ -640,7 +649,7 @@ async function main() {
   const maxTurns = parseInt(requireEnv("MAX_TURNS"));
   const model = requireEnv("AGENT_MODEL");
   const provider = process.env.AGENT_PROVIDER || "anthropic";
-  const concurrency = parseConcurrency(process.env.CONCURRENCY);
+  const concurrency = parseCeiling(process.env.CONCURRENCY);
   const resultsDir = requireEnv("RESULTS_DIR");
   const logsDir = requireEnv("LOGS_DIR");
   const timeoutMs =
@@ -666,7 +675,7 @@ async function main() {
     console.log(`Prompt for ${agent.key}: ${Buffer.byteLength(prompts[agent.key])} bytes`);
   }
   console.log(
-    `Running ${runnable.length} agent(s) × ${voters} voter(s), at most ${concurrency} at once`,
+    `Running ${runnable.length} agent(s) × ${voters} voter(s), ${concurrency === Infinity ? "as many at once as memory and the provider allow" : `at most ${concurrency} at once`}`,
   );
 
   // The summary is written a row at a time, so it survives the step being

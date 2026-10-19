@@ -20,9 +20,9 @@ on:
         type: number
         default: 3
       concurrency:
-        description: "Most review agent processes running at once"
+        description: "Most review agent processes running at once, or 0 to leave the runner's memory and the provider's rate limits as the only limits"
         type: number
-        default: 8
+        default: 0
       ref:
         description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
         type: string
@@ -302,8 +302,9 @@ jobs:
         run: sh .review-hero/scripts/detect-ai-rules.sh /tmp/ai-rules.md .caller-base
 
       # ── Run agents ───────────────────────────────────────────────────
-      # Every agent and voter runs here as a Claude CLI process, at most
-      # `concurrency` at once. Agent processes get an allowlisted environment,
+      # Every agent and voter runs here as a Claude CLI process. Processes
+      # start while the runner has memory to spare and the provider is not
+      # throttling, up to `concurrency` when set. They get an allowlisted environment,
       # and this step carries no GitHub token in the first place.
       # The step's own time limit sits inside the job's, so a review whose
       # agents run long still leaves the orchestrator time to post.

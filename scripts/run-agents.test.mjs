@@ -9,8 +9,6 @@ import {
   buildPrompts,
   cacheReadShare,
   mergeWrapUp,
-  createSlotPool,
-  parseConcurrency,
   runAgents,
   spawnClaude,
   summaryTable,
@@ -109,6 +107,7 @@ function review(fake, overrides = {}) {
       model: "claude-sonnet-5",
       provider: "anthropic",
       concurrency: 8,
+      memory: null,
       resultsDir,
       logsDir,
       env: { ANTHROPIC_API_KEY: "key" },
@@ -127,29 +126,6 @@ test("at most the concurrency cap of agent processes run at once", async () => {
   await review(fake, { agents, concurrency: 2 }).rows;
   assert.equal(fake.calls.length, 3 + 9);
   assert.equal(fake.peak(), 2);
-});
-
-test("the slot pool starts queued work in the order it was queued", async () => {
-  const withSlot = createSlotPool(1);
-  const started = [];
-  await Promise.all(
-    [0, 1, 2, 3].map((n) =>
-      withSlot(async () => {
-        started.push(n);
-        await new Promise((resolve) => setImmediate(resolve));
-      }),
-    ),
-  );
-  assert.deepEqual(started, [0, 1, 2, 3]);
-});
-
-test("the concurrency cap defaults to 8 and must be a positive integer", () => {
-  assert.equal(parseConcurrency(undefined), 8);
-  assert.equal(parseConcurrency(""), 8);
-  assert.equal(parseConcurrency("3"), 3);
-  for (const bad of ["0", "-1", "1.5", "lots"]) {
-    assert.throws(() => parseConcurrency(bad));
-  }
 });
 
 // ── Priming ──────────────────────────────────────────────────────────────────
@@ -296,8 +272,8 @@ test("the job summary has a row per process", async () => {
   const rows = await review(fake).rows;
   const table = summaryTable(rows);
   assert.equal(table.split("\n").filter((line) => line.startsWith("| bugs |")).length, 4);
-  assert.match(table, /\| bugs \| primer \|  \| \d+s \| \d+s \| 4 \| 0% \| primed \|/);
-  assert.match(table, /\| bugs \| voter 0 \| 1 \| \d+s \| \d+s \| 4 \| 90% \| usable \|/);
+  assert.match(table, /\| bugs \| primer \|  \| \d+s \| \d+s \|  \| 0 \| 4 \| 0% \| primed \|/);
+  assert.match(table, /\| bugs \| voter 0 \| 1 \| \d+s \| \d+s \|  \| 0 \| 4 \| 90% \| usable \|/);
 });
 
 test("each process's log is written as one group", async () => {
@@ -501,6 +477,58 @@ test("spawning the CLI feeds it the prompt and collects its output and exit code
   const env = stubClaude('cat; echo "$1" >&2; exit 3');
   const result = await spawnClaude({ args: ["-p"], input: "the prompt", env, timeoutMs: 10_000 });
   assert.deepEqual(result, { code: 3, timedOut: false, stdout: "the prompt", stderr: "-p\n" });
+});
+
+test("spawning the CLI hands over each streamed event and keeps the result event as its output", async () => {
+  const lines = [
+    '{"type":"system","subtype":"init"}',
+    '{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"retry_delay_ms":1000}',
+    '{"type":"result","subtype":"success","result":"[]","num_turns":2}',
+  ];
+  const env = stubClaude(`cat > /dev/null; printf '%s\\n' ${lines.map((l) => `'${l}'`).join(" ")}`);
+  const events = [];
+  const pids = [];
+  const result = await spawnClaude({
+    args: [],
+    input: "prompt",
+    env,
+    timeoutMs: 10_000,
+    onEvent: (e) => events.push(e.subtype ?? e.type),
+    onSpawn: (pid) => pids.push(pid),
+    onExit: (pid) => pids.push(-pid),
+  });
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, lines[2]);
+  assert.deepEqual(events, ["init", "api_retry", "success"]);
+  assert.equal(pids.length, 2);
+  assert.equal(pids[1], -pids[0]);
+});
+
+test("a run that never reaches a result event keeps the tail of its raw output", async () => {
+  const env = stubClaude("cat > /dev/null; echo 'Error: something broke'; exit 1");
+  const result = await spawnClaude({ args: [], input: "", env, timeoutMs: 10_000 });
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "Error: something broke\n");
+});
+
+test("the CLI streams its output so retries can be seen", async () => {
+  const fake = fakeClaude();
+  await review(fake, { voters: 1 }).rows;
+  const { args } = fake.calls[0];
+  assert.equal(args[args.indexOf("--output-format") + 1], "stream-json");
+  assert.ok(args.includes("--verbose"));
+});
+
+test("rate-limit retries reported by a run reach the scheduler and the row", async () => {
+  const fake = fakeClaude();
+  const runClaude = async (options) => {
+    options.onEvent?.({ type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 0 });
+    return fake.runClaude(options);
+  };
+  const lines = [];
+  const [row] = await review(fake, { voters: 1, runClaude, out: (text) => lines.push(text) }).rows;
+  assert.equal(row.retries, 1);
+  assert.ok(lines.some((l) => l.includes("Provider throttled (HTTP 429)")));
 });
 
 test("a process past its time limit is stopped and reported as timed out", async () => {
