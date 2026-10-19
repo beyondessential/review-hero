@@ -397,9 +397,12 @@ jobs:
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
 | `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
-| `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job. `ubuntu-slim` caps a job at 15 minutes, which the whole review (setup, every agent, and posting) has to fit within. |
+| `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job. |
 | `voters`  | `3`                | Independent voters per agent for a diff of 100 to 499 changed lines; smaller diffs run one, larger ones two more. `>=2` enables consensus filtering. Set to `1` to disable. |
 | `concurrency` | `8`            | Most review agent processes running at once. |
+
+> [!NOTE]
+> `ubuntu-slim` caps a job at 15 minutes, and the whole review (setup, every agent, and posting) runs in one job, so it has to fit within that.
 
 ### Auto-Fix inputs
 
