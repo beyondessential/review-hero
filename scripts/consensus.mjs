@@ -19,7 +19,7 @@
 import { appendFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { MAX_VOTERS, RESULT_FILE_PATTERN } from "./lib.mjs";
+import { RESULT_FILE_PATTERN, votersFromEnv } from "./lib.mjs";
 import {
   applyConsensus,
   createAnthropicModelCaller,
@@ -161,7 +161,7 @@ async function main() {
   if (!artifactsDir || !consensusPath) {
     throw new Error("Missing ARTIFACTS_DIR or CONSENSUS_PATH");
   }
-  const voters = Math.max(1, Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS));
+  const voters = votersFromEnv();
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   const callModel = apiKey
     ? createAnthropicModelCaller({

@@ -31,6 +31,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A failed primer still releases its voters, with a warning that it wrote no cache (verifies spec: RUN)
 - [x] One voter, or OpenRouter, runs without a primer (verifies spec: RUN)
 - [x] Every voter of an agent gets byte-identical prompt bytes (verifies spec: RUN)
+- [x] A PR title with newlines stays on one line in review and checker prompts (verifies spec: RUN)
 - [ ] On a real multi-voter Anthropic review, voters report cache reads in the summary table (verifies spec: RUN)
 
 ## Wrap-up, retries and replacements
@@ -76,6 +77,9 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] Without a consensus outcome, every agent result is kept as it stands (verifies spec: RUN)
 - [x] An agent key ending in `-voter-<n>` is rejected
 - [x] Checkers start under the same limits as voters (verifies spec: RUN)
+- [x] With several checkers on Anthropic, each area's primer starts before any checker, and a failed primer still releases them (verifies spec: RUN)
+- [x] One checker per area, or OpenRouter, runs without a primer (verifies spec: RUN)
+- [x] The consensus reply's token limit grows with the number of findings
 - [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
 - [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
 - [x] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
@@ -90,6 +94,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 
 - [ ] A PR edit with no ticked checkbox shows the job as skipped, with no runner started (verifies spec: RUN)
 - [ ] A ticked checkbox with two spaces after `[x]` still runs a review (verifies spec: RUN)
+- [ ] A ticked checkbox with a tab or three spaces after `[x]` is skipped by both the gate and the exact check (verifies spec: RUN)
 - [ ] A PR edit with only the template's unticked checkboxes shows the job as skipped (verifies spec: RUN)
 - [ ] A consensus step that fails still leaves the orchestrator posting every agent finding, with a warning (verifies spec: RUN)
 - [ ] Agents stopped at the step's time limit still leave the orchestrator posting from finished voters (verifies spec: RUN)

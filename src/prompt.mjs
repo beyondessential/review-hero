@@ -65,7 +65,9 @@ export function softTurnCap(maxTurns) {
 /**
  * The layout every agent prompt shares: project context, the instructions,
  * the repository's AI rules (to follow when doing `task`), the turn budget,
- * then the PR title and fenced diff.
+ * then the PR title and fenced diff. The title is the PR author's and can be
+ * set with newlines through the API, so it is rendered on one line like any
+ * other untrusted value, never as prompt sections of its own.
  */
 function assemblePrompt({ projectContext, instructions, aiRules, task, turnBudget, prTitle, diff }) {
   let prompt = "";
@@ -78,7 +80,7 @@ function assemblePrompt({ projectContext, instructions, aiRules, task, turnBudge
     prompt += aiRules;
   }
   prompt += `\n\n## Turn budget\n\n${turnBudget}\n`;
-  prompt += `\n\n## PR Title\n\n${prTitle}\n\n## PR Diff\n\n\`\`\`diff\n`;
+  prompt += `\n\n## PR Title\n\n${sanitizeForPrompt(prTitle)}\n\n## PR Diff\n\n\`\`\`diff\n`;
   prompt += diff;
   if (diff && !diff.endsWith("\n")) prompt += "\n";
   prompt += "\`\`\`\n";

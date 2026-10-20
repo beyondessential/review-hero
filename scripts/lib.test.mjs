@@ -14,6 +14,7 @@ import {
   createCompletionReporter,
   mapWithConcurrency,
   voterCountForDiff,
+  votersFromEnv,
   MAX_VOTERS,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
@@ -194,4 +195,13 @@ test("the voter count stays between one and the cap", () => {
   assert.equal(voterCountForDiff(200, 50), MAX_VOTERS);
   assert.equal(voterCountForDiff(200, 0), 1);
   assert.equal(voterCountForDiff(200, "nonsense"), 1);
+});
+
+test("the voter count read back from the environment stays between one and the cap", () => {
+  assert.equal(votersFromEnv("3"), 3);
+  assert.equal(votersFromEnv(String(MAX_VOTERS + 5)), MAX_VOTERS);
+  assert.equal(votersFromEnv("0"), 1);
+  assert.equal(votersFromEnv(""), 1);
+  assert.equal(votersFromEnv(undefined), 1);
+  assert.equal(votersFromEnv("nonsense"), 1);
 });

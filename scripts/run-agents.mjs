@@ -55,23 +55,20 @@ import {
   agentEnv,
   agentPromptPath,
   cacheReadShare,
-  claudeArgs,
   createProcessRunner,
   deadlineFrom,
-  parseEnvelope,
-  runOutput,
+  primeRun,
+  PRIMER_TIMEOUT_MS,
   runWithWrapUp,
   spawnClaude,
   summaryHeader,
   summaryRow,
 } from "./agent-process.mjs";
-import { formatCacheStats, getEnvOrThrow, MAX_VOTERS, readOptional, resultFileName } from "./lib.mjs";
+import { formatCacheStats, getEnvOrThrow, readOptional, resultFileName, votersFromEnv } from "./lib.mjs";
 import { ceilingFor, createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
 import { buildReviewAgentPrompt, parseAgentResult } from "../src/index.mjs";
 
 export const DEFAULT_PROCESS_TIMEOUT_MS = 20 * 60 * 1000;
-/** A primer only has to send its first request, so it gets far less time. */
-export const PRIMER_TIMEOUT_MS = 5 * 60 * 1000;
 /** A fresh run for a crashed or empty voter only starts with this much time left. */
 export const MIN_FRESH_RUN_MS = 5 * 60 * 1000;
 
@@ -169,20 +166,15 @@ export async function runAgents({
   // spec: RUN#prompt-cache-priming
   async function prime(agent) {
     const label = `${agent.key} (primer)`;
-    const { result, waitedMs, ranMs, peakBytes, retries } = await timed(label, (run) =>
-      run(claudeArgs({ model, maxTurns: 1 }), prompts[agent.key], primerTimeoutMs),
-    );
-    writeFileSync(join(logsDir, `${agent.key}-primer.json`), runOutput(result));
-    const envelope = parseEnvelope(result.stdout);
-    const written = envelope?.usage?.cache_creation_input_tokens ?? 0;
-    // Hitting the one-turn cap is the expected way for a primer to end. What
-    // matters is whether the first request wrote the prefix.
-    const outcome = result.notStarted ? "not started" : written > 0 ? "primed" : "wrote no cache";
-    if (outcome === "wrote no cache") {
-      out(
-        `::warning::${label} wrote no cache tokens; its voters will not share a prefix\n`,
-      );
-    }
+    const { result, envelope, outcome, waitedMs, ranMs, peakBytes, retries } = await primeRun({
+      timed,
+      label,
+      prompt: prompts[agent.key],
+      model,
+      timeoutMs: primerTimeoutMs,
+      logPath: join(logsDir, `${agent.key}-primer.json`),
+      out,
+    });
     logGroup(out, { label, outcome, envelope, stderr: result.stderr });
     record({
       agent: agent.key,
@@ -361,7 +353,7 @@ export function buildPrompts({ agents, reviewHeroDir, callerBaseDir, common, out
 
 async function main() {
   const agents = JSON.parse(getEnvOrThrow("AGENTS"));
-  const voters = Math.max(1, Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS));
+  const voters = votersFromEnv();
   const maxTurns = parseInt(getEnvOrThrow("MAX_TURNS"));
   const model = getEnvOrThrow("AGENT_MODEL");
   const provider = process.env.AGENT_PROVIDER || "anthropic";

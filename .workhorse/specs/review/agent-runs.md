@@ -13,6 +13,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] The job runs on the workflow's `runner` input, which defaults to `ubuntu-latest`.
 - [ ] An event that cannot start a review skips the job without starting a runner: a pull request action other than opened, reopened or edited in checkbox mode, or a description with no ticked Review Hero checkbox.
 - [ ] The exact checkbox match runs as the job's first step, and a mismatch ends the job before any setup.
+- [ ] Every description the exact match accepts also passes the job's skip condition, so a ticked checkbox always starts a review.
 - [ ] Checkouts, dependency installs and the Claude CLI install happen once per review.
 - [ ] A review keeps its working files where the runner empties them for every job, so a reused runner never reads one review's results, consensus or rules into the next.
 - [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
@@ -51,6 +52,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 ## Prompt cache priming
 
 - [ ] Every voter of an agent sends a byte-identical prompt, so the voters share one cached prompt prefix.
+- [ ] The PR title appears in a prompt on a single line, whatever line breaks it holds.
 - [ ] With more than one voter on Anthropic, each agent first makes a single-turn primer run that writes the cache, and its voters start once the primer has returned.
 - [ ] A primer that fails still releases its voters, which then run without the shared prefix.
 - [ ] On OpenRouter, voters start without a primer run.
@@ -83,6 +85,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] A finding below the majority is kept when its voters and the checkers confirming it together reach the majority.
 - [ ] A review takes at most one second look.
 - [ ] Checkers start under the same memory, provider and `concurrency` limits as voters, use the same wrap-up, and have a time limit of their own inside the job's.
+- [ ] With more than one checker per area on Anthropic, each area first makes a primer run, and its checkers start once it has returned, as an agent's voters do.
 - [ ] Each contested area's verdicts are saved as soon as its checkers finish, so areas settled before a second look fails or runs out of time still count, and the rest stand as consensus left them.
 - [ ] A verdict counts only when it names a finding by its number; anything else is a rejection.
 - [ ] The review summary's filtering line says how many findings a second look confirmed, when it confirmed any.

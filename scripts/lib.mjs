@@ -35,6 +35,14 @@ export function voterCountForDiff(diffLines, requested) {
   return Math.min(base, MAX_VOTERS);
 }
 
+/**
+ * The voter count triage set, read back from `VOTERS` by the scripts after it:
+ * a whole number from 1 to `MAX_VOTERS`, and 1 when unset or unreadable.
+ */
+export function votersFromEnv(raw = process.env.VOTERS) {
+  return Math.max(1, Math.min(parseInt(raw || "1") || 1, MAX_VOTERS));
+}
+
 /** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
 export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:nitro"];
 

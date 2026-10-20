@@ -16,6 +16,16 @@ import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 export const MAX_CONTESTED_AREAS = 3;
 
 /**
+ * The consensus reply's token limit. The reply lists each finding's index at
+ * most once, in `keep` or in a contested group, so it grows with the number
+ * of findings. Cut off, it no longer parses, and consensus falls back to
+ * keeping everything on exactly the large reviews it exists to filter.
+ */
+export function consensusMaxTokens(findingCount) {
+  return 3000 + 8 * findingCount;
+}
+
+/**
  * Apply voter consensus to determine whether findings from different voters are
  * about the same issue. The model receives all findings and returns which ones
  * to keep — the deduplicated set that a majority of voters agree on — and the
@@ -60,7 +70,7 @@ export async function applyConsensus(findings, voterCount, callModel) {
   try {
     const text = await callModel({
       model: "claude-sonnet-5",
-      maxTokens: 3000,
+      maxTokens: consensusMaxTokens(findings.length),
       // Mechanical grouping — no reasoning needed, and thinking would eat
       // into the token budget the JSON output needs.
       thinking: { type: "disabled" },

@@ -8,6 +8,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { processTree } from "./scheduler.mjs";
@@ -400,6 +401,36 @@ export function createProcessRunner({
     });
   }
   return { timed, timeLeft };
+}
+
+// ── Priming ──────────────────────────────────────────────────────────────────
+
+/** A primer only has to send its first request, so it gets far less time. */
+export const PRIMER_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Run a primer: one single-turn run of `prompt` that writes it to the prompt
+ * cache, so the runs started after it read that prefix instead of each
+ * writing their own. Its output goes to `logPath`. Resolves with the run, its
+ * envelope, its outcome ("primed", "wrote no cache" or "not started") and the
+ * admission timing. The primer is queued before this returns, so primers
+ * started together keep their order ahead of whatever is queued after them.
+ */
+// spec: RUN#prompt-cache-priming
+export async function primeRun({ timed, label, prompt, model, timeoutMs = PRIMER_TIMEOUT_MS, logPath, out }) {
+  const { result, ...timing } = await timed(label, (run) =>
+    run(claudeArgs({ model, maxTurns: 1 }), prompt, timeoutMs),
+  );
+  writeFileSync(logPath, runOutput(result));
+  const envelope = parseEnvelope(result.stdout);
+  const written = envelope?.usage?.cache_creation_input_tokens ?? 0;
+  // Hitting the one-turn cap is the expected way for a primer to end. What
+  // matters is whether the first request wrote the prefix.
+  const outcome = result.notStarted ? "not started" : written > 0 ? "primed" : "wrote no cache";
+  if (outcome === "wrote no cache") {
+    out(`::warning::${label} wrote no cache tokens; the runs after it will not share a prefix\n`);
+  }
+  return { result, envelope, outcome, ...timing };
 }
 
 // ── Trusted prompts ──────────────────────────────────────────────────────────

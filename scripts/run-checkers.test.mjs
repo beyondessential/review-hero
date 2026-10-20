@@ -96,6 +96,7 @@ test("checkers run under the cap, see their area's prompt, and their verdicts ar
     consensus: twoAreas,
     prompts: ["area 0", "area 1"],
     model: "m",
+    provider: "openrouter",
     maxTurns: 10,
     concurrency: 3,
     memory: null,
@@ -136,6 +137,69 @@ test("a checker stopped at its time limit after answering is reported by its ans
   assert.deepEqual(rows.map((r) => r.outcome), ["answered"]);
 });
 
+/** Second-look runs recorded in order, with primers told apart by their one-turn cap. */
+async function primedSecondLook({ voters, provider, primer }) {
+  const twoAreas = { ...consensus(voters), contested: [...consensus(voters).contested, { ...consensus(voters).contested[0], area: "other" }] };
+  const calls = [];
+  const runClaude = async ({ args, input }) => {
+    const kind = args[args.indexOf("--max-turns") + 1] === "1" ? "primer" : "checker";
+    calls.push(`${kind} ${input}`);
+    await new Promise((resolve) => setImmediate(resolve));
+    if (kind === "primer") return primer();
+    return { code: 0, timedOut: false, stdout: JSON.stringify({ result: answer([[0, "confirm"]]) }), stderr: "" };
+  };
+  const rows = [];
+  const { confirmationsByArea } = await runSecondLook({
+    consensus: twoAreas,
+    prompts: ["area 0", "area 1"],
+    model: "m",
+    provider,
+    maxTurns: 10,
+    concurrency: 1,
+    memory: null,
+    logsDir: mkdtempSync(join(tmpdir(), "checkers-")),
+    env: {},
+    runClaude,
+    out: () => {},
+    onRow: (row) => rows.push(row),
+  });
+  return { calls, rows, confirmationsByArea };
+}
+
+const PRIMED = () => ({
+  code: 1,
+  timedOut: false,
+  stdout: JSON.stringify({ subtype: "error_max_turns", usage: { cache_creation_input_tokens: 5000 } }),
+  stderr: "",
+});
+
+test("with several checkers on Anthropic, each area primes the cache before its checkers start", async () => {
+  const { calls, rows, confirmationsByArea } = await primedSecondLook({ voters: 5, provider: "anthropic", primer: PRIMED });
+  assert.deepEqual(calls.slice(0, 2), ["primer area 0", "primer area 1"]);
+  assert.equal(calls.filter((c) => c.startsWith("checker")).length, 4);
+  assert.deepEqual(rows.filter((r) => r.run.endsWith("primer")).map((r) => r.outcome), ["primed", "primed"]);
+  assert.deepEqual(confirmationsByArea, [[2, 0], [2, 0]]);
+});
+
+test("a primer that fails still releases its area's checkers", async () => {
+  const { calls, confirmationsByArea } = await primedSecondLook({
+    voters: 5,
+    provider: "anthropic",
+    primer: () => {
+      throw new Error("boom");
+    },
+  });
+  assert.equal(calls.filter((c) => c.startsWith("checker")).length, 4);
+  assert.deepEqual(confirmationsByArea, [[2, 0], [2, 0]]);
+});
+
+test("one checker per area, or OpenRouter, runs without a primer", async () => {
+  for (const [voters, provider] of [[3, "anthropic"], [5, "openrouter"]]) {
+    const { calls } = await primedSecondLook({ voters, provider, primer: PRIMED });
+    assert.ok(calls.every((c) => c.startsWith("checker")), `${voters} voters on ${provider}`);
+  }
+});
+
 test("a checker that throws only withholds its votes", async () => {
   let calls = 0;
   const runClaude = async () => {
@@ -147,6 +211,7 @@ test("a checker that throws only withholds its votes", async () => {
     consensus: consensus(5),
     prompts: ["area 0"],
     model: "m",
+    provider: "openrouter",
     maxTurns: 10,
     concurrency: 1,
     memory: null,

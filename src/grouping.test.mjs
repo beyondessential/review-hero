@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { applyConsensus, parseConsensusReply, MAX_CONTESTED_AREAS } from "./index.mjs";
+import { consensusMaxTokens } from "./grouping.mjs";
 
 const finding = (voter, line, comment = `finding at ${line}`) => ({
   file: "a.ts",
@@ -59,6 +60,18 @@ test("a group already at the majority is not contested", async () => {
   });
   const { contested } = await applyConsensus(findings, 3, async () => reply);
   assert.deepEqual(contested.map((a) => a.groups.map((g) => g.members.map((m) => m.line))), [[[90]]]);
+});
+
+test("the consensus reply may grow with the number of findings", async () => {
+  const many = Array.from({ length: 400 }, (_, i) => finding(i % 5, i + 1));
+  let asked;
+  await applyConsensus(many, 5, async ({ maxTokens }) => {
+    asked = maxTokens;
+    return JSON.stringify({ keep: [], contested: [] });
+  });
+  assert.equal(asked, consensusMaxTokens(400));
+  assert.ok(consensusMaxTokens(400) > consensusMaxTokens(10));
+  assert.ok(consensusMaxTokens(0) >= 3000);
 });
 
 test("consensus names at most the cap of contested areas", async () => {

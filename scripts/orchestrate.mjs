@@ -31,7 +31,7 @@ import {
   findRejectedFindings,
   generateSuppressions,
 } from "./learn-from-reactions.mjs";
-import { MAX_VOTERS, createCompletionReporter } from "./lib.mjs";
+import { createCompletionReporter, votersFromEnv } from "./lib.mjs";
 import { outcomeWithoutConsensus } from "./consensus.mjs";
 import {
   parseAgentResult,
@@ -313,7 +313,7 @@ async function main() {
     );
     consensus = outcomeWithoutConsensus(
       process.env.ARTIFACTS_DIR || "",
-      Math.max(1, Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS)),
+      votersFromEnv(),
     );
   }
   const { agentsCompleted, agentsFailed } = consensus;

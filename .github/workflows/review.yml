@@ -65,10 +65,11 @@ jobs:
   review:
     # Evaluated without starting a runner, so a PR edit that cannot start a
     # review costs nothing. Expressions have no regex, so it looks for a
-    # ticked box with one or two spaces before the label (contains() ignores
-    # case, so [X] matches too). The PR template always carries the label
-    # unticked, so looking for the label alone would start a runner on every
-    # PR edit. The exact check in the first step stays the authority.
+    # ticked box with one or two spaces before the label. The PR template
+    # always carries the label unticked, so looking for the label alone would
+    # start a runner on every PR edit. The exact check in the first step
+    # accepts the same spacing and is otherwise stricter (lowercase x, the
+    # marker after the label), so this never skips a body it would accept.
     if: >-
       inputs.trigger == 'always' ||
       ((github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'edited') &&
@@ -116,7 +117,8 @@ jobs:
               return;
             }
             const body = context.payload.pull_request?.body ?? '';
-            core.setOutput('should_run', /\[x\]\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(-claude)? -->/.test(body));
+            // One or two spaces after the box, as the job's `if:` looks for.
+            core.setOutput('should_run', /\[x\] {1,2}\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(-claude)? -->/.test(body));
 
       # spec: RUN#the-review-job
       # Callers that set ubuntu-slim before the review became one job would
