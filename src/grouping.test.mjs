@@ -92,6 +92,18 @@ test("consensus names at most the cap of contested areas", async () => {
   assert.equal(contested.length, MAX_CONTESTED_AREAS);
 });
 
+test("consensus says whether it filtered the findings", async () => {
+  assert.equal((await applyConsensus(findings, 3, async () => JSON.stringify({ keep: [0], contested: [] }))).applied, true);
+  assert.equal((await applyConsensus(findings, 3, null)).applied, false);
+  assert.equal((await applyConsensus(findings, 3, async () => "no idea")).applied, false);
+  assert.equal(
+    (await applyConsensus(findings, 3, async () => {
+      throw new Error("down");
+    })).applied,
+    false,
+  );
+});
+
 test("a bare array reply still keeps findings, with no contested areas", async () => {
   const { kept, contested } = await applyConsensus(findings, 3, async () => "[0, 2]");
   assert.deepEqual(kept.map((f) => f.line), [10, 40]);
@@ -138,6 +150,11 @@ test("a reply cut off mid-object keeps only its explicit keep list, and says the
     // group's or nothing, never the kept findings.
     assert.equal(parseConsensusReply('{"keep": [0, 3'), null);
     assert.equal(parseConsensusReply('{"contested": [{"groups": [[5]]}], "keep": [0'), null);
+    // Cut off before the keep key: the contested group's list is not the kept findings.
+    assert.equal(parseConsensusReply('{"contested": [{"area": "loop", "groups": [[4]]}], "ke'), null);
+    assert.equal(parseConsensusReply('Sure: {"contested": [{"groups": [[4]]}]'), null);
+    // A bare array, with or without prose, is still the older reply shape.
+    assert.deepEqual(parseConsensusReply("Kept: [1, 2]"), { keep: [1, 2], contested: [] });
   } finally {
     console.warn = warn;
   }

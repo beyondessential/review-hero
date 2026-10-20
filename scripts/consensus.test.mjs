@@ -4,7 +4,13 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { collectFindings, outcomeWithoutConsensus, runConsensus, scanForResults } from "./consensus.mjs";
+import {
+  collectFindings,
+  CONSENSUS_CONCURRENCY,
+  outcomeWithoutConsensus,
+  runConsensus,
+  scanForResults,
+} from "./consensus.mjs";
 
 const envelope = (findings) => JSON.stringify({ type: "result", result: JSON.stringify(findings) });
 const finding = (line, comment) => ({ file: "a.ts", line, severity: "suggestion", comment });
@@ -36,7 +42,7 @@ test("one voter keeps everything with no consensus call and nothing contested", 
       throw new Error("not called");
     },
   });
-  assert.deepEqual(result, { kept: [{ ...finding(1, "x"), agent: "bugs" }], dropped: [], contested: [] });
+  assert.deepEqual(result, { kept: [{ ...finding(1, "x"), agent: "bugs" }], dropped: [], contested: [], unfiltered: [] });
 });
 
 test("contested groups point into the combined dropped list across agents", async () => {
@@ -76,4 +82,25 @@ test("without a consensus outcome, every agent finding is kept as it stands", ()
   assert.deepEqual(outcome.kept.map((f) => f.comment), ["x", "x again"]);
   assert.ok(outcome.kept.every((f) => !("voter" in f)));
   assert.deepEqual([outcome.dropped, outcome.contested, outcome.secondLook], [[], [], 0]);
+  assert.deepEqual(outcome.unfiltered, ["bugs"]);
+});
+
+test("agents whose consensus failed are named as unfiltered, and calls run a few at a time", async () => {
+  const tag = (agent, voter, line) => ({ ...finding(line, `${agent} ${line}`), agent, voter: `${agent}-${voter}` });
+  const agents = ["a", "b", "c", "d", "e", "f"];
+  const findings = agents.flatMap((agent) => [tag(agent, 0, 1), tag(agent, 1, 1)]);
+  let active = 0;
+  let peak = 0;
+  const callModel = async ({ messages }) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setImmediate(resolve));
+    active--;
+    if (messages[0].content.includes("[b]") || messages[0].content.includes("b 1")) throw new Error("overloaded");
+    return JSON.stringify({ keep: [0], contested: [] });
+  };
+  const { unfiltered } = await runConsensus({ findings, voters: 3, callModel });
+  assert.deepEqual(unfiltered, ["b"]);
+  assert.ok(peak <= CONSENSUS_CONCURRENCY);
+  assert.ok(peak > 1);
 });

@@ -8,7 +8,6 @@
  */
 
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -209,6 +208,12 @@ export function claudeArgs({ model, maxTurns, resume }) {
   // Keeps per-machine detail out of the system prompt, so the cacheable
   // prefix is the same for every voter and for a voter's wrap-up.
   args.push("--exclude-dynamic-system-prompt-sections");
+  // spec: RUN#credentials
+  // The CLI runs in the PR checkout, and would otherwise load the PR's own
+  // project settings (hooks run shell commands, and permission rules widen
+  // the tools), its MCP servers and its skills. User settings stay, for the
+  // trusted global rules the workflow installs.
+  args.push("--setting-sources", "user", "--strict-mcp-config", "--disable-slash-commands");
   return args;
 }
 
@@ -286,28 +291,6 @@ export async function runWithWrapUp({
 }
 
 // ── Reporting ────────────────────────────────────────────────────────────────
-
-/**
- * A collapsible log group around `body`, as one string, so concurrent
- * processes finishing together cannot interleave their lines. The body is the
- * model's and the CLI's output, which quotes the pull request: a line in it
- * starting with `::` would otherwise run as a workflow command (a forged
- * annotation, or a mask that hides later log lines). Command processing is
- * off for the body, under a token it cannot guess.
- */
-// spec: RUN#logs
-export function logGroup(title, body) {
-  const token = randomUUID();
-  const lines = [`::group::${title}`];
-  if (body.trim()) lines.push(`::stop-commands::${token}`, body.trimEnd(), `::${token}::`);
-  lines.push("::endgroup::");
-  return lines.join("\n") + "\n";
-}
-
-/** Model-controlled text for a single log line: one line, so it cannot start a command. */
-export function oneLine(text) {
-  return String(text ?? "").replace(/[\r\n]+/g, " ");
-}
 
 /**
  * The share of cacheable input read from the cache. A run that reported usage

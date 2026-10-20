@@ -37,8 +37,6 @@ import {
   agentPromptPath,
   cacheReadShare,
   createProcessRunner,
-  logGroup,
-  oneLine,
   primeRun,
   PRIMER_TIMEOUT_MS,
   runOutput,
@@ -48,7 +46,7 @@ import {
   startDriver,
 } from "./agent-process.mjs";
 import { writeConsensus } from "./consensus.mjs";
-import { getEnvOrThrow } from "./lib.mjs";
+import { getEnvOrThrow, logGroup, oneLine } from "./lib.mjs";
 import { ceilingFor, createScheduler, linuxMemoryProbe } from "./scheduler.mjs";
 import { buildCheckerPrompt, extractJsonArray } from "../src/index.mjs";
 

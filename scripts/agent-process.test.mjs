@@ -8,9 +8,7 @@ import {
   agentEnv,
   cacheReadShare,
   deadlineFrom,
-  logGroup,
   mergeWrapUp,
-  oneLine,
   spawnClaude,
   wrapUpReason,
 } from "./agent-process.mjs";
@@ -53,18 +51,6 @@ test("a run that reports usage but no cache shows as none, not blank", () => {
   assert.equal(cacheReadShare(undefined), "");
   assert.equal(cacheReadShare({ input_tokens: 10 }), "none");
   assert.equal(cacheReadShare({ cache_read_input_tokens: 3, cache_creation_input_tokens: 1 }), "75%");
-});
-
-test("each log group stops commands under its own token, and an empty body has none", () => {
-  const a = logGroup("one", "body");
-  const b = logGroup("two", "body");
-  assert.notEqual(a.split("\n")[1], b.split("\n")[1]);
-  assert.equal(logGroup("empty", "  \n"), "::group::empty\n::endgroup::\n");
-});
-
-test("model text for a single log line is kept to one line", () => {
-  assert.equal(oneLine("area\n::error::forged\r\nmore"), "area ::error::forged more");
-  assert.equal(oneLine(undefined), "");
 });
 
 // ── Deadline and environment ─────────────────────────────────────────────────

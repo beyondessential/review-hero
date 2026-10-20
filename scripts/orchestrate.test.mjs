@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseAgentResult, buildSummaryHeader } from "./orchestrate.mjs";
+import { parseAgentResult, buildSummaryHeader, consensusStat } from "./orchestrate.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-parse-"));
 
@@ -178,4 +178,14 @@ test("findings written as bare objects without the array brackets are still read
 
 test("a bare object that is not a finding is still a failure", () => {
   assert.equal(parse("bare-other-result.json", { type: "result", subtype: "success", result: '{"summary": "looks fine"}' }), null);
+});
+
+test("the summary reports consensus only where it filtered the findings", () => {
+  const f = (agent) => ({ file: "a.ts", line: 1, severity: "nitpick", comment: "c", agent });
+  const outcome = { voters: 3, kept: [f("bugs")], dropped: [f("design")] };
+  assert.equal(consensusStat({ ...outcome, voters: 1 }), null);
+  assert.equal(consensusStat({ ...outcome, unfiltered: [] }), "consensus 3 voters");
+  assert.equal(consensusStat(outcome), "consensus 3 voters");
+  assert.equal(consensusStat({ ...outcome, unfiltered: ["design"] }), "consensus 3 voters, not applied for 1 agent");
+  assert.equal(consensusStat({ ...outcome, unfiltered: ["bugs", "design"] }), "no consensus (3 voters)");
 });

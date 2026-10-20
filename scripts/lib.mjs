@@ -6,6 +6,7 @@
 
 import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import * as core from "@actions/core";
 import { formatCommitLink } from "../src/summary.mjs";
@@ -77,6 +78,30 @@ export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
     };
   }
   return { model: id, provider: "openrouter", warning };
+}
+
+// ── Job log ─────────────────────────────────────────────────────────────────
+
+/**
+ * A collapsible log group around `body`, as one string, so concurrent
+ * processes finishing together cannot interleave their lines. The body is the
+ * model's and the CLI's output, which quotes the pull request: a line in it
+ * starting with `::` would otherwise run as a workflow command (a forged
+ * annotation, or a mask that hides later log lines). Command processing is
+ * off for the body, under a token it cannot guess.
+ */
+// spec: RUN#logs
+export function logGroup(title, body) {
+  const token = randomUUID();
+  const lines = [`::group::${title}`];
+  if (body.trim()) lines.push(`::stop-commands::${token}`, body.trimEnd(), `::${token}::`);
+  lines.push("::endgroup::");
+  return lines.join("\n") + "\n";
+}
+
+/** Model-controlled text for a single log line: one line, so it cannot start a command. */
+export function oneLine(text) {
+  return String(text ?? "").replace(/[\r\n]+/g, " ");
 }
 
 // ── Agent result files ───────────────────────────────────────────────────────

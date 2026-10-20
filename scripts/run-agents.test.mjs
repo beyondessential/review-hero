@@ -4,11 +4,11 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildPrompts, runAgents, summaryTable, freshRunMinimum, DEFAULT_PROCESS_TIMEOUT_MS } from "./run-agents.mjs";
+import { buildPrompts, runAgents, freshRunMinimum, DEFAULT_PROCESS_TIMEOUT_MS } from "./run-agents.mjs";
 
 /** The time a fresh run needs left, at the voter time limit tests run with. */
 const MIN_FRESH_RUN_MS = freshRunMinimum(DEFAULT_PROCESS_TIMEOUT_MS);
-import { WRAP_UP_TIMEOUT_MS } from "./agent-process.mjs";
+import { summaryRow, WRAP_UP_TIMEOUT_MS } from "./agent-process.mjs";
 import { RESULT_FILE_PATTERN, resultFileName } from "./lib.mjs";
 import { parseAgentResult } from "../src/index.mjs";
 
@@ -259,7 +259,7 @@ test("result file names round-trip through the orchestrator's pattern", () => {
 test("the job summary has a row per process", async () => {
   const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
   const rows = await review(fake).rows;
-  const table = summaryTable(rows);
+  const table = rows.map(summaryRow).join("");
   assert.equal(table.split("\n").filter((line) => line.startsWith("| bugs |")).length, 4);
   assert.match(table, /\| bugs \| primer \|  \| \d+s \| \d+s \|  \| 0 \| 4 \| 0% \| primed \|/);
   assert.match(table, /\| bugs \| voter 0 \| 1 \| \d+s \| \d+s \|  \| 0 \| 4 \| 90% \| usable \|/);
@@ -521,6 +521,17 @@ test("an agent whose prompt cannot be read is skipped, and the rest still run", 
 });
 
 // ── Streaming ────────────────────────────────────────────────────────────────
+
+test("the CLI loads no settings, MCP servers or skills from the PR checkout, wrap-ups included", async () => {
+  const fake = fakeClaude((call) => (call.kind === "voter" ? PROSE : USABLE));
+  await review(fake, { voters: 1 }).rows;
+  assert.equal(fake.calls.length, 2);
+  for (const { args } of fake.calls) {
+    assert.equal(args[args.indexOf("--setting-sources") + 1], "user");
+    assert.ok(args.includes("--strict-mcp-config"));
+    assert.ok(args.includes("--disable-slash-commands"));
+  }
+});
 
 test("the CLI streams its output so retries can be seen", async () => {
   const fake = fakeClaude();

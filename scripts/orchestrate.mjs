@@ -451,9 +451,8 @@ async function main() {
 
   // Show filtering stats when non-trivial filtering occurred
   const filterStats = [];
-  if (voterCount > 1) {
-    filterStats.push(`consensus ${voterCount} voters`);
-  }
+  const consensusLine = consensusStat(consensus);
+  if (consensusLine) filterStats.push(consensusLine);
   if (droppedGroups.length > 0) {
     filterStats.push(`${droppedGroups.length} below threshold`);
   }
@@ -539,4 +538,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 }
 
-export { parseAgentResult, extractJsonArray, buildSummaryHeader };
+/**
+ * The summary's consensus figure, or null with one voter. Only a vote that
+ * happened is reported as one: consensus can fail for some agents, or be
+ * skipped for all of them when its step left no outcome.
+ */
+// spec: RUN#voters
+function consensusStat({ voters, unfiltered = [], kept, dropped }) {
+  if (voters <= 1) return null;
+  // Counted before suppression, which can empty an agent's findings.
+  const agents = new Set([...kept, ...dropped].map((f) => f.agent)).size;
+  if (unfiltered.length === 0) return `consensus ${voters} voters`;
+  if (unfiltered.length >= agents) return `no consensus (${voters} voters)`;
+  return `consensus ${voters} voters, not applied for ${unfiltered.length} agent${unfiltered.length === 1 ? "" : "s"}`;
+}
+
+export { parseAgentResult, extractJsonArray, buildSummaryHeader, consensusStat };

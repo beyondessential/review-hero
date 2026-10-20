@@ -19,8 +19,7 @@
 import { appendFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { oneLine } from "./agent-process.mjs";
-import { RESULT_FILE_PATTERN, votersFromEnv } from "./lib.mjs";
+import { mapWithConcurrency, oneLine, RESULT_FILE_PATTERN, votersFromEnv } from "./lib.mjs";
 import {
   applyConsensus,
   createAnthropicModelCaller,
@@ -84,10 +83,15 @@ export function collectFindings(results) {
   return { findings, agentsCompleted, agentsFailed };
 }
 
+/** Consensus model calls running at once: one per agent, a few at a time. */
+export const CONSENSUS_CONCURRENCY = 4;
+
 /**
  * Apply consensus per agent, so that two agents flagging the same line stay
  * distinct findings. Contested groups point into the combined `dropped` list,
- * so a second look can move a confirmed group back to `kept`.
+ * so a second look can move a confirmed group back to `kept`. `unfiltered`
+ * names the agents whose findings consensus could not filter, so the review
+ * does not claim a vote that never happened.
  */
 export async function runConsensus({ findings, voters, callModel }) {
   if (voters <= 1) {
@@ -95,6 +99,7 @@ export async function runConsensus({ findings, voters, callModel }) {
       kept: findings.map(({ voter, ...rest }) => rest),
       dropped: [],
       contested: [],
+      unfiltered: [],
     };
   }
 
@@ -105,14 +110,16 @@ export async function runConsensus({ findings, voters, callModel }) {
   }
 
   const entries = [...byAgent.entries()];
-  const results = await Promise.all(
-    entries.map(([, agentFindings]) => applyConsensus(agentFindings, voters, callModel)),
+  const results = await mapWithConcurrency(entries, CONSENSUS_CONCURRENCY, ([, agentFindings]) =>
+    applyConsensus(agentFindings, voters, callModel),
   );
 
   const kept = [];
   const dropped = [];
   const contested = [];
+  const unfiltered = [];
   results.forEach((result, i) => {
+    if (!result.applied) unfiltered.push(entries[i][0]);
     const offset = dropped.length;
     kept.push(...result.kept);
     dropped.push(...result.droppedFindings);
@@ -128,7 +135,7 @@ export async function runConsensus({ findings, voters, callModel }) {
       });
     }
   });
-  return { kept, dropped, contested };
+  return { kept, dropped, contested, unfiltered };
 }
 
 /**
@@ -145,6 +152,7 @@ export function outcomeWithoutConsensus(artifactsDir, voters) {
     kept: findings.map(({ voter, ...rest }) => rest),
     dropped: [],
     contested: [],
+    unfiltered: voters > 1 ? [...new Set(findings.map((f) => f.agent))] : [],
     secondLook: 0,
   };
 }
@@ -173,7 +181,7 @@ async function main() {
 
   const { findings, agentsCompleted, agentsFailed } = collectFindings(scanForResults(artifactsDir));
   if (voters > 1) console.log(`Voter consensus enabled: ${voters} voters per agent`);
-  const { kept, dropped, contested } = await runConsensus({ findings, voters, callModel });
+  const { kept, dropped, contested, unfiltered } = await runConsensus({ findings, voters, callModel });
 
   for (const area of contested) {
     // The label is the consensus model's, so it is kept to one line.
@@ -187,6 +195,7 @@ async function main() {
     kept,
     dropped,
     contested,
+    unfiltered,
     secondLook: 0,
   });
 

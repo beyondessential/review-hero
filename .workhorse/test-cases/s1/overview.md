@@ -81,6 +81,9 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] One checker per area, or OpenRouter, runs without a primer (verifies spec: RUN)
 - [x] The consensus reply's token limit grows with the number of findings, and so does cross-agent grouping's
 - [x] A consensus reply cut off mid-object keeps only an explicit keep list, warns that contested areas were lost, and is unreadable when the keep list itself is cut off (verifies spec: RUN)
+- [x] A reply cut off before its keep key is unreadable, never read as a bare array (verifies spec: RUN)
+- [x] Agents whose consensus failed are named as unfiltered; consensus calls run a few at a time
+- [x] The summary says "no consensus" or "not applied for N agents" rather than claiming a vote that did not happen (verifies spec: RUN)
 - [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
 - [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
 - [x] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
@@ -89,6 +92,8 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 ## Credentials
 
 - [x] Agent processes get no `GITHUB_TOKEN`, `GH_TOKEN` or `ACTIONS_*` variables (verifies spec: RUN)
+- [x] Every agent process, wrap-ups included, runs with user settings only, strict MCP config and skills disabled (verifies spec: RUN)
+- [ ] On a real run, a PR adding `.claude/settings.json` with a hook does not run that hook (verifies spec: RUN)
 - [ ] On a real run, no checkout leaves credentials in `.git/config` or under the runner temp directory (verifies spec: RUN)
 
 ## The review job

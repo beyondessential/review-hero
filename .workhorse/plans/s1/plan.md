@@ -178,3 +178,15 @@ Steps:
 - [x] Summary table gains peak memory and API retries; the log says why starts are held back
 - [x] Workflow input, README, DEVELOPING, spec and test cases
 - [ ] Watch a real review: pool fill, peak memory per process, any throttling
+
+## Trust boundary between agents and posting
+
+Review round 9 raised that agents now share a VM with the steps after them, including the one that mints the GitHub App token and posts.
+
+What was checked:
+
+- On `main`, every agent job minted the App token before its agents ran and checked the PR out with persisted credentials, so the agents could already reach a live token. This PR mints the token after the agents and persists no credentials, so it is an improvement on `main`.
+- The CLI loaded the PR's own `.claude/settings.json` (hooks, permission rules), `.mcp.json` and skills. Closed: agents run with `--setting-sources user --strict-mcp-config --disable-slash-commands`.
+- `git log --format=%B --output=<path>` writes a commit message, which the PR author controls, byte for byte to any path the runner user can write, and `git show --output=<path>` empties one. Both fall under the agents' `Bash(git log:*)` and `Bash(git show:*)` rules. Whether the CLI's permission check lets those flags through could not be confirmed locally. If it does, an agent can overwrite code a later step runs (the orchestrator, or a cached action), and so reach the App token; it can also rewrite the suppressions, diff and AI rules the later steps read, or another process's `~/.claude`.
+
+Open: whether posting moves to its own job, so the token never exists on a VM where agents ran, or whether the agents lose their git tools, which takes away the write. Waiting on the user.

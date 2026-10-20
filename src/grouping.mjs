@@ -37,7 +37,8 @@ export function indexReplyMaxTokens(findingCount, base) {
  * they sit in `droppedFindings`, and the number of distinct voters behind it.
  *
  * Falls back to keeping all findings (stripped of voter tags) with no contested
- * areas on error or when no `callModel` is supplied.
+ * areas on error or when no `callModel` is supplied, with `applied` false so
+ * the review can say its findings were not filtered.
  */
 // spec: RUN#second-look
 export async function applyConsensus(findings, voterCount, callModel) {
@@ -46,6 +47,7 @@ export async function applyConsensus(findings, voterCount, callModel) {
     dropped: 0,
     droppedFindings: [],
     contested: [],
+    applied: false,
   });
 
   if (voterCount <= 1) return keepAll();
@@ -162,7 +164,7 @@ Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "
     console.log(
       `Consensus: kept ${kept.length}, dropped ${droppedFindings.length} (${threshold}/${voterCount} voter threshold), ${contested.length} contested area(s)`,
     );
-    return { kept, dropped: droppedFindings.length, droppedFindings, contested };
+    return { kept, dropped: droppedFindings.length, droppedFindings, contested, applied: true };
   } catch (err) {
     console.warn(`Consensus filter failed, keeping all: ${err.message}`);
     return keepAll();
@@ -207,14 +209,17 @@ export function parseConsensusReply(text) {
   // An object reply that did not parse, most likely cut off: only an
   // explicit `keep` list can stand for the kept findings, never whatever
   // array comes first, which may be a contested group. The contested areas
-  // are lost, so say so.
-  if (/"keep"\s*:/.test(text)) {
+  // are lost, so say so. An object without a complete keep list (cut off
+  // before or inside it) is unreadable.
+  const arrayStart = text.indexOf("[");
+  if (start !== -1 && (arrayStart === -1 || start < arrayStart)) {
     const keepMatch = text.match(/"keep"\s*:\s*(\[[\d\s,]*\])/);
     if (!keepMatch) return null;
     console.warn("Consensus reply was not a readable object; kept findings recovered, contested areas lost");
     return { keep: asIndices(JSON.parse(keepMatch[1])), contested: [] };
   }
 
+  // A bare array of kept indices, the older reply shape.
   const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
   if (!arrMatch) return null;
   return { keep: asIndices(JSON.parse(arrMatch[0])), contested: [] };

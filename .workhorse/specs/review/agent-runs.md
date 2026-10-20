@@ -36,6 +36,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] The voter count never exceeds 10.
 - [ ] A finding survives consensus when a strict majority of the review's voter count reports it, with voters that contributed nothing still counting toward that number.
 - [ ] The completion block's `counts.voters` is the voter count the review ran with (see `reporting/completion-comments.md`).
+- [ ] The review summary's filtering line reports consensus only where it filtered findings: it says when consensus was not applied for some agents, and "no consensus" when it was applied for none.
 
 ## Concurrency
 
@@ -95,6 +96,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 ## Credentials
 
 - [ ] Agent processes run with no GitHub token in their environment.
+- [ ] Agent processes load no settings, hooks, MCP servers or skills from the pull request's checkout.
 - [ ] The GitHub App token is created after the agents and any second look have finished, just before the orchestrator posts.
 - [ ] The pull request checkout the agents read holds no stored credentials.
 

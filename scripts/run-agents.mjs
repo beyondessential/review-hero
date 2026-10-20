@@ -54,16 +54,13 @@ import {
   agentPromptPath,
   cacheReadShare,
   createProcessRunner,
-  logGroup,
   primeRun,
   PRIMER_TIMEOUT_MS,
   runWithWrapUp,
   spawnClaude,
   startDriver,
-  summaryHeader,
-  summaryRow,
 } from "./agent-process.mjs";
-import { formatCacheStats, getEnvOrThrow, resultFileName, votersFromEnv } from "./lib.mjs";
+import { formatCacheStats, getEnvOrThrow, logGroup, resultFileName, votersFromEnv } from "./lib.mjs";
 import { ceilingFor, createScheduler, linuxMemoryProbe } from "./scheduler.mjs";
 import { buildReviewAgentPrompt, parseAgentResult } from "../src/index.mjs";
 
@@ -102,12 +99,6 @@ function logRun(out, { label, outcome, envelope, stderr }) {
   if (stderr.trim()) lines.push(stderr.trimEnd());
   if (typeof envelope?.result === "string") lines.push(envelope.result);
   out(logGroup(`${label}: ${outcome}`, lines.join("\n")));
-}
-
-export const SUMMARY_HEADER = summaryHeader("Review agent runs");
-
-export function summaryTable(rows) {
-  return SUMMARY_HEADER + rows.map(summaryRow).join("");
 }
 
 /** Write through a temporary file, so a reader never sees half a result. */

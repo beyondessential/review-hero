@@ -15,6 +15,8 @@ import {
   mapWithConcurrency,
   voterCountForDiff,
   votersFromEnv,
+  logGroup,
+  oneLine,
   MAX_VOTERS,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
@@ -204,4 +206,16 @@ test("the voter count read back from the environment stays between one and the c
   assert.equal(votersFromEnv(""), 1);
   assert.equal(votersFromEnv(undefined), 1);
   assert.equal(votersFromEnv("nonsense"), 1);
+});
+
+test("each log group stops commands under its own token, and an empty body has none", () => {
+  const a = logGroup("one", "body");
+  const b = logGroup("two", "body");
+  assert.notEqual(a.split("\n")[1], b.split("\n")[1]);
+  assert.equal(logGroup("empty", "  \n"), "::group::empty\n::endgroup::\n");
+});
+
+test("model text for a single log line is kept to one line", () => {
+  assert.equal(oneLine("area\n::error::forged\r\nmore"), "area ::error::forged more");
+  assert.equal(oneLine(undefined), "");
 });

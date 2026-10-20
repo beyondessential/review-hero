@@ -107,6 +107,12 @@ export interface ConsensusResult {
   droppedFindings: Finding[];
   /** At most `MAX_CONTESTED_AREAS` areas, empty when consensus named none. */
   contested: ContestedArea[];
+  /**
+   * Whether the consensus model filtered these findings. False when every
+   * finding was kept unfiltered: one voter, no model caller, or a failed or
+   * unreadable reply.
+   */
+  applied: boolean;
 }
 
 export const MAX_CONTESTED_AREAS: number;
