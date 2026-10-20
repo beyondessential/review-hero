@@ -19,6 +19,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A small early measurement does not shrink the estimate below the assumed footprint (verifies spec: RUN)
 - [x] With no memory probe and no `concurrency`, at most eight processes run, with a warning (verifies spec: RUN)
 - [x] Process trees are measured on the poll, not once per queued piece of work
+- [x] A memory probe that cannot be read holds further starts and never ends the driver
 - [x] One process always runs, however full memory is (verifies spec: RUN)
 - [x] A 429 or 529 retry pauses new starts for its delay and lowers the running limit (verifies spec: RUN)
 - [x] Each unthrottled finish raises a lowered limit by one (verifies spec: RUN)
@@ -91,7 +92,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 
 ## Credentials
 
-- [x] Agent processes get no `GITHUB_TOKEN`, `GH_TOKEN` or `ACTIONS_*` variables (verifies spec: RUN)
+- [x] Agent processes get no `GITHUB_TOKEN`, `GH_TOKEN` or `ACTIONS_*` variables, and only the Anthropic and Claude Code variables named in the allowlist (verifies spec: RUN)
 - [x] Every agent process, wrap-ups included, runs with user settings only, strict MCP config and skills disabled (verifies spec: RUN)
 - [ ] On a real run, a PR adding `.claude/settings.json` with a hook does not run that hook (verifies spec: RUN)
 - [ ] On a real run, no checkout leaves credentials in `.git/config` or under the runner temp directory (verifies spec: RUN)
@@ -100,7 +101,8 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 
 - [ ] A PR edit with no ticked checkbox shows the job as skipped, with no runner started (verifies spec: RUN)
 - [ ] A ticked checkbox with two spaces after `[x]` still runs a review (verifies spec: RUN)
-- [ ] A ticked checkbox with a tab or three spaces after `[x]` is skipped by both the gate and the exact check (verifies spec: RUN)
+- [x] A ticked checkbox with a tab or three spaces after `[x]` is skipped by both the gate and the exact check (verifies spec: RUN)
+- [x] The job's gate, read from the workflow, never skips a description the first step's exact check accepts (verifies spec: RUN)
 - [ ] A PR edit with only the template's unticked checkboxes shows the job as skipped (verifies spec: RUN)
 - [ ] A consensus step that fails still leaves the orchestrator posting every agent finding, with a warning (verifies spec: RUN)
 - [ ] A review whose consensus or second look fails or times out still finishes with the job passing (verifies spec: RUN)

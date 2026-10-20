@@ -53,8 +53,14 @@ const ALLOWED_ENV_NAMES = new Set([
   "https_proxy",
   "no_proxy",
   "API_TIMEOUT_MS",
+  // Named one by one, not by prefix, so a variable added to the step later
+  // cannot reach an agent unnoticed.
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
 ]);
-const ALLOWED_ENV_PREFIXES = ["ANTHROPIC_", "CLAUDE_CODE_", "LC_"];
+const ALLOWED_ENV_PREFIXES = ["LC_"];
 
 /**
  * The environment an agent process runs with: what the CLI needs to start and

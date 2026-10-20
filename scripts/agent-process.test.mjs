@@ -72,6 +72,8 @@ test("agent processes get no GitHub tokens", () => {
     ANTHROPIC_AUTH_TOKEN: "router",
     API_TIMEOUT_MS: "180000",
     CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1000000",
+    ANTHROPIC_LOG: "debug",
+    CLAUDE_CODE_SOMETHING_NEW: "x",
     GITHUB_TOKEN: "ghs_secret",
     GH_TOKEN: "ghs_secret",
     ACTIONS_RUNTIME_TOKEN: "secret",

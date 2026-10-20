@@ -304,3 +304,28 @@ test("process trees are measured on the poll, not once per queued piece of work"
   h.releaseAll();
   await Promise.all([first, ...rest]);
 });
+
+test("a memory probe that cannot be read holds starts and never throws", async () => {
+  let readable = false;
+  const lines = [];
+  const memory = {
+    usage: () => {
+      if (!readable) throw new Error("EMFILE");
+      return { total: 10 * GB, used: 1 * GB };
+    },
+    treeRss: () => {
+      throw new Error("EMFILE");
+    },
+  };
+  const h = harness(createScheduler({ memory, pollMs: 1, log: (l) => lines.push(l) }));
+  const done = [h.submit("a", 101), h.submit("b", 102)];
+  await tick();
+  // The first always runs; the second waits while memory cannot be read.
+  assert.deepEqual(h.started, ["a"]);
+  assert.ok(lines.some((l) => l.includes("memory unreadable")));
+  readable = true;
+  await tick();
+  assert.deepEqual(h.started, ["a", "b"]);
+  h.releaseAll();
+  await Promise.all(done);
+});

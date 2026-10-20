@@ -178,11 +178,19 @@ export function createScheduler({
   let timer = null;
   let lastHold = null;
 
+  // The probe reads /proc, which can fail (a process gone mid-read, or no
+  // file descriptors to spare). A failed read must never end the driver and
+  // the voters still running in it, so it only skips this measurement.
   function measure() {
     if (!memory) return;
     const roots = [...running].flatMap((work) => [...work.pids]);
     if (roots.length === 0) return;
-    const sizes = memory.treeRss(roots);
+    let sizes;
+    try {
+      sizes = memory.treeRss(roots);
+    } catch {
+      return;
+    }
     for (const work of running) {
       let size = 0;
       for (const pid of work.pids) size += sizes.get(pid) ?? 0;
@@ -204,7 +212,14 @@ export function createScheduler({
       // Never below the assumed footprint: the first measurement comes moments
       // after a process starts, long before it has grown to its working size.
       const estimate = Math.max(footprint, defaultFootprint);
-      const { total, used } = memory.usage();
+      let usage;
+      try {
+        usage = memory.usage();
+      } catch {
+        // Unreadable for now: hold, and look again on the next poll.
+        return "memory unreadable";
+      }
+      const { total, used } = usage;
       let growth = 0;
       for (const work of running) growth += Math.max(0, estimate - (work.current ?? 0));
       if (used + estimate + growth > total * fillTarget) return "memory";
