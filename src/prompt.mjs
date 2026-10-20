@@ -63,6 +63,29 @@ export function softTurnCap(maxTurns) {
 }
 
 /**
+ * The layout every agent prompt shares: project context, the instructions,
+ * the repository's AI rules (to follow when doing `task`), the turn budget,
+ * then the PR title and fenced diff.
+ */
+function assemblePrompt({ projectContext, instructions, aiRules, task, turnBudget, prTitle, diff }) {
+  let prompt = "";
+  if (projectContext) {
+    prompt += `## Project Context\n\n${projectContext}\n\n`;
+  }
+  prompt += instructions;
+  if (aiRules) {
+    prompt += `\n\n## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when ${task}.\n\n`;
+    prompt += aiRules;
+  }
+  prompt += `\n\n## Turn budget\n\n${turnBudget}\n`;
+  prompt += `\n\n## PR Title\n\n${prTitle}\n\n## PR Diff\n\n\`\`\`diff\n`;
+  prompt += diff;
+  if (diff && !diff.endsWith("\n")) prompt += "\n";
+  prompt += "\`\`\`\n";
+  return prompt;
+}
+
+/**
  * Assemble the prompt for one review agent: project context, the shared agent
  * prompt, the agent's own specialisation, the repository's AI rules, the turn
  * budget, then the PR title and diff.
@@ -81,24 +104,15 @@ export function buildReviewAgentPrompt({
   prTitle = "",
   diff,
 }) {
-  let prompt = "";
-  if (projectContext) {
-    prompt += `## Project Context\n\n${projectContext}\n\n`;
-  }
-  prompt += basePrompt;
-  prompt += "\n\n";
-  prompt += agentPrompt;
-  if (aiRules) {
-    prompt +=
-      "\n\n## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when reviewing.\n\n";
-    prompt += aiRules;
-  }
-  prompt += `\n\n## Turn budget\n\nYou have at most ${maxTurns} agent turns for this review, and every tool call spends one. Stop exploring by turn ${softTurnCap(maxTurns)} and spend the remainder writing up findings. Prioritise the highest-risk changes, sample files selectively rather than reading them end-to-end, and make your final message the JSON array (exactly \`[]\` if you found nothing). Returning fewer high-confidence findings on time beats being cut off mid-exploration with no output at all.\n`;
-  prompt += `\n\n## PR Title\n\n${prTitle}\n\n## PR Diff\n\n\`\`\`diff\n`;
-  prompt += diff;
-  if (diff && !diff.endsWith("\n")) prompt += "\n";
-  prompt += "\`\`\`\n";
-  return prompt;
+  return assemblePrompt({
+    projectContext,
+    instructions: `${basePrompt}\n\n${agentPrompt}`,
+    aiRules,
+    task: "reviewing",
+    turnBudget: `You have at most ${maxTurns} agent turns for this review, and every tool call spends one. Stop exploring by turn ${softTurnCap(maxTurns)} and spend the remainder writing up findings. Prioritise the highest-risk changes, sample files selectively rather than reading them end-to-end, and make your final message the JSON array (exactly \`[]\` if you found nothing). Returning fewer high-confidence findings on time beats being cut off mid-exploration with no output at all.`,
+    prTitle,
+    diff,
+  });
 }
 
 /**
@@ -122,23 +136,15 @@ export function buildCheckerPrompt({
   area,
   findings,
 }) {
-  let prompt = "";
-  if (projectContext) {
-    prompt += `## Project Context\n\n${projectContext}\n\n`;
-  }
-  prompt += checkerPrompt;
-  prompt += "\n\n## Your specialisation\n\n";
-  prompt += agentPrompt;
-  if (aiRules) {
-    prompt +=
-      "\n\n## Repository AI Rules\n\nThis repository defines the following AI coding rules. Follow them when judging findings.\n\n";
-    prompt += aiRules;
-  }
-  prompt += `\n\n## Turn budget\n\nYou have at most ${maxTurns} agent turns for this check, and every tool call spends one. Stop exploring by turn ${softTurnCap(maxTurns)} and make your final message the JSON array of verdicts.\n`;
-  prompt += `\n\n## PR Title\n\n${prTitle}\n\n## PR Diff\n\n\`\`\`diff\n`;
-  prompt += diff;
-  if (diff && !diff.endsWith("\n")) prompt += "\n";
-  prompt += "\`\`\`\n";
+  let prompt = assemblePrompt({
+    projectContext,
+    instructions: `${checkerPrompt}\n\n## Your specialisation\n\n${agentPrompt}`,
+    aiRules,
+    task: "judging findings",
+    turnBudget: `You have at most ${maxTurns} agent turns for this check, and every tool call spends one. Stop exploring by turn ${softTurnCap(maxTurns)} and make your final message the JSON array of verdicts.`,
+    prTitle,
+    diff,
+  });
   prompt += `\n## Findings to check\n\nArea: ${sanitizeForPrompt(area)}\n\n`;
   findings.forEach((f, i) => {
     const comment = sanitizeForPrompt(f.comment, { maxLength: COMMENT_LIMIT });

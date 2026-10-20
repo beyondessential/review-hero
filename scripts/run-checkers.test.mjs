@@ -112,6 +112,30 @@ test("checkers run under the cap, see their area's prompt, and their verdicts ar
   assert.ok(rows.every((r) => r.outcome === "answered"));
 });
 
+test("a checker stopped at its time limit after answering is reported by its answer", async () => {
+  const runClaude = async () => ({
+    code: -1,
+    timedOut: true,
+    stdout: JSON.stringify({ result: answer([[0, "confirm"]]) }),
+    stderr: "",
+  });
+  const rows = [];
+  const { confirmationsByArea } = await runSecondLook({
+    consensus: consensus(3),
+    prompts: ["area 0"],
+    model: "m",
+    maxTurns: 10,
+    memory: null,
+    logsDir: mkdtempSync(join(tmpdir(), "checkers-")),
+    env: {},
+    runClaude,
+    out: () => {},
+    onRow: (row) => rows.push(row),
+  });
+  assert.deepEqual(confirmationsByArea, [[1, 0]]);
+  assert.deepEqual(rows.map((r) => r.outcome), ["answered"]);
+});
+
 test("a checker that throws only withholds its votes", async () => {
   let calls = 0;
   const runClaude = async () => {

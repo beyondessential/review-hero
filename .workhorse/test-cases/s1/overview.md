@@ -17,6 +17,8 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] Processes fill memory up to 80%, leaving room for running ones to grow to the largest footprint (verifies spec: RUN)
 - [x] A measured process-tree footprint larger than the assumed one replaces it (verifies spec: RUN)
 - [x] A small early measurement does not shrink the estimate below the assumed footprint (verifies spec: RUN)
+- [x] With no memory probe and no `concurrency`, at most eight processes run, with a warning (verifies spec: RUN)
+- [x] Process trees are measured on the poll, not once per queued piece of work
 - [x] One process always runs, however full memory is (verifies spec: RUN)
 - [x] A 429 or 529 retry pauses new starts for its delay and lowers the running limit (verifies spec: RUN)
 - [x] Each unthrottled finish raises a lowered limit by one (verifies spec: RUN)
@@ -39,6 +41,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] An empty voter is replaced once by a fresh voter (verifies spec: RUN)
 - [x] A slot never gets more than one fresh run (verifies spec: RUN)
 - [x] A timed-out voter is not retried and gets no wrap-up
+- [x] A voter or checker stopped at its time limit after answering counts by its answer (verifies spec: RUN)
 - [x] A run with no result event writes a result marked failed, never its raw output, so it counts as a failed run (verifies spec: RUN)
 - [x] A process past its time limit is stopped along with the processes it spawned (verifies spec: RUN)
 - [x] Each slot's result is written under the name the orchestrator scans for (verifies spec: RUN)
@@ -75,7 +78,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] Checkers start under the same limits as voters (verifies spec: RUN)
 - [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
 - [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
-- [ ] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
+- [x] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
 - [ ] A second look stopped at its time limit leaves the orchestrator posting from consensus as it stood (verifies spec: RUN)
 
 ## Credentials
@@ -95,6 +98,8 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [ ] A caller with no config on the default branch and a bootstrap branch set reads config from the bootstrap branch
 - [ ] On a self-hosted runner, a second review reads none of the first review's results or consensus outcome (verifies spec: RUN)
 - [ ] The completion block's `counts.voters` matches the voter tier for the diff (verifies spec: RUN)
+- [ ] A review on `ubuntu-slim` shows the 15-minute warning in the job log (verifies spec: RUN)
+- [ ] The second look step runs with the same environment as the agents step, through the shared anchor
 
 ## Logs
 

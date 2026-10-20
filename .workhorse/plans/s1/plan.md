@@ -157,7 +157,7 @@ Steps:
 - [x] `scripts/orchestrate.mjs` reads the outcome; summary filtering line and `counts.secondLook`
 - [x] Workflow: consensus and second-look steps before the token, time limits 40 / 15 / 75 minutes
 - [x] README, DEVELOPING, completion comments spec
-- [ ] Observe a real second look on a PR
+- [x] Observe a real second look on a PR
 
 ## Concurrency by memory and provider
 

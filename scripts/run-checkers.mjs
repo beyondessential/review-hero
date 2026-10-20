@@ -44,10 +44,10 @@ import {
   spawnClaude,
   summaryHeader,
   summaryRow,
-} from "./run-agents.mjs";
+} from "./agent-process.mjs";
 import { writeConsensus } from "./consensus.mjs";
 import { getEnvOrThrow, readOptional } from "./lib.mjs";
-import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
+import { ceilingFor, createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
 import { buildCheckerPrompt, extractJsonArray } from "../src/index.mjs";
 
 export const DEFAULT_CHECKER_MAX_TURNS = 10;
@@ -151,7 +151,12 @@ export async function runSecondLook({
   onProgress = () => {},
   now = Date.now,
   deadline = Infinity,
-  scheduler = createScheduler({ ceiling: concurrency, memory, now, log: (line) => out(`${line}\n`) }),
+  scheduler = createScheduler({
+    ceiling: ceilingFor(concurrency, memory, (line) => out(`::warning::${line}\n`)),
+    memory,
+    now,
+    log: (line) => out(`${line}\n`),
+  }),
 }) {
   const { timed } = createProcessRunner({ scheduler, env, runClaude, timeoutMs, deadline, now, out });
   const count = checkersPerArea(consensus.voters);
@@ -181,12 +186,14 @@ export async function runSecondLook({
             writeFileSync(join(logsDir, `${area.agent}-area-${i}-checker-${checker}.json`), runOutput(result));
             const answer = typeof envelope?.result === "string" ? envelope.result : null;
             const verdicts = answer === null ? null : extractJsonArray(answer);
+            // Verdicts count however the run ended, so one stopped at its
+            // time limit after answering is reported by its answer.
             let outcome = result.notStarted
               ? "not started"
-              : result.timedOut
-                ? "timed out"
-                : verdicts
-                  ? "answered"
+              : verdicts
+                ? "answered"
+                : result.timedOut
+                  ? "timed out"
                   : "no verdicts";
             if (wrappedUp) outcome += " after wrap-up";
             out(

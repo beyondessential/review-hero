@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
+import { ceilingFor, createScheduler, linuxMemoryProbe, parseCeiling, UNMEASURED_CEILING } from "./scheduler.mjs";
 
 const GB = 1024 * 1024 * 1024;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
@@ -280,4 +280,27 @@ test("work waiting out a provider pause keeps the process alive with nothing run
   `;
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf-8", timeout: 15_000 });
   assert.equal(result.stdout.trim(), "waited", result.stderr);
+});
+
+test("with no memory probe and no ceiling, a fixed ceiling stands in", () => {
+  const lines = [];
+  assert.equal(ceilingFor(Infinity, null, (l) => lines.push(l)), UNMEASURED_CEILING);
+  assert.match(lines[0], /memory cannot be read/);
+  assert.equal(ceilingFor(3, null), 3);
+  assert.equal(ceilingFor(Infinity, fakeMemory()), Infinity);
+});
+
+test("process trees are measured on the poll, not once per queued piece of work", async () => {
+  let scans = 0;
+  const memory = { ...fakeMemory(), treeRss: (roots) => (scans++, new Map(roots.map((pid) => [pid, 0]))) };
+  const h = harness(createScheduler({ memory, defaultFootprint: 0.1 * GB, pollMs: 60_000 }));
+  const first = h.submit("first", 101);
+  await tick();
+  const rest = Array.from({ length: 20 }, (_, i) => h.submit(i));
+  await tick();
+  assert.equal(scans, 0);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all([first, ...rest]);
 });

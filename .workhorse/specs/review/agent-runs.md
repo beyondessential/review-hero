@@ -18,6 +18,8 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
 - [ ] Consensus has a time limit of its own, and when it leaves no outcome the orchestrator posts every agent finding without consensus, with a warning in the job log.
 - [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
+- [ ] Every step that reaches the network or a model has a time limit of its own, and the job's limit covers them all, so a hung step cannot take the orchestrator's time to post.
+- [ ] A review running on `ubuntu-slim` warns in the job log that the runner stops a job at 15 minutes.
 - [ ] The agents and the second look each work to a deadline a little inside their time limit: every process stops by it, so its result is written before the limit is reached.
 - [ ] A fresh run for a crashed or empty voter starts only when enough time is left before the deadline for it to be useful, judged when it would start.
 - [ ] An agent process due to start with no time left before its deadline does not start, and is recorded as not started.
@@ -42,6 +44,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] When an agent process reports that the provider is rate limiting or overloaded, no new process starts for the retry delay the provider asked for, and the number allowed to run drops below the number running at that moment.
 - [ ] Each agent process that finishes without having been rate limited raises that number by one.
 - [ ] `concurrency` is an optional workflow input capping how many agent processes run at once, with no cap by default.
+- [ ] Where the runner's memory cannot be read and `concurrency` is not set, at most eight agent processes run at once, with a warning in the job log.
 - [ ] Outside a provider pause, one agent process always runs while work is waiting, whatever the other limits say.
 - [ ] Work starts in the order it was queued, so every primer starts ahead of any voter and every agent's cache is written early.
 
@@ -61,6 +64,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] A voter that still has no usable findings after its wrap-up is replaced once by a fresh voter.
 - [ ] A voter left without usable findings after its retry or replacement contributes nothing, and the review carries on.
 - [ ] A voter that produced no result of its own, whether it timed out, crashed, failed unexpectedly or never started, has its result recorded as failed, so it counts as a failed agent run.
+- [ ] A voter or checker stopped at its time limit after it had already answered counts by its answer.
 - [ ] Each voter's result is written as soon as it finishes, so results from finished voters survive a later failure in the job.
 - [ ] An unexpected error in one voter costs only that voter.
 

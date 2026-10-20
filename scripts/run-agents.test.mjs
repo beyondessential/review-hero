@@ -4,19 +4,8 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  agentEnv,
-  buildPrompts,
-  cacheReadShare,
-  mergeWrapUp,
-  runAgents,
-  spawnClaude,
-  summaryTable,
-  WRAP_UP_TIMEOUT_MS,
-  MIN_FRESH_RUN_MS,
-  deadlineFrom,
-  wrapUpReason,
-} from "./run-agents.mjs";
+import { buildPrompts, runAgents, summaryTable, MIN_FRESH_RUN_MS } from "./run-agents.mjs";
+import { WRAP_UP_TIMEOUT_MS } from "./agent-process.mjs";
 import { RESULT_FILE_PATTERN, resultFileName } from "./lib.mjs";
 import { parseAgentResult } from "../src/index.mjs";
 
@@ -202,13 +191,6 @@ test("a failed wrap-up keeps the original result", async () => {
   assert.equal(result[1].outcome, "usable");
 });
 
-test("the wrap-up only follows a capped run or an answer with no array", () => {
-  assert.equal(wrapUpReason(USABLE, JSON.parse(USABLE.stdout), 20), null);
-  assert.equal(wrapUpReason(CRASH, null, 20), null);
-  assert.match(wrapUpReason(CAPPED, JSON.parse(CAPPED.stdout), 20), /max-turns \(20\)/);
-  assert.match(wrapUpReason(PROSE, JSON.parse(PROSE.stdout), 20), /without a findings array/);
-});
-
 // ── Retries and replacements ─────────────────────────────────────────────────
 
 test("a crashed voter is retried once from scratch", async () => {
@@ -296,17 +278,6 @@ test("a voter's row covers its wrap-up, with turns summed over both runs", async
   assert.equal(row.turns, 8);
 });
 
-test("merging a wrap-up keeps its answer and sums the counters", () => {
-  const merged = mergeWrapUp(
-    { num_turns: 20, duration_ms: 1000, usage: { cache_read_input_tokens: 100, cache_creation_input_tokens: 50 } },
-    { result: "[]", num_turns: 1, duration_ms: 200, usage: { cache_read_input_tokens: 300 } },
-  );
-  assert.equal(merged.result, "[]");
-  assert.equal(merged.num_turns, 21);
-  assert.equal(merged.duration_ms, 1200);
-  assert.deepEqual(merged.usage, { cache_read_input_tokens: 400, cache_creation_input_tokens: 50 });
-});
-
 test("an answer with a stray bracket but no findings array still gets its wrap-up", async () => {
   const stray = { code: 0, timedOut: false, stdout: envelope("I read [src/x.mjs] and it looks fine."), stderr: "" };
   const fake = fakeClaude((call) => (call.kind === "resume" ? USABLE : stray));
@@ -370,12 +341,6 @@ test("every row is handed over as it settles", async () => {
   assert.deepEqual(seen, rows);
 });
 
-test("a run that reports usage but no cache shows as none, not blank", () => {
-  assert.equal(cacheReadShare(undefined), "");
-  assert.equal(cacheReadShare({ input_tokens: 10 }), "none");
-  assert.equal(cacheReadShare({ cache_read_input_tokens: 3, cache_creation_input_tokens: 1 }), "75%");
-});
-
 test("every process's time limit is cut to what is left before the deadline", async () => {
   let clock = 0;
   const fake = fakeClaude();
@@ -429,6 +394,15 @@ test("a fresh run admitted with too little time left does not start", async () =
   assert.deepEqual(result.map((r) => `${r.agent} ${r.outcome}`), ["bugs crashed", "design usable", "bugs not started"]);
 });
 
+test("a voter stopped at its time limit after answering counts by its answer", async () => {
+  const fake = fakeClaude(() => ({ ...USABLE, code: -1, timedOut: true }));
+  const { output, rows } = review(fake, { voters: 1 });
+  const result = await rows;
+  assert.deepEqual(result.map((r) => r.outcome), ["usable"]);
+  assert.equal(fake.calls.length, 1);
+  assert.ok(!output.some((line) => line.includes("contributes nothing")));
+});
+
 test("a run with no result writes one marked failed, never its raw output", async () => {
   // Cut part way through a line, a stream's tail can still hold an array that
   // would read as an empty set of findings.
@@ -452,42 +426,7 @@ test("a voter that fails unexpectedly writes a result marked failed", async () =
   assert.equal(parseAgentResult(join(resultsDir, "bugs-result.json"), "bugs"), null);
 });
 
-test("a step budget becomes a deadline, and no budget means none", () => {
-  const now = () => 1000;
-  assert.equal(deadlineFrom("60000", now), 61000);
-  assert.equal(deadlineFrom(undefined, now), Infinity);
-  assert.equal(deadlineFrom("", now), Infinity);
-  assert.equal(deadlineFrom("nonsense", now), Infinity);
-});
-
 // ── Environment ──────────────────────────────────────────────────────────────
-
-test("agent processes get no GitHub tokens", () => {
-  const env = agentEnv({
-    PATH: "/usr/bin",
-    HOME: "/home/runner",
-    ANTHROPIC_API_KEY: "key",
-    ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
-    ANTHROPIC_AUTH_TOKEN: "router",
-    API_TIMEOUT_MS: "180000",
-    CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1000000",
-    GITHUB_TOKEN: "ghs_secret",
-    GH_TOKEN: "ghs_secret",
-    ACTIONS_RUNTIME_TOKEN: "secret",
-    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "secret",
-    GITHUB_STEP_SUMMARY: "/tmp/summary",
-    REVIEW_HERO_PRIVATE_KEY: "secret",
-  });
-  assert.deepEqual(Object.keys(env).sort(), [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "API_TIMEOUT_MS",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-    "HOME",
-    "PATH",
-  ]);
-});
 
 test("the review passes its environment to every process unchanged", async () => {
   const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
@@ -559,55 +498,7 @@ test("an agent whose prompt cannot be read is skipped, and the rest still run", 
   assert.match(warnings.join("\n"), /::warning::Skipping agent "house": cannot read its prompt/);
 });
 
-// ── Spawning the CLI ─────────────────────────────────────────────────────────
-
-/** A `claude` on a private PATH that runs the given shell body. */
-function stubClaude(body) {
-  const bin = mkdtempSync(join(tmpdir(), "run-agents-bin-"));
-  const path = join(bin, "claude");
-  writeFileSync(path, `#!/bin/sh\n${body}\n`);
-  chmodSync(path, 0o755);
-  return { PATH: `${bin}:/usr/bin:/bin` };
-}
-
-test("spawning the CLI feeds it the prompt and collects its output and exit code", async () => {
-  const env = stubClaude('cat; echo "$1" >&2; exit 3');
-  const result = await spawnClaude({ args: ["-p"], input: "the prompt", env, timeoutMs: 10_000 });
-  assert.deepEqual(result, { code: 3, timedOut: false, stdout: "", rawTail: "the prompt", stderr: "-p\n" });
-});
-
-test("spawning the CLI hands over each streamed event and keeps the result event as its output", async () => {
-  const lines = [
-    '{"type":"system","subtype":"init"}',
-    '{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"retry_delay_ms":1000}',
-    '{"type":"result","subtype":"success","result":"[]","num_turns":2}',
-  ];
-  const env = stubClaude(`cat > /dev/null; printf '%s\\n' ${lines.map((l) => `'${l}'`).join(" ")}`);
-  const events = [];
-  const pids = [];
-  const result = await spawnClaude({
-    args: [],
-    input: "prompt",
-    env,
-    timeoutMs: 10_000,
-    onEvent: (e) => events.push(e.subtype ?? e.type),
-    onSpawn: (pid) => pids.push(pid),
-    onExit: (pid) => pids.push(-pid),
-  });
-  assert.equal(result.code, 0);
-  assert.equal(result.stdout, lines[2]);
-  assert.deepEqual(events, ["init", "api_retry", "success"]);
-  assert.equal(pids.length, 2);
-  assert.equal(pids[1], -pids[0]);
-});
-
-test("a run that never reaches a result event keeps the tail of its raw output apart from its result", async () => {
-  const env = stubClaude("cat > /dev/null; echo 'Error: something broke'; exit 1");
-  const result = await spawnClaude({ args: [], input: "", env, timeoutMs: 10_000 });
-  assert.equal(result.code, 1);
-  assert.equal(result.stdout, "");
-  assert.equal(result.rawTail, "Error: something broke\n");
-});
+// ── Streaming ────────────────────────────────────────────────────────────────
 
 test("the CLI streams its output so retries can be seen", async () => {
   const fake = fakeClaude();
@@ -629,23 +520,3 @@ test("rate-limit retries reported by a run reach the scheduler and the row", asy
   assert.ok(lines.some((l) => l.includes("Provider throttling (HTTP 429)")));
 });
 
-test("a process past its time limit is stopped and reported as timed out", async () => {
-  const env = stubClaude("exec sleep 30");
-  const result = await spawnClaude({ args: [], input: "", env, timeoutMs: 100 });
-  assert.equal(result.timedOut, true);
-});
-
-test("a process past its time limit is stopped along with the processes it spawned", async () => {
-  const pidFile = join(mkdtempSync(join(tmpdir(), "run-agents-child-")), "pid");
-  const env = stubClaude(`cat > /dev/null; sleep 30 & echo $! > ${pidFile}; wait`);
-  const result = await spawnClaude({ args: [], input: "", env, timeoutMs: 200 });
-  assert.equal(result.timedOut, true);
-  const child = Number(readFileSync(pidFile, "utf-8"));
-  assert.throws(() => process.kill(child, 0));
-});
-
-test("a CLI that cannot be found reports a failed run rather than throwing", async () => {
-  const result = await spawnClaude({ args: [], input: "", env: { PATH: "/nonexistent" }, timeoutMs: 1000 });
-  assert.equal(result.code, -1);
-  assert.equal(result.timedOut, false);
-});

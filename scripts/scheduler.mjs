@@ -17,7 +17,8 @@
  *
  * At least one process always runs while work is waiting, outside a provider
  * pause, so the scheduler never stalls on an estimate. Work starts in the
- * order it was queued.
+ * order it was queued. Where memory cannot be read and there is no ceiling,
+ * the drivers fall back to a fixed one (see `ceilingFor`).
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -30,6 +31,12 @@ export const DEFAULT_FOOTPRINT_BYTES = 250 * 1024 * 1024;
 
 /** How often running process trees are measured and waiting work re-checked. */
 export const POLL_MS = 2_000;
+
+/**
+ * The most agent processes running at once where the runner's memory cannot
+ * be read and no `concurrency` is set, so nothing else bounds the pool.
+ */
+export const UNMEASURED_CEILING = 8;
 
 /** The least time new starts pause for after a throttled request. */
 const MIN_THROTTLE_PAUSE_MS = 5_000;
@@ -205,8 +212,10 @@ export function createScheduler({
     return null;
   }
 
+  // Admission only reads overall memory use. Process trees are measured on
+  // the poll alone: work queued in one burst would otherwise rescan /proc once
+  // per item, for processes spawned moments ago that cannot have grown yet.
   function pump() {
-    measure();
     while (waiting.length > 0) {
       const reason = holdReason();
       if (reason) {
@@ -228,7 +237,10 @@ export function createScheduler({
       // Left ref'd on purpose: while work waits out a provider pause with
       // nothing running, this timer is the only thing keeping the process
       // alive. It is cleared as soon as nothing is running or waiting.
-      timer = setInterval(pump, pollMs);
+      timer = setInterval(() => {
+        measure();
+        pump();
+      }, pollMs);
     } else if (!busy && timer) {
       clearInterval(timer);
       timer = null;
@@ -302,6 +314,16 @@ export function createScheduler({
       return { running: running.size, waiting: waiting.length, providerLimit, pausedUntil, footprint };
     },
   };
+}
+
+/**
+ * The ceiling to schedule with: `ceiling` as given, or `UNMEASURED_CEILING`
+ * when there is no ceiling and no memory probe to stand in for one.
+ */
+export function ceilingFor(ceiling, memory, log = () => {}) {
+  if (memory || ceiling !== Infinity) return ceiling;
+  log(`Runner memory cannot be read; running at most ${UNMEASURED_CEILING} agent processes at once`);
+  return UNMEASURED_CEILING;
 }
 
 /**

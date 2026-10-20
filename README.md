@@ -407,10 +407,10 @@ jobs:
 | `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job. |
 | `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
-| `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits. |
+| `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits; on a runner whose memory cannot be read, it runs at most 8. |
 
 > [!NOTE]
-> `ubuntu-slim` caps a job at 15 minutes, and the whole review (setup, every agent, and posting) runs in one job, so it has to fit within that.
+> `ubuntu-slim` caps a job at 15 minutes, and the whole review (setup, every agent, and posting) runs in one job, so it has to fit within that. A review on `ubuntu-slim` warns about this in the job log.
 
 ### Auto-Fix inputs
 
