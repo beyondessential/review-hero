@@ -17,6 +17,7 @@ import {
   discoverBaseAgents,
   filterDiff,
   createAnthropicModelCaller,
+  isValidAgentKey,
 } from "./index.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-lib-"));
@@ -313,4 +314,12 @@ test("createAnthropicModelCaller returns \"\" when a response carries no text bl
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("an agent key cannot end in the voter suffix result files use", () => {
+  assert.ok(isValidAgentKey("perf"));
+  assert.ok(isValidAgentKey("voter-rules"));
+  assert.ok(isValidAgentKey("perf-voter"));
+  assert.ok(!isValidAgentKey("perf-voter-1"));
+  assert.ok(!isValidAgentKey("Perf"));
 });

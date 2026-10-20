@@ -12,7 +12,7 @@ PR checkbox checked
         ▼
    ┌─────────┐   Haiku selects    ┌──────────────────────────────┐
    │ Triage  │──── agents ───────>│ Review agents (x N x voters) │
-   │ (Haiku) │   filters diff     │ (GLM or Claude, parallel)    │
+   │ (Haiku) │   filters diff     │ (GLM or Claude, concurrent)  │
    └─────────┘                    └──────────────┬────────────────┘
                                                  │ JSON findings
                                                  ▼
@@ -24,9 +24,12 @@ PR checkbox checked
                                         └─────────────────┘
 ```
 
-1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, and sets the agent turn budget (flat for GLM, scaled by diff size for Claude).
-2. **Review agents** — a parallel matrix of Claude Code CLI invocations, each with a specialised prompt. When `voters > 1`, each agent runs multiple times independently for consensus. Agents have read-only access to the repo so they can explore surrounding code for context.
-3. **Orchestrator** — collects all agent outputs, applies voter consensus (when enabled), filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
+Triage, the agents, consensus and the second look run in one job. The orchestrator posts from a second, short job on `ubuntu-slim`.
+
+1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
+2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt. The CLI installed is the newest release at least a week old, so a broken or compromised release has time to be caught first. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
+3. **Consensus and second look** — applies voter consensus per agent (when enabled). Where findings below the majority cluster in a part of the code, fresh checkers take a second look at them (see [Second look](#second-look)).
+4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
 
 ## Prerequisites (once per owner — user or org)
 
@@ -189,7 +192,7 @@ agents:
 
 ### Custom agents
 
-Drop a `.md` file into `.github/review-hero/prompts/` and it becomes an agent. The filename (minus `.md`) is the agent key, which must consist of **lowercase alphanumeric characters and hyphens only** (e.g. `project-conventions`, `my-rules`). Keys that don't match this pattern are ignored. Define the agent's display name and triage description in `config.yml` under `agents`.
+Drop a `.md` file into `.github/review-hero/prompts/` and it becomes an agent. The filename (minus `.md`) is the agent key, which must consist of **lowercase alphanumeric characters and hyphens only** (e.g. `project-conventions`, `my-rules`) and must not end in `-voter-` followed by a number, which names a voter's results. Keys that don't match are ignored. Define the agent's display name and triage description in `config.yml` under `agents`.
 
 Example — `.github/review-hero/prompts/project-conventions.md`:
 
@@ -243,20 +246,37 @@ Review Hero includes two complementary mechanisms to improve signal-to-noise rat
 
 ### Voter consensus
 
-When `voters` is set to 2 or more, each review agent runs N independent times and only findings that a majority of voters agree on are kept. This significantly reduces false positives — noise tends to vary between runs while real issues are consistently found.
+When a review runs 2 or more voters, each review agent runs that many independent times and only findings that a majority of voters agree on are kept. This significantly reduces false positives — noise tends to vary between runs while real issues are consistently found.
+
+The number of voters follows the size of the filtered diff:
+
+| Changed diff lines | Voters per agent |
+|--------------------|------------------|
+| Under 100          | 1 (no consensus) |
+| 100 or more        | `voters`         |
+
+Every agent in a review runs the same number of voters, never more than 10.
 
 ```yaml
 jobs:
   review:
     uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
-      voters: 3  # Run each agent 3 times, keep findings with ≥2/3 agreement
+      voters: 3  # Run each agent 3 times on a typical diff, keep findings with ≥2/3 agreement
     secrets: inherit
 ```
 
-The consensus threshold is `floor(voters / 2) + 1` (strict majority) — for 3 voters, a finding needs at least 2 to agree (same file, within 5 lines). Each voter runs the same prompt — natural LLM stochasticity provides diversity, while real issues are found consistently.
+The consensus threshold is a strict majority of the review's voter count — for 3 voters, a finding needs at least 2 to agree (same file, within 5 lines). A voter that contributed nothing still counts toward that number. Each voter runs the same prompt — natural LLM stochasticity provides diversity, while real issues are found consistently.
 
 **Cost impact:** Voters multiply agent costs linearly. The default of 3 voters strikes a good balance between noise reduction and cost.
+
+### Second look
+
+Findings below the majority are usually noise, but sometimes several voters each flag something different in the same part of the code, or a lone finding looks serious. While grouping findings, the consensus model names up to three such contested areas per agent.
+
+Each contested area gets fresh checkers: runs of the same agent, given the diff and the area's findings, which read the code and confirm or reject each one. Every confirmation counts as a vote, and an area gets as many checkers as a finding from a single voter needs to reach the majority (one for 3 voters, two for 5). A finding whose voters and confirming checkers reach the majority is posted with the rest; the summary's filtering line says how many a second look confirmed.
+
+A review takes at most one second look, and none when it runs a single voter. If the second look fails or runs out of time, the review posts from consensus as it stood.
 
 ### Choosing the model
 
@@ -341,7 +361,7 @@ Posted at the end of a review round, or when a review could not complete.
 | `outcome` | `completed` when at least one agent returned results, `failed` when every agent failed |
 | `reviewedSha` | The commit that was reviewed |
 | `model` | The model the review agents ran on |
-| `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed` |
+| `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, `secondLook` (findings below the majority a second look confirmed) |
 
 ### `auto-fix`
 
@@ -375,8 +395,9 @@ jobs:
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
       model: claude-sonnet-5   # Claude model for the Claude checkbox (auto-upgrades to Opus for large PRs)
-      runner: ubuntu-slim      # Runner for all jobs
-      voters: 3                # Voters per agent (1 to disable consensus)
+      runner: ubuntu-latest    # Runner for the review job
+      voters: 3                # Voters per agent on a typical diff (1 to disable consensus)
+      concurrency: 0           # Most agent processes at once (0 = limited by memory and the provider only)
     secrets: inherit
 ```
 
@@ -384,8 +405,12 @@ jobs:
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
 | `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
-| `runner`  | `ubuntu-slim`      | GitHub Actions runner for all jobs. |
-| `voters`  | `3`                | Independent voters per agent. `>=2` enables consensus filtering. Set to `1` to disable. |
+| `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job, which runs the agents. Posting always runs on `ubuntu-slim`. |
+| `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
+| `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits; on a runner whose memory cannot be read, it runs at most 8. |
+
+> [!NOTE]
+> `ubuntu-slim` caps a job at 15 minutes, and setup and every agent run in the review job, so they have to fit within that. A review job on `ubuntu-slim` warns about this in the job log.
 
 ### Auto-Fix inputs
 
@@ -421,7 +446,7 @@ The triage step uses Haiku to skip agents that aren't relevant to the changed fi
 
 ### GitHub Actions minutes
 
-Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows), which means all jobs run against the **calling repo's** Actions minute quota and billing — not this repo's. Each review run (triage + agents + orchestrator) and each auto-fix run count towards your repo's monthly included minutes or usage charges.
+Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows), which means all jobs run against the **calling repo's** Actions minute quota and billing — not this repo's. Each review run (two jobs: one for triage and the agents, and a short one that posts) and each auto-fix run count towards your repo's monthly included minutes or usage charges.
 
 ### Review
 

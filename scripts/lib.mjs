@@ -4,8 +4,9 @@
  * Common helpers used by auto-fix and other action scripts.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import * as core from "@actions/core";
 import { formatCommitLink } from "../src/summary.mjs";
@@ -17,8 +18,31 @@ export { buildBasePromptSections, parseClaudeResult } from "../src/prompt.mjs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Maximum number of voters allowed per agent (matches GitHub Actions matrix limits). */
+/** Maximum number of voters per agent, since voters multiply a review's API cost. */
 export const MAX_VOTERS = 10;
+
+/** Below this many changed diff lines, each agent runs a single voter. */
+export const SMALL_DIFF_LINES = 100;
+
+/**
+ * The number of voters every agent runs for a review: one for a small diff,
+ * where voters converge and consensus buys little, and the requested count
+ * otherwise. Never more than `MAX_VOTERS`.
+ */
+// spec: RUN#voters
+export function voterCountForDiff(diffLines, requested) {
+  if (diffLines < SMALL_DIFF_LINES) return 1;
+  const base = Math.max(1, Math.trunc(Number(requested)) || 1);
+  return Math.min(base, MAX_VOTERS);
+}
+
+/**
+ * The voter count triage set, read back from `VOTERS` by the scripts after it:
+ * a whole number from 1 to `MAX_VOTERS`, and 1 when unset or unreadable.
+ */
+export function votersFromEnv(raw = process.env.VOTERS) {
+  return Math.max(1, Math.min(parseInt(raw || "1") || 1, MAX_VOTERS));
+}
 
 /** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
 export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:nitro"];
@@ -56,12 +80,55 @@ export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
   return { model: id, provider: "openrouter", warning };
 }
 
+// ── Job log ─────────────────────────────────────────────────────────────────
+
+/**
+ * A collapsible log group around `body`, as one string, so concurrent
+ * processes finishing together cannot interleave their lines. The body is the
+ * model's and the CLI's output, which quotes the pull request: a line in it
+ * starting with `::` would otherwise run as a workflow command (a forged
+ * annotation, or a mask that hides later log lines). Command processing is
+ * off for the body, under a token it cannot guess.
+ */
+// spec: RUN#logs
+export function logGroup(title, body) {
+  const token = randomUUID();
+  const lines = [`::group::${title}`];
+  if (body.trim()) lines.push(`::stop-commands::${token}`, body.trimEnd(), `::${token}::`);
+  lines.push("::endgroup::");
+  return lines.join("\n") + "\n";
+}
+
+/** Model-controlled text for a single log line: one line, so it cannot start a command. */
+export function oneLine(text) {
+  return String(text ?? "").replace(/[\r\n]+/g, " ");
+}
+
+// ── Agent result files ───────────────────────────────────────────────────────
+
+/**
+ * Agent result files are named `{key}-result.json` when each agent runs one
+ * voter and `{key}-voter-{n}-result.json` otherwise. The agent runner writes
+ * them and the orchestrator scans for them.
+ */
+export const RESULT_FILE_PATTERN = /^(.+?)(?:-voter-(\d+))?-result\.json$/;
+
+export function resultFileName(key, voter, voters) {
+  return voters > 1 ? `${key}-voter-${voter}-result.json` : `${key}-result.json`;
+}
+
 // ── Environment ──────────────────────────────────────────────────────────────
 
 export function getEnvOrThrow(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
+}
+
+/** A file's contents, or "" when no path is given or the file is absent. */
+export function readOptional(path) {
+  if (!path || !existsSync(path)) return "";
+  return readFileSync(path, "utf-8");
 }
 
 // ── GitHub API ───────────────────────────────────────────────────────────────

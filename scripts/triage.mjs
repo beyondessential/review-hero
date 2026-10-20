@@ -6,21 +6,23 @@
  *    (from the caller repo's .github/review-hero/)
  * 3. Calls Claude Haiku to select which agents are relevant
  * 4. Calculates max-turns based on filtered diff size
- * 5. Outputs matrix, max_turns, and agent_names for downstream jobs
+ * 5. Sets the voter count every agent runs, scaled to the diff
+ * 6. Outputs agents, voters, max_turns, and agent_names for later steps
  *
  * Environment variables:
  *   DIFF_PATH           — Path to the raw PR diff file
  *   ANTHROPIC_API_KEY   — API key for Claude
  *   ANTHROPIC_BASE_URL  — Optional custom base URL for the Anthropic API
  *   REVIEW_HERO_DIR     — Path to the review-hero checkout (prompts/, scripts/)
- *   CALLER_REPO_DIR     — Path to the caller repo checkout (workspace root)
+ *   CALLER_REPO_DIR     — Path to the caller repo checkout at the trusted ref
  *   FILTERED_DIFF_PATH  — Where to write the filtered diff for agents to consume
  *   PR_BODY             — PR description, read for the model checkbox and marker
  *   HAS_OPENROUTER_KEY  — "true" when REVIEW_HERO_OPENROUTER_API_KEY is set
+ *   VOTERS              — Requested voters per agent, before scaling to the diff
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { MAX_VOTERS, chooseAgentModel } from "./lib.mjs";
+import { chooseAgentModel, voterCountForDiff } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
@@ -195,38 +197,16 @@ for (const a of allAgents) {
   agentNames[a.key] = a.name;
 }
 
-// Build matrix for the review-agent job
+// One voter count for every agent, scaled to the diff.
 const rawVoters = Math.max(1, parseInt(process.env.VOTERS || "1") || 1);
-if (rawVoters > MAX_VOTERS) {
-  console.warn(
-    `Voters capped at ${MAX_VOTERS} (requested ${rawVoters}) to stay within GitHub Actions matrix limits and control API cost`,
+const voters = voterCountForDiff(diffLines, rawVoters);
+if (voters !== rawVoters) {
+  console.log(
+    `Voters set to ${voters} (requested ${rawVoters}) for a diff of ${diffLines} changed lines`,
   );
 }
-const voters = Math.min(rawVoters, MAX_VOTERS);
 
-// Every voter of a given agent runs a byte-identical prompt, so they can share
-// a cached prompt prefix — but only if one request lands before the others. A
-// cache entry becomes readable once the first response begins, so voter 0 is
-// marked as the primer: it writes the cache, and its siblings wait for it.
-// With a single voter there is nothing to share, so no primer is nominated.
-const matrix = {
-  agents:
-    voters > 1
-      ? selectedAgents.flatMap((a) =>
-          Array.from({ length: voters }, (_, i) => ({
-            key: a.key,
-            source: a.source,
-            voter: String(i),
-            primer: i === 0 ? "1" : "",
-          })),
-        )
-      : selectedAgents.map((a) => ({
-          key: a.key,
-          source: a.source,
-          voter: "",
-          primer: "",
-        })),
-};
+const agents = selectedAgents.map((a) => ({ key: a.key, source: a.source }));
 
 console.log(
   `Diff: ${diffLines} changed lines across ${changedFiles.length} files`,
@@ -242,16 +222,15 @@ const modelNote =
       ? " (upgraded for large PR)"
       : "";
 console.log(`Model: ${agentModel}${modelNote}`);
-if (voters > 1) {
-  console.log(
-    `Voters: ${voters} per agent (${matrix.agents.length} total jobs)`,
-  );
-}
+console.log(
+  `Voters: ${voters} per agent (${agents.length * voters} agent runs)`,
+);
 
 // Output for GitHub Actions
 const outputFile = process.env.GITHUB_OUTPUT;
 if (outputFile) {
-  appendFileSync(outputFile, `matrix=${JSON.stringify(matrix)}\n`);
+  appendFileSync(outputFile, `agents=${JSON.stringify(agents)}\n`);
+  appendFileSync(outputFile, `voters=${voters}\n`);
   appendFileSync(outputFile, `max_turns=${maxTurns}\n`);
   appendFileSync(outputFile, `agent_model=${agentModel}\n`);
   appendFileSync(outputFile, `agent_provider=${agentProvider}\n`);

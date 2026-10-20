@@ -1,9 +1,9 @@
 /**
  * Review Hero — Orchestrator
  *
- * Reads structured JSON findings from review agent artifacts, applies voter
- * consensus (when multiple voters per agent), filters against suppression
- * rules, deduplicates, and posts a consolidated PR review via the GitHub API.
+ * Reads the consensus outcome (the findings voter consensus and any second
+ * look kept and dropped), filters against suppression rules, deduplicates,
+ * and posts a consolidated PR review via the GitHub API.
  *
  * Environment variables:
  *   GITHUB_TOKEN        — GitHub App token for posting reviews
@@ -13,32 +13,32 @@
  *   PR_NUMBER           — Pull request number
  *   REVIEWED_SHA        — PR head commit the agents reviewed
  *   REVIEW_HERO_REF     — Review Hero ref the caller asked for (optional)
- *   ARTIFACTS_DIR       — Directory containing agent result files
+ *   CONSENSUS_PATH      — Consensus outcome from the consensus step and any second look
+ *   ARTIFACTS_DIR       — Agent result files, posted from without consensus when
+ *                         there is no consensus outcome
+ *   VOTERS              — Voters each agent ran, reported when there is no consensus outcome
  *   AGENT_NAMES         — JSON map of agent key → display name
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
- *   VOTERS              — Number of voters per agent (default: 1)
  *   SUPPRESSIONS_PATH   — Path to local suppressions YAML file (optional)
  *   GLOBAL_SUPPRESSIONS_PATH — Path to global suppressions YAML file (optional)
  *   ANTHROPIC_API_KEY   — API key for Haiku-based filtering (optional)
  *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
  */
 
-import { readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 import {
   findRejectedFindings,
   generateSuppressions,
 } from "./learn-from-reactions.mjs";
-import { join } from "node:path";
-import { MAX_VOTERS, createCompletionReporter } from "./lib.mjs";
+import { createCompletionReporter, votersFromEnv } from "./lib.mjs";
+import { outcomeWithoutConsensus } from "./consensus.mjs";
 import {
   parseAgentResult,
   extractJsonArray,
-  applyConsensus,
   groupAllFindings,
   loadSuppressions,
   filterWithSuppressions,
-  VALID_AGENT_KEY,
   SUMMARY_HEADER,
   buildSummaryHeader,
   buildSummaryTable,
@@ -245,14 +245,10 @@ async function main() {
   const prNumber = getEnvOrThrow("PR_NUMBER");
   // spec: CMPL#reviewed-commit
   const reviewedSha = getEnvOrThrow("REVIEWED_SHA");
-  const artifactsDir = getEnvOrThrow("ARTIFACTS_DIR");
+  const consensusPath = getEnvOrThrow("CONSENSUS_PATH");
   const agentNames = loadAgentNames();
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
-  const voterCount = Math.max(
-    1,
-    Math.min(parseInt(process.env.VOTERS || "1") || 1, MAX_VOTERS),
-  );
   const suppressionsPath = process.env.SUPPRESSIONS_PATH || "";
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   const anthropicBaseUrl =
@@ -263,15 +259,12 @@ async function main() {
 
   // The filtering stages reach the model through a caller-supplied function;
   // this repo backs it with the Anthropic API. Null when no key is set, which
-  // makes consensus, grouping, and suppression keep every finding.
+  // makes grouping and suppression keep every finding.
   const callModel = apiKey
     ? createAnthropicModelCaller({ apiKey, baseUrl: anthropicBaseUrl })
     : null;
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
-  if (voterCount > 1) {
-    console.log(`Voter consensus enabled: ${voterCount} voters per agent`);
-  }
 
   // ── Learn from reactions ──────────────────────────────────────────────
   // Before resolving old threads, check for thumbs-down reactions so we
@@ -307,64 +300,25 @@ async function main() {
   // Resolve previous Review Hero comments so they don't clutter the PR
   await resolvePreviousReviewHeroThreads(prNumber, botLogin);
 
-  // ── Scan for results ──────────────────────────────────────────────────
-  // Result files follow one of two patterns:
-  //   {key}-result.json          (single voter / voters=1)
-  //   {key}-voter-{n}-result.json (multi-voter)
-  const RESULT_PATTERN = /^(.+?)(?:-voter-(\d+))?-result\.json$/;
-  const agentResults = []; // { agentKey, voter, filePath }
-
-  function scanForResults(dir) {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        scanForResults(fullPath);
-      } else if (entry.isFile()) {
-        const match = entry.name.match(RESULT_PATTERN);
-        if (match && VALID_AGENT_KEY.test(match[1])) {
-          agentResults.push({
-            agentKey: match[1],
-            voter: match[2] !== undefined ? parseInt(match[2]) : undefined,
-            filePath: fullPath,
-          });
-        }
-      }
-    }
+  // ── Read the consensus outcome ────────────────────────────────────
+  // The consensus step, and any second look after it, ran without the
+  // GitHub token. When it left no outcome (it failed or ran out of time),
+  // post from the agents' result files with every finding kept.
+  let consensus;
+  try {
+    consensus = JSON.parse(readFileSync(consensusPath, "utf-8"));
+  } catch (err) {
+    console.log(
+      `::warning::No consensus outcome (${err.message}); posting every agent finding without consensus`,
+    );
+    consensus = outcomeWithoutConsensus(
+      process.env.ARTIFACTS_DIR || "",
+      votersFromEnv(),
+    );
   }
-
-  scanForResults(artifactsDir);
-
-  // ── Collect findings ──────────────────────────────────────────────────
-  const allFindings = [];
-  let agentsCompleted = 0;
-  let agentsFailed = 0;
-  const seenAgentVoters = new Set();
-
-  for (const { agentKey, voter, filePath } of agentResults) {
-    const dedupKey = voter !== undefined ? `${agentKey}-${voter}` : agentKey;
-    if (seenAgentVoters.has(dedupKey)) continue;
-    seenAgentVoters.add(dedupKey);
-
-    const findings = parseAgentResult(filePath, agentKey, voter);
-    if (findings === null) {
-      const name = agentNames[agentKey] ?? agentKey;
-      const voterLabel = voter !== undefined ? ` (voter ${voter})` : "";
-      console.warn(`${name}${voterLabel}: failed to parse output`);
-      agentsFailed++;
-      continue;
-    }
-    const name = agentNames[agentKey] ?? agentKey;
-    const voterLabel = voter !== undefined ? ` (voter ${voter})` : "";
-    console.log(`${name}${voterLabel}: ${findings.length} findings`);
-    allFindings.push(...findings);
-    agentsCompleted++;
-  }
+  const { agentsCompleted, agentsFailed } = consensus;
+  const voterCount = consensus.voters;
+  const secondLook = consensus.secondLook ?? 0;
 
   if (agentsCompleted === 0) {
     const block = completion.block(
@@ -383,35 +337,8 @@ async function main() {
     return;
   }
 
-  // ── Apply voter consensus ─────────────────────────────────────────────
-  // Apply consensus per agent so that cross-agent findings about the same
-  // line aren't incorrectly grouped and dropped. Each agent's voters are
-  // independent — a bugs voter and a performance voter flagging the same
-  // line are distinct findings, not duplicates.
-  let findings = [];
-  let allDroppedFindings = [];
-
-  if (voterCount > 1) {
-    const findingsByAgent = new Map();
-    for (const f of allFindings) {
-      const agentKey = f.agent;
-      if (!findingsByAgent.has(agentKey)) findingsByAgent.set(agentKey, []);
-      findingsByAgent.get(agentKey).push(f);
-    }
-
-    const entries = [...findingsByAgent.entries()];
-    const results = await Promise.all(
-      entries.map(([, agentFindings]) =>
-        applyConsensus(agentFindings, voterCount, callModel)
-      )
-    );
-    for (const c of results) {
-      findings.push(...c.kept);
-      allDroppedFindings.push(...c.droppedFindings);
-    }
-  } else {
-    findings = allFindings.map(({ voter, ...rest }) => rest);
-  }
+  let findings = consensus.kept;
+  const allDroppedFindings = consensus.dropped;
 
   // ── Apply suppression filter ──────────────────────────────────────────
   const globalSuppressionsPath = process.env.GLOBAL_SUPPRESSIONS_PATH || "";
@@ -463,6 +390,7 @@ async function main() {
     keptGroups,
     droppedGroups,
     suppressedCount,
+    secondLook,
   });
 
   // Split kept groups by severity
@@ -523,11 +451,14 @@ async function main() {
 
   // Show filtering stats when non-trivial filtering occurred
   const filterStats = [];
-  if (voterCount > 1) {
-    filterStats.push(`consensus ${voterCount} voters`);
-  }
+  const consensusLine = consensusStat(consensus);
+  if (consensusLine) filterStats.push(consensusLine);
   if (droppedGroups.length > 0) {
     filterStats.push(`${droppedGroups.length} below threshold`);
+  }
+  // spec: RUN#second-look
+  if (secondLook > 0) {
+    filterStats.push(`${secondLook} confirmed on a second look`);
   }
   if (suppressedCount > 0) {
     filterStats.push(`${suppressedCount} suppressed`);
@@ -607,4 +538,21 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 }
 
-export { parseAgentResult, extractJsonArray, buildSummaryHeader };
+/**
+ * The summary's consensus figure, or null with one voter. Only a vote that
+ * happened is reported as one: consensus can fail for some agents, or be
+ * skipped for all of them when its step left no outcome.
+ */
+// spec: RUN#voters
+function consensusStat({ voters, unfiltered = [], kept, dropped }) {
+  if (voters <= 1) return null;
+  // Counted before suppression, which can empty an agent's findings. With no
+  // findings at all there was nothing to vote on.
+  const agents = new Set([...kept, ...dropped].map((f) => f.agent)).size;
+  if (agents === 0) return null;
+  if (unfiltered.length === 0) return `consensus ${voters} voters`;
+  if (unfiltered.length >= agents) return `no consensus (${voters} voters)`;
+  return `consensus ${voters} voters, not applied for ${unfiltered.length} agent${unfiltered.length === 1 ? "" : "s"}`;
+}
+
+export { parseAgentResult, extractJsonArray, buildSummaryHeader, consensusStat };

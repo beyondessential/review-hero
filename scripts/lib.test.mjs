@@ -13,6 +13,11 @@ import {
   reviewHeroVersion,
   createCompletionReporter,
   mapWithConcurrency,
+  voterCountForDiff,
+  votersFromEnv,
+  logGroup,
+  oneLine,
+  MAX_VOTERS,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -169,4 +174,48 @@ test("bounded concurrency preserves order and never exceeds the cap", async () =
 
 test("bounded concurrency copes with an empty list", async () => {
   assert.deepEqual(await mapWithConcurrency([], 6, async () => 1), []);
+});
+
+test("a small diff runs one voter per agent", () => {
+  assert.equal(voterCountForDiff(0, 3), 1);
+  assert.equal(voterCountForDiff(99, 3), 1);
+  assert.equal(voterCountForDiff(99, 7), 1);
+});
+
+test("any diff from 100 changed lines runs the requested voters", () => {
+  assert.equal(voterCountForDiff(100, 3), 3);
+  assert.equal(voterCountForDiff(500, 3), 3);
+  assert.equal(voterCountForDiff(5000, 3), 3);
+});
+
+test("one requested voter disables consensus whatever the diff size", () => {
+  assert.equal(voterCountForDiff(250, 1), 1);
+  assert.equal(voterCountForDiff(5000, 1), 1);
+});
+
+test("the voter count stays between one and the cap", () => {
+  assert.equal(voterCountForDiff(200, 50), MAX_VOTERS);
+  assert.equal(voterCountForDiff(200, 0), 1);
+  assert.equal(voterCountForDiff(200, "nonsense"), 1);
+});
+
+test("the voter count read back from the environment stays between one and the cap", () => {
+  assert.equal(votersFromEnv("3"), 3);
+  assert.equal(votersFromEnv(String(MAX_VOTERS + 5)), MAX_VOTERS);
+  assert.equal(votersFromEnv("0"), 1);
+  assert.equal(votersFromEnv(""), 1);
+  assert.equal(votersFromEnv(undefined), 1);
+  assert.equal(votersFromEnv("nonsense"), 1);
+});
+
+test("each log group stops commands under its own token, and an empty body has none", () => {
+  const a = logGroup("one", "body");
+  const b = logGroup("two", "body");
+  assert.notEqual(a.split("\n")[1], b.split("\n")[1]);
+  assert.equal(logGroup("empty", "  \n"), "::group::empty\n::endgroup::\n");
+});
+
+test("model text for a single log line is kept to one line", () => {
+  assert.equal(oneLine("area\n::error::forged\r\nmore"), "area ::error::forged more");
+  assert.equal(oneLine(undefined), "");
 });

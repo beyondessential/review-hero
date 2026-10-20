@@ -1,0 +1,331 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { ceilingFor, createScheduler, linuxMemoryProbe, parseCeiling, UNMEASURED_CEILING } from "./scheduler.mjs";
+
+const GB = 1024 * 1024 * 1024;
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+/** Work that runs until released, recording how many ran at once. */
+function harness(scheduler) {
+  let active = 0;
+  let peak = 0;
+  const releases = [];
+  const slots = [];
+  const started = [];
+  const submit = (name, pid) =>
+    scheduler.withSlot(async (slot) => {
+      started.push(name);
+      slots.push(slot);
+      if (pid) slot.onSpawn(pid);
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => releases.push(resolve));
+      active--;
+      return name;
+    });
+  return {
+    submit,
+    started,
+    slots,
+    peak: () => peak,
+    active: () => active,
+    releaseOne: () => releases.shift()?.(),
+    releaseAll: () => {
+      while (releases.length) releases.shift()();
+    },
+  };
+}
+
+/** A memory probe with fixed total and baseline use, and settable tree sizes. */
+function fakeMemory({ total = 10 * GB, used = 2 * GB, sizes = {} } = {}) {
+  return {
+    sizes,
+    usage: () => ({ total, used }),
+    treeRss: (roots) => new Map(roots.map((pid) => [pid, sizes[pid] ?? 0])),
+  };
+}
+
+test("work starts in the order it was queued, up to the ceiling", async () => {
+  const h = harness(createScheduler({ ceiling: 2, memory: null, pollMs: 1 }));
+  const done = ["a", "b", "c", "d"].map((n) => h.submit(n));
+  await tick();
+  assert.deepEqual(h.started, ["a", "b"]);
+  h.releaseOne();
+  await tick();
+  assert.deepEqual(h.started, ["a", "b", "c"]);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all(done);
+  assert.deepEqual(h.started, ["a", "b", "c", "d"]);
+  assert.equal(h.peak(), 2);
+});
+
+test("with no ceiling or memory limit everything starts at once", async () => {
+  const h = harness(createScheduler({ memory: null, pollMs: 1 }));
+  const done = Array.from({ length: 20 }, (_, i) => h.submit(i));
+  await tick();
+  assert.equal(h.active(), 20);
+  h.releaseAll();
+  await Promise.all(done);
+});
+
+test("work fills memory up to the target, leaving room for running work to grow", async () => {
+  // 2 GB used of 10, an assumed 2 GB per tree, fill to 8 GB: the first starts
+  // regardless, then 2+2+2 and 2+2+4 fit, and 2+2+6 does not.
+  const h = harness(createScheduler({ memory: fakeMemory(), defaultFootprint: 2 * GB, pollMs: 1 }));
+  const done = Array.from({ length: 5 }, (_, i) => h.submit(i));
+  await tick();
+  assert.equal(h.active(), 3);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all(done);
+});
+
+test("a measured footprint replaces the assumed one", async () => {
+  const memory = fakeMemory({ sizes: { 101: 3 * GB } });
+  const scheduler = createScheduler({ memory, defaultFootprint: 1 * GB, pollMs: 1 });
+  const h = harness(scheduler);
+  const first = h.submit("first", 101);
+  await tick();
+  assert.equal(scheduler.state().footprint, 3 * GB);
+  // 2 used + 3 for a newcomer, and the first is already at its 3 GB peak: 5 fits.
+  const second = h.submit("second", 102);
+  await tick();
+  assert.equal(h.active(), 2);
+  // A third would need 2 + 3 + 3 (the second can grow to 3) = 8: it fits; a fourth would not.
+  const rest = [h.submit("third", 103), h.submit("fourth", 104)];
+  await tick();
+  assert.equal(h.active(), 3);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all([first, second, ...rest]);
+});
+
+test("a small early measurement does not shrink the assumed footprint", async () => {
+  // Measured moments after starting, the first tree is tiny. 2 GB used of 10
+  // with 2 GB assumed per tree still admits only three, as with no measurement.
+  const memory = fakeMemory({ sizes: { 101: 0.1 * GB } });
+  const h = harness(createScheduler({ memory, defaultFootprint: 2 * GB, pollMs: 1 }));
+  const done = [h.submit("first", 101), ...Array.from({ length: 4 }, (_, i) => h.submit(i))];
+  await tick();
+  assert.equal(h.active(), 3);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all(done);
+});
+
+test("one piece of work always runs, however full memory is", async () => {
+  const h = harness(createScheduler({ memory: fakeMemory({ used: 9.5 * GB }), pollMs: 1 }));
+  const done = [h.submit("a"), h.submit("b")];
+  await tick();
+  assert.deepEqual(h.started, ["a"]);
+  h.releaseOne();
+  await tick();
+  assert.deepEqual(h.started, ["a", "b"]);
+  h.releaseAll();
+  await Promise.all(done);
+});
+
+test("a rate-limit retry pauses new starts and lowers the running limit", async () => {
+  let clock = 0;
+  const lines = [];
+  const scheduler = createScheduler({ memory: null, pollMs: 1, now: () => clock, log: (l) => lines.push(l) });
+  const h = harness(scheduler);
+  const first = [h.submit("a"), h.submit("b"), h.submit("c")];
+  await tick();
+  assert.equal(h.active(), 3);
+
+  h.slots[0].onEvent({ type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 30_000 });
+  assert.equal(scheduler.state().providerLimit, 2);
+  assert.ok(lines.some((l) => l.includes("Provider throttling (HTTP 429)")));
+
+  const later = [h.submit("d"), h.submit("e")];
+  // One finishes, but the pause still holds.
+  h.releaseOne();
+  await tick();
+  assert.deepEqual(h.started, ["a", "b", "c"]);
+
+  // Once the pause passes, two still run: at the lowered limit, so nothing starts.
+  clock = 31_000;
+  await tick();
+  assert.deepEqual(h.started, ["a", "b", "c"]);
+
+  // An unthrottled finish raises the limit to 3, with one running: both start.
+  h.releaseOne();
+  await tick();
+  assert.equal(scheduler.state().providerLimit, 3);
+  assert.deepEqual(h.started, ["a", "b", "c", "d", "e"]);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all([...first, ...later]);
+});
+
+test("each unthrottled finish raises a lowered limit by one", async () => {
+  const scheduler = createScheduler({ memory: null, pollMs: 1 });
+  const h = harness(scheduler);
+  const done = [h.submit("a"), h.submit("b"), h.submit("c")];
+  await tick();
+  h.slots[0].onEvent({ type: "system", subtype: "api_retry", error_status: 529, retry_delay_ms: 0 });
+  assert.equal(scheduler.state().providerLimit, 2);
+  // "a" was throttled: its finish does not raise the limit, "b"'s does.
+  h.releaseOne();
+  await tick();
+  assert.equal(scheduler.state().providerLimit, 2);
+  h.releaseOne();
+  await tick();
+  assert.equal(scheduler.state().providerLimit, 3);
+  h.releaseAll();
+  await Promise.all(done);
+});
+
+test("other API retries are counted but do not throttle", async () => {
+  const scheduler = createScheduler({ memory: null, pollMs: 1 });
+  const h = harness(scheduler);
+  const done = h.submit("a");
+  await tick();
+  h.slots[0].onEvent({ type: "system", subtype: "api_retry", error_status: 500, retry_delay_ms: 1000 });
+  h.slots[0].onEvent({ type: "assistant" });
+  assert.equal(scheduler.state().providerLimit, Infinity);
+  h.releaseAll();
+  const settled = await done;
+  assert.equal(settled.retries, 1);
+  assert.equal(settled.throttled, false);
+  assert.equal(settled.result, "a");
+});
+
+test("work that throws still frees its place", async () => {
+  const scheduler = createScheduler({ ceiling: 1, memory: null, pollMs: 1 });
+  await assert.rejects(scheduler.withSlot(async () => {
+    throw new Error("boom");
+  }));
+  const settled = await scheduler.withSlot(async () => "next");
+  assert.equal(settled.result, "next");
+});
+
+test("the ceiling is a whole number, with 0 or nothing meaning no ceiling", () => {
+  assert.equal(parseCeiling(undefined), Infinity);
+  assert.equal(parseCeiling(""), Infinity);
+  assert.equal(parseCeiling("0"), Infinity);
+  assert.equal(parseCeiling("12"), 12);
+  for (const bad of ["-1", "1.5", "lots"]) {
+    assert.throws(() => parseCeiling(bad));
+  }
+});
+
+test("the Linux probe measures this process's own tree", { skip: process.platform !== "linux" }, () => {
+  const probe = linuxMemoryProbe();
+  assert.ok(probe);
+  const { total, used } = probe.usage();
+  assert.ok(total > used && used > 0);
+  const size = probe.treeRss([process.pid]).get(process.pid);
+  assert.ok(size > 1024 * 1024, `expected this process to use over 1 MB, got ${size}`);
+});
+
+test("a provider pause holds new starts even once nothing is running", async () => {
+  let clock = 0;
+  const scheduler = createScheduler({ memory: null, pollMs: 1, now: () => clock });
+  const h = harness(scheduler);
+  const first = h.submit("a");
+  await tick();
+  h.slots[0].onEvent({ type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 30_000 });
+  const second = h.submit("b");
+  h.releaseOne();
+  await first;
+  await tick();
+  assert.deepEqual(h.started, ["a"]);
+  clock = 31_000;
+  await tick();
+  assert.deepEqual(h.started, ["a", "b"]);
+  h.releaseAll();
+  await second;
+});
+
+test("repeated throttle retries from running work log once, not once per retry", async () => {
+  let clock = 0;
+  const lines = [];
+  const scheduler = createScheduler({ memory: null, pollMs: 1, now: () => clock, log: (l) => lines.push(l) });
+  const h = harness(scheduler);
+  const done = [h.submit("a"), h.submit("b"), h.submit("c")];
+  await tick();
+  const retry = { type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 10_000 };
+  for (let i = 0; i < 5; i++) h.slots[i % 3].onEvent(retry);
+  assert.equal(lines.filter((l) => l.includes("Provider throttling")).length, 1);
+  assert.equal(scheduler.state().providerLimit, 2);
+
+  // Once the pause has lapsed, a fresh throttle is news again.
+  clock = 20_000;
+  h.slots[0].onEvent(retry);
+  assert.equal(lines.filter((l) => l.includes("Provider throttling")).length, 2);
+  h.releaseAll();
+  await Promise.all(done);
+});
+
+test("work waiting out a provider pause keeps the process alive with nothing running", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const script = `
+    import { createScheduler } from ${JSON.stringify(new URL("./scheduler.mjs", import.meta.url).href)};
+    const scheduler = createScheduler({ memory: null, pollMs: 20 });
+    await scheduler.withSlot(async (slot) => {
+      slot.onEvent({ type: "system", subtype: "api_retry", error_status: 429, retry_delay_ms: 5100 });
+    });
+    const started = Date.now();
+    await scheduler.withSlot(async () => {});
+    console.log(Date.now() - started >= 5000 ? "waited" : "early");
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf-8", timeout: 15_000 });
+  assert.equal(result.stdout.trim(), "waited", result.stderr);
+});
+
+test("with no memory probe and no ceiling, a fixed ceiling stands in", () => {
+  const lines = [];
+  assert.equal(ceilingFor(Infinity, null, (l) => lines.push(l)), UNMEASURED_CEILING);
+  assert.match(lines[0], /memory cannot be read/);
+  assert.equal(ceilingFor(3, null), 3);
+  assert.equal(ceilingFor(Infinity, fakeMemory()), Infinity);
+});
+
+test("process trees are measured on the poll, not once per queued piece of work", async () => {
+  let scans = 0;
+  const memory = { ...fakeMemory(), treeRss: (roots) => (scans++, new Map(roots.map((pid) => [pid, 0]))) };
+  const h = harness(createScheduler({ memory, defaultFootprint: 0.1 * GB, pollMs: 60_000 }));
+  const first = h.submit("first", 101);
+  await tick();
+  const rest = Array.from({ length: 20 }, (_, i) => h.submit(i));
+  await tick();
+  assert.equal(scans, 0);
+  h.releaseAll();
+  await tick();
+  h.releaseAll();
+  await Promise.all([first, ...rest]);
+});
+
+test("a memory probe that cannot be read holds starts and never throws", async () => {
+  let readable = false;
+  const lines = [];
+  const memory = {
+    usage: () => {
+      if (!readable) throw new Error("EMFILE");
+      return { total: 10 * GB, used: 1 * GB };
+    },
+    treeRss: () => {
+      throw new Error("EMFILE");
+    },
+  };
+  const h = harness(createScheduler({ memory, pollMs: 1, log: (l) => lines.push(l) }));
+  const done = [h.submit("a", 101), h.submit("b", 102)];
+  await tick();
+  // The first always runs; the second waits while memory cannot be read.
+  assert.deepEqual(h.started, ["a"]);
+  assert.ok(lines.some((l) => l.includes("memory unreadable")));
+  readable = true;
+  await tick();
+  assert.deepEqual(h.started, ["a", "b"]);
+  h.releaseAll();
+  await Promise.all(done);
+});

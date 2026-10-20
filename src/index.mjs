@@ -19,7 +19,12 @@ export {
   parseAgentResult,
 } from "./findings.mjs";
 
-export { applyConsensus, groupAllFindings } from "./grouping.mjs";
+export {
+  applyConsensus,
+  parseConsensusReply,
+  groupAllFindings,
+  MAX_CONTESTED_AREAS,
+} from "./grouping.mjs";
 
 export {
   loadSuppressions,
@@ -44,7 +49,13 @@ export {
   filterDiff,
 } from "./scope.mjs";
 
-export { buildBasePromptSections, parseClaudeResult } from "./prompt.mjs";
+export {
+  buildBasePromptSections,
+  buildReviewAgentPrompt,
+  buildCheckerPrompt,
+  softTurnCap,
+  parseClaudeResult,
+} from "./prompt.mjs";
 
 export {
   SUMMARY_HEADER,

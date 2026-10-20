@@ -83,11 +83,44 @@ export function parseAgentResult(
 
 // ── Consensus and grouping ───────────────────────────────────────────────────
 
+/** A group of findings below the majority, put to a second look. */
+export interface ContestedGroup {
+  /** The group's first finding, without its voter tag. */
+  representative: Finding;
+  /** Every finding in the group, voter tags intact. */
+  members: Finding[];
+  /** Where each member sits in the result's `droppedFindings`. */
+  dropped: number[];
+  /** Distinct voters behind the group. */
+  supporters: number;
+}
+
+/** A part of the code where findings below the majority are worth a second look. */
+export interface ContestedArea {
+  area: string;
+  groups: ContestedGroup[];
+}
+
 export interface ConsensusResult {
   kept: Finding[];
   dropped: number;
   droppedFindings: Finding[];
+  /** At most `MAX_CONTESTED_AREAS` areas, empty when consensus named none. */
+  contested: ContestedArea[];
+  /**
+   * Whether the consensus model filtered these findings. False when every
+   * finding was kept unfiltered: one voter, no model caller, or a failed or
+   * unreadable reply.
+   */
+  applied: boolean;
 }
+
+export const MAX_CONTESTED_AREAS: number;
+
+/** Read the consensus model's reply, or null when it has no usable answer. */
+export function parseConsensusReply(
+  text: string,
+): { keep: number[]; contested: Array<{ area: string; groups: number[][] }> } | null;
 
 export function applyConsensus(
   findings: Finding[],
@@ -168,6 +201,44 @@ export interface BasePromptOptions {
 }
 
 export function buildBasePromptSections(options: BasePromptOptions): string[];
+
+export interface ReviewAgentPromptOptions {
+  projectContext?: string;
+  /** The shared agent prompt (`prompts/agent-prompt.md`). */
+  basePrompt: string;
+  /** The agent's own specialisation prompt. */
+  agentPrompt: string;
+  /** The repository's AI rules, left out when empty. */
+  aiRules?: string;
+  /** The agent's hard turn cap; the prompt names a lower soft cap. */
+  maxTurns: number;
+  prTitle?: string;
+  diff: string;
+}
+
+/** The turn a review agent is told to stop exploring by, below its hard cap. */
+export function softTurnCap(maxTurns: number): number;
+/** Byte-identical for identical options, so an agent's voters share a cached prefix. */
+export function buildReviewAgentPrompt(options: ReviewAgentPromptOptions): string;
+
+export interface CheckerPromptOptions {
+  projectContext?: string;
+  /** The checker instructions (`prompts/checker-prompt.md`). */
+  checkerPrompt: string;
+  /** The agent's own specialisation prompt. */
+  agentPrompt: string;
+  aiRules?: string;
+  maxTurns: number;
+  prTitle?: string;
+  diff: string;
+  /** The contested area's label, from consensus. */
+  area: string;
+  /** The findings to judge, numbered in this order. */
+  findings: Finding[];
+}
+
+/** The prompt for a second-look checker, identical for every checker of an area. */
+export function buildCheckerPrompt(options: CheckerPromptOptions): string;
 export function parseClaudeResult(raw: string): unknown[];
 
 // ── Summary formatting ───────────────────────────────────────────────────────
@@ -227,6 +298,8 @@ export interface ReviewCompletion extends CompletionBase {
     nitpick: number;
     belowThreshold: number;
     suppressed: number;
+    /** Findings below the majority that a second look confirmed. */
+    secondLook: number;
   };
 }
 
@@ -282,6 +355,8 @@ export function buildReviewResult(args: {
   keptGroups?: FindingGroup[];
   droppedGroups?: FindingGroup[];
   suppressedCount?: number;
+  /** Findings below the majority that a second look confirmed. */
+  secondLook?: number;
   model?: string;
 }): ReviewResult;
 
