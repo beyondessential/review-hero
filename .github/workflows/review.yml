@@ -63,13 +63,14 @@ jobs:
   # waiting on the model, so one runner carries them all, and the shared setup
   # happens once.
   review:
-    # Evaluated without starting a runner, so a PR edit that cannot start a
-    # review costs nothing. Expressions have no regex, so it looks for a
-    # ticked box with one or two spaces before the label. The PR template
-    # always carries the label unticked, so looking for the label alone would
-    # start a runner on every PR edit. The exact check in the first step
-    # accepts the same spacing and is otherwise stricter (lowercase x, the
-    # marker after the label), so this never skips a body it would accept.
+    # Evaluated without starting a runner, so a PR edit with no ticked box
+    # costs nothing. Expressions have no regex, so it looks for a ticked box
+    # with one or two spaces before the label. The PR template always carries
+    # the label unticked, so looking for the label alone would start a runner
+    # on every PR edit. The exact check in the first step accepts the same
+    # spacing and is otherwise stricter (lowercase x, the marker after the
+    # label), so this never skips a body it would accept. A body that passes
+    # here but not there boots a runner that stops at that first step.
     if: >-
       inputs.trigger == 'always' ||
       ((github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'edited') &&
@@ -467,8 +468,9 @@ jobs:
             exit "$rc"
           fi
 
-      # Agent results, primer and checker output, per-process logs and the
-      # consensus outcome, for debugging.
+      # Agent results, primer and checker output, per-process logs, the
+      # consensus outcome, and the diff and suppressions the review used, for
+      # debugging.
       - name: Upload agent results and logs
         if: always() && steps.check.outputs.should_run == 'true'
         timeout-minutes: 5
@@ -479,5 +481,7 @@ jobs:
             ${{ runner.temp }}/review-results
             ${{ runner.temp }}/review-logs
             ${{ runner.temp }}/consensus.json
+            ${{ runner.temp }}/pr-filtered.diff
+            ${{ runner.temp }}/suppressions.yml
           retention-days: 1
           if-no-files-found: ignore

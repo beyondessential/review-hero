@@ -546,8 +546,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 // spec: RUN#voters
 function consensusStat({ voters, unfiltered = [], kept, dropped }) {
   if (voters <= 1) return null;
-  // Counted before suppression, which can empty an agent's findings.
+  // Counted before suppression, which can empty an agent's findings. With no
+  // findings at all there was nothing to vote on.
   const agents = new Set([...kept, ...dropped].map((f) => f.agent)).size;
+  if (agents === 0) return null;
   if (unfiltered.length === 0) return `consensus ${voters} voters`;
   if (unfiltered.length >= agents) return `no consensus (${voters} voters)`;
   return `consensus ${voters} voters, not applied for ${unfiltered.length} agent${unfiltered.length === 1 ? "" : "s"}`;

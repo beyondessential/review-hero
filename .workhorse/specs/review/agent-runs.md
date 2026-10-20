@@ -37,7 +37,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] The voter count never exceeds 10.
 - [ ] A finding survives consensus when a strict majority of the review's voter count reports it, with voters that contributed nothing still counting toward that number.
 - [ ] The completion block's `counts.voters` is the voter count the review ran with (see `reporting/completion-comments.md`).
-- [ ] The review summary's filtering line reports consensus only where it filtered findings: it says when consensus was not applied for some agents, and "no consensus" when it was applied for none.
+- [ ] The review summary's filtering line reports consensus only where it filtered findings: it says when consensus was not applied for some agents, "no consensus" when it was applied for none, and nothing about consensus when no agent had findings.
 
 ## Concurrency
 

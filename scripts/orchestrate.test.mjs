@@ -184,6 +184,7 @@ test("the summary reports consensus only where it filtered the findings", () => 
   const f = (agent) => ({ file: "a.ts", line: 1, severity: "nitpick", comment: "c", agent });
   const outcome = { voters: 3, kept: [f("bugs")], dropped: [f("design")] };
   assert.equal(consensusStat({ ...outcome, voters: 1 }), null);
+  assert.equal(consensusStat({ voters: 3, kept: [], dropped: [], unfiltered: [] }), null);
   assert.equal(consensusStat({ ...outcome, unfiltered: [] }), "consensus 3 voters");
   assert.equal(consensusStat(outcome), "consensus 3 voters");
   assert.equal(consensusStat({ ...outcome, unfiltered: ["design"] }), "consensus 3 voters, not applied for 1 agent");

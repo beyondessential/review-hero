@@ -83,7 +83,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A consensus reply cut off mid-object keeps only an explicit keep list, warns that contested areas were lost, and is unreadable when the keep list itself is cut off (verifies spec: RUN)
 - [x] A reply cut off before its keep key is unreadable, never read as a bare array (verifies spec: RUN)
 - [x] Agents whose consensus failed are named as unfiltered; consensus calls run a few at a time
-- [x] The summary says "no consensus" or "not applied for N agents" rather than claiming a vote that did not happen (verifies spec: RUN)
+- [x] The summary says "no consensus" or "not applied for N agents" rather than claiming a vote that did not happen, and leaves consensus out when there were no findings (verifies spec: RUN)
 - [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
 - [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
 - [x] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
