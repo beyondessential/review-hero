@@ -18,6 +18,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] A review keeps its working files where the runner empties them for every job, so a reused runner never reads one review's results, consensus or rules into the next.
 - [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
 - [ ] Consensus has a time limit of its own, and when it leaves no outcome the orchestrator posts every agent finding without consensus, with a warning in the job log.
+- [ ] Consensus or a second look failing or running out of time does not fail the review job, since the review still posts.
 - [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
 - [ ] Every step that reaches the network or a model has a time limit of its own, and the job's limit covers them all, so a hung step cannot take the orchestrator's time to post.
 - [ ] A review running on `ubuntu-slim` warns in the job log that the runner stops a job at 15 minutes.

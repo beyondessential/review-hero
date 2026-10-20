@@ -103,6 +103,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [ ] A ticked checkbox with a tab or three spaces after `[x]` is skipped by both the gate and the exact check (verifies spec: RUN)
 - [ ] A PR edit with only the template's unticked checkboxes shows the job as skipped (verifies spec: RUN)
 - [ ] A consensus step that fails still leaves the orchestrator posting every agent finding, with a warning (verifies spec: RUN)
+- [ ] A review whose consensus or second look fails or times out still finishes with the job passing (verifies spec: RUN)
 - [ ] Agents stopped at the step's time limit still leave the orchestrator posting from finished voters (verifies spec: RUN)
 - [ ] A ticked checkbox runs the whole review as one job and posts a summary (verifies spec: RUN)
 - [ ] An agent failure part way through still leaves the orchestrator posting from the finished voters (verifies spec: RUN)

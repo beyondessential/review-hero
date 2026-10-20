@@ -393,8 +393,10 @@ jobs:
         if: always() && steps.check.outputs.should_run == 'true'
         id: consensus
         # Model calls only; bounded so a hung call cannot eat the orchestrator's
-        # time. If it fails, the orchestrator posts without consensus.
+        # time. If it fails, the orchestrator posts without consensus, so the
+        # failure does not fail the job: the posted review decides that.
         timeout-minutes: 8
+        continue-on-error: true
         env:
           ARTIFACTS_DIR: ${{ runner.temp }}/review-results
           VOTERS: ${{ steps.triage.outputs.voters }}
@@ -410,6 +412,8 @@ jobs:
       - name: Second look
         if: always() && steps.check.outputs.should_run == 'true' && steps.consensus.outputs.second_look == 'true'
         timeout-minutes: 15
+        # Cut short, it leaves consensus as it stood, and the review still posts.
+        continue-on-error: true
         env: *agent-env
         # A minute inside the step's 15, so verdicts land before it is killed.
         run: TIME_BUDGET_MS=840000 node .review-hero/scripts/run-checkers.mjs
