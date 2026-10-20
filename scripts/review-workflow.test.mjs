@@ -63,3 +63,55 @@ test("both agree on how much space may follow the box", () => {
     assert.ok(!gate(bodies[name]) && !check.test(bodies[name]), name);
   }
 });
+
+// ── Posting ──────────────────────────────────────────────────────────────────
+
+// spec: RUN#posting
+const post = workflow.jobs.post;
+const uses = (step, action) => step.uses?.startsWith(`${action}@`);
+const mentions = (value, text) => JSON.stringify(value).includes(text);
+
+test("the GitHub App token is minted only in the posting job, on a fresh slim runner", () => {
+  assert.ok(!job.steps.some((s) => uses(s, "actions/create-github-app-token")));
+  assert.ok(!mentions(job, "REVIEW_HERO_PRIVATE_KEY"));
+  assert.ok(post.steps.some((s) => uses(s, "actions/create-github-app-token")));
+  assert.equal(post["runs-on"], "ubuntu-slim");
+  assert.equal(post.needs, "review");
+});
+
+test("posting checks out review-hero and the trusted config at the commits recorded before the agents ran", () => {
+  const checkouts = post.steps.filter((s) => uses(s, "actions/checkout"));
+  assert.match(checkouts.find((s) => s.with.path === ".review-hero").with.ref, /needs\.review\.outputs\.review_hero_sha/);
+  assert.match(checkouts.find((s) => s.with.path === ".caller-base").with.ref, /needs\.review\.outputs\.trusted_sha/);
+  const record = job.steps.findIndex((s) => s.id === "trusted-refs");
+  const agents = job.steps.findIndex((s) => s.name === "Run review agents");
+  assert.ok(record !== -1 && record < agents);
+  assert.ok(checkouts.every((s) => s.with["persist-credentials"] === false));
+});
+
+test("posting reads the review's results from the artifact the review job uploads, and suppressions afresh", () => {
+  const upload = job.steps.find((s) => uses(s, "actions/upload-artifact"));
+  const download = post.steps.find((s) => uses(s, "actions/download-artifact"));
+  assert.equal(download.with.name, upload.with.name);
+  assert.equal(download.with.path, upload.with.path);
+  const orchestrate = post.steps.find((s) => s.name === "Run orchestrator");
+  for (const name of ["CONSENSUS_PATH", "ARTIFACTS_DIR"]) {
+    assert.ok(orchestrate.env[name].startsWith(`${upload.with.path}/`), name);
+  }
+  assert.ok(!orchestrate.env.SUPPRESSIONS_PATH.startsWith(`${upload.with.path}/`));
+  assert.ok(post.steps.some((s) => s.name === "Prepare suppressions" && s.run.includes(".caller-base/")));
+});
+
+test("the review job's working files that posting reads sit under the uploaded directory", () => {
+  const upload = job.steps.find((s) => uses(s, "actions/upload-artifact"));
+  const agents = job.steps.find((s) => s.name === "Run review agents");
+  for (const name of ["RESULTS_DIR", "CONSENSUS_PATH"]) {
+    assert.ok(agents.env[name].startsWith(`${upload.with.path}/`), name);
+  }
+});
+
+test("the Claude CLI installed is the newest release at least a week old", () => {
+  const install = job.steps.find((s) => s.name === "Install Claude CLI");
+  assert.match(install.run, /npm install -g --before="\$before" @anthropic-ai\/claude-code/);
+  assert.match(install.run, /Date\.now\(\) - 7 \* 24 \* 60 \* 60 \* 1000/);
+});

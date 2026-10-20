@@ -58,10 +58,11 @@ concurrency:
 
 jobs:
   # spec: RUN#the-review-job
-  # One job runs the whole review: triage, every agent and voter as
-  # concurrent processes, and the orchestrator. The agents spend their time
+  # One job runs the review: triage, every agent and voter as concurrent
+  # processes, consensus and the second look. The agents spend their time
   # waiting on the model, so one runner carries them all, and the shared setup
-  # happens once.
+  # happens once. Posting runs in its own job (`post`, below), so the GitHub
+  # App token never exists on a runner the agents ran on.
   review:
     # Evaluated without starting a runner, so a PR edit with no ticked box
     # costs nothing. Expressions have no regex, so it looks for a ticked box
@@ -77,9 +78,18 @@ jobs:
       (contains(github.event.pull_request.body, '[x] **Run Review Hero') ||
       contains(github.event.pull_request.body, '[x]  **Run Review Hero')))
     runs-on: ${{ inputs.runner }}
+    # Recorded before any agent runs, so the posting job reads them as they
+    # were, whatever an agent did to this runner afterwards.
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      voters: ${{ steps.triage.outputs.voters }}
+      agent_names: ${{ steps.triage.outputs.agent_names }}
+      agent_model: ${{ steps.triage.outputs.agent_model }}
+      trusted_sha: ${{ steps.trusted-refs.outputs.caller }}
+      review_hero_sha: ${{ steps.trusted-refs.outputs.review_hero }}
     # Time budget. Every step that reaches the network or a model has its own
     # limit, and the job's is their sum, so a slow or hung step is cut short
-    # and the orchestrator always gets to post:
+    # and the results are still uploaded for the posting job:
     #   checkouts      3 min each (12)
     #   setup         15 min (Node, npm ci, Claude CLI: 5 each)
     #   PR diff        2 min
@@ -87,8 +97,6 @@ jobs:
     #   agents        40 min
     #   consensus      8 min
     #   second look   15 min
-    #   app token      2 min
-    #   orchestrator  15 min
     #   upload         5 min
     # The remaining steps only read and copy local files.
     # The agent and checker drivers work to a deadline (TIME_BUDGET_MS) a
@@ -97,8 +105,9 @@ jobs:
     # limits (a voter 20 min, a checker 6, a wrap-up 5) need not add up to
     # the step's, and results are written before the step would kill them.
     # Working files live under runner.temp, which is emptied for every job, so
-    # a reused runner never feeds one review's files into the next.
-    timeout-minutes: 120
+    # a reused runner never feeds one review's files into the next. What the
+    # posting job needs sits in runner.temp/review, uploaded as one artifact.
+    timeout-minutes: 105
     steps:
       # ── Trigger check ────────────────────────────────────────────────
       - id: check
@@ -126,7 +135,7 @@ jobs:
       # otherwise see a large review stopped before it posts, with no clue why.
       - name: Warn about the ubuntu-slim time cap
         if: steps.check.outputs.should_run == 'true' && contains(inputs.runner, 'slim')
-        run: echo "::warning::ubuntu-slim stops a job at 15 minutes, and the whole review runs in one job, so a large review may not finish. Set runner to ubuntu-latest."
+        run: echo "::warning::ubuntu-slim stops a job at 15 minutes, and every agent runs in this one job, so a large review may not finish. Set runner to ubuntu-latest."
 
       # ── Checkouts ────────────────────────────────────────────────────
       # spec: RUN#credentials
@@ -218,6 +227,16 @@ jobs:
           path: .review-hero
           persist-credentials: false
 
+      # The commits the trusted checkouts landed on, for the posting job to
+      # check out afresh: the same config and the same review-hero code,
+      # without reading anything from this runner after the agents ran.
+      - name: Record trusted refs
+        if: steps.check.outputs.should_run == 'true'
+        id: trusted-refs
+        run: |
+          echo "caller=$(git -C .caller-base rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "review_hero=$(git -C .review-hero rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       # ── Setup ────────────────────────────────────────────────────────
       # The Node version comes from the trusted ref, never the PR.
       - name: Resolve Node.js version
@@ -246,10 +265,17 @@ jobs:
         timeout-minutes: 5
         run: npm ci --prefix .review-hero
 
+      # spec: RUN#the-review-job
+      # The newest release published at least a week ago, its dependencies
+      # included, so a broken or compromised release has time to be caught
+      # and pulled before any review runs it.
       - name: Install Claude CLI
         if: steps.check.outputs.should_run == 'true'
         timeout-minutes: 5
-        run: npm install -g @anthropic-ai/claude-code
+        run: |
+          before=$(node -e 'console.log(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())')
+          npm install -g --before="$before" @anthropic-ai/claude-code
+          claude --version
 
       # ── Install global Claude rules ──────────────────────────────────
       # Override aggressive defaults in Claude Code's built-in system
@@ -311,7 +337,7 @@ jobs:
         timeout-minutes: 5
         env:
           DIFF_PATH: ${{ runner.temp }}/pr.diff
-          FILTERED_DIFF_PATH: ${{ runner.temp }}/pr-filtered.diff
+          FILTERED_DIFF_PATH: ${{ runner.temp }}/review/pr-filtered.diff
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           REVIEW_HERO_DIR: .review-hero
@@ -322,6 +348,7 @@ jobs:
           HAS_OPENROUTER_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY != '' }}
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/review"
           set +e
           node .review-hero/scripts/triage.mjs 2>&1 | tee "$RUNNER_TEMP/triage-run.log"
           rc=${PIPESTATUS[0]}
@@ -329,18 +356,6 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "::error::triage.mjs exited with status $rc (stdout/stderr are duplicated above via tee)"
             exit "$rc"
-          fi
-
-      - name: Prepare suppressions
-        if: steps.check.outputs.should_run == 'true'
-        run: |
-          SUPP=".caller-base/.github/review-hero/suppressions.yml"
-          if [ -f "$SUPP" ]; then
-            cp "$SUPP" "$RUNNER_TEMP/suppressions.yml"
-            echo "Suppressions file found"
-          else
-            echo "[]" > "$RUNNER_TEMP/suppressions.yml"
-            echo "No suppressions file"
           fi
 
       # ── Detect AI rules (from trusted ref) ──────────────────────────
@@ -367,12 +382,12 @@ jobs:
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
           AGENT_PROVIDER: ${{ steps.triage.outputs.agent_provider }}
           CONCURRENCY: ${{ inputs.concurrency }}
-          RESULTS_DIR: ${{ runner.temp }}/review-results
-          LOGS_DIR: ${{ runner.temp }}/review-logs
-          CONSENSUS_PATH: ${{ runner.temp }}/consensus.json
+          RESULTS_DIR: ${{ runner.temp }}/review/results
+          LOGS_DIR: ${{ runner.temp }}/review/logs
+          CONSENSUS_PATH: ${{ runner.temp }}/review/consensus.json
           REVIEW_HERO_DIR: .review-hero
           CALLER_BASE_DIR: .caller-base
-          DIFF_PATH: ${{ runner.temp }}/pr-filtered.diff
+          DIFF_PATH: ${{ runner.temp }}/review/pr-filtered.diff
           AI_RULES_PATH: ${{ runner.temp }}/ai-rules.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -399,9 +414,9 @@ jobs:
         timeout-minutes: 8
         continue-on-error: true
         env:
-          ARTIFACTS_DIR: ${{ runner.temp }}/review-results
+          ARTIFACTS_DIR: ${{ runner.temp }}/review/results
           VOTERS: ${{ steps.triage.outputs.voters }}
-          CONSENSUS_PATH: ${{ runner.temp }}/consensus.json
+          CONSENSUS_PATH: ${{ runner.temp }}/review/consensus.json
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
         run: node .review-hero/scripts/consensus.mjs
@@ -419,13 +434,101 @@ jobs:
         # A minute inside the step's 15, so verdicts land before it is killed.
         run: TIME_BUDGET_MS=840000 node .review-hero/scripts/run-checkers.mjs
 
-      # ── Generate app token ───────────────────────────────────────────
-      # Minted just before posting, so it is fresh however long the agents
-      # took, and never exists on the runner while agents or checkers run.
-      - name: Generate app token
+      # ── Hand over to posting ─────────────────────────────────────────
+      # The results, consensus outcome, logs and the diff the agents were
+      # shown: the posting job's input, and the record for debugging.
+      - name: Upload review results
         if: always() && steps.check.outputs.should_run == 'true'
-        id: app-token
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7
+        with:
+          name: review-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # spec: RUN#posting
+  # Posting runs on a fresh runner, so the GitHub App token never exists
+  # where the agents ran: the agents can write files there through their git
+  # tools, and a file they wrote could otherwise run with the token. This job
+  # checks out review-hero and the trusted config afresh, at the commits the
+  # review job recorded before its agents ran, and reads the review's results
+  # and consensus outcome only as data. It runs even when the review job
+  # failed, and posts from whatever results it uploaded.
+  post:
+    needs: review
+    if: always() && needs.review.outputs.should_run == 'true'
+    runs-on: ubuntu-slim
+    # Every step has a limit of its own, and together they fit the 15 minutes
+    # ubuntu-slim allows a job.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout review-hero
+        timeout-minutes: 1
+        uses: actions/checkout@v6
+        with:
+          repository: beyondessential/review-hero
+          ref: ${{ needs.review.outputs.review_hero_sha || inputs.ref }}
+          path: .review-hero
+          persist-credentials: false
+
+      - name: Checkout caller config (trusted ref)
+        timeout-minutes: 1
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.review.outputs.trusted_sha || github.event.repository.default_branch }}
+          sparse-checkout: |
+            .github/review-hero
+            .node-version
+          sparse-checkout-cone-mode: false
+          path: .caller-base
+          persist-credentials: false
+
+      - name: Resolve Node.js version
+        id: node-version
+        run: |
+          version=""
+          if [ -f .caller-base/.node-version ]; then
+            version=$(tr -d '[:space:]' < .caller-base/.node-version)
+          fi
+          echo "version=${version:-latest}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
         timeout-minutes: 2
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+          cache: npm
+          cache-dependency-path: .review-hero/package-lock.json
+
+      - name: Install review-hero dependencies
+        timeout-minutes: 2
+        run: npm ci --prefix .review-hero
+
+      # Missing when the review job failed before uploading; the orchestrator
+      # then reports that every agent failed.
+      - name: Download review results
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/download-artifact@v8
+        with:
+          name: review-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review
+
+      - name: Prepare suppressions
+        run: |
+          SUPP=".caller-base/.github/review-hero/suppressions.yml"
+          if [ -f "$SUPP" ]; then
+            cp "$SUPP" "$RUNNER_TEMP/suppressions.yml"
+            echo "Suppressions file found"
+          else
+            echo "[]" > "$RUNNER_TEMP/suppressions.yml"
+            echo "No suppressions file"
+          fi
+
+      - name: Generate app token
+        id: app-token
+        timeout-minutes: 1
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.REVIEW_HERO_APP_ID }}
@@ -433,12 +536,10 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       # ── Orchestrate ──────────────────────────────────────────────────
-      # Runs even when agents failed or ran out of time, and posts from
-      # whatever results were written: each voter's result lands as soon as it
-      # settles.
+      # Posts from whatever results the review job uploaded: each voter's
+      # result is written as soon as it settles.
       - name: Run orchestrator
-        if: always() && steps.check.outputs.should_run == 'true'
-        timeout-minutes: 15
+        timeout-minutes: 7
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_ACTIONS_TOKEN: ${{ github.token }}
@@ -446,12 +547,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_HERO_REF: ${{ inputs.ref }}
-          CONSENSUS_PATH: ${{ runner.temp }}/consensus.json
+          CONSENSUS_PATH: ${{ runner.temp }}/review/consensus.json
           # Posted from without consensus when the consensus step left no outcome.
-          ARTIFACTS_DIR: ${{ runner.temp }}/review-results
-          VOTERS: ${{ steps.triage.outputs.voters }}
-          AGENT_NAMES: ${{ steps.triage.outputs.agent_names }}
-          AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
+          ARTIFACTS_DIR: ${{ runner.temp }}/review/results
+          VOTERS: ${{ needs.review.outputs.voters }}
+          AGENT_NAMES: ${{ needs.review.outputs.agent_names }}
+          AGENT_MODEL: ${{ needs.review.outputs.agent_model }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           SUPPRESSIONS_PATH: ${{ runner.temp }}/suppressions.yml
           GLOBAL_SUPPRESSIONS_PATH: .review-hero/suppressions.yml
@@ -467,21 +568,3 @@ jobs:
             echo "::error::orchestrate.mjs exited with status $rc (stdout/stderr are duplicated above via tee)"
             exit "$rc"
           fi
-
-      # Agent results, primer and checker output, per-process logs, the
-      # consensus outcome, and the diff and suppressions the review used, for
-      # debugging.
-      - name: Upload agent results and logs
-        if: always() && steps.check.outputs.should_run == 'true'
-        timeout-minutes: 5
-        uses: actions/upload-artifact@v7
-        with:
-          name: review-agent-runs-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/review-results
-            ${{ runner.temp }}/review-logs
-            ${{ runner.temp }}/consensus.json
-            ${{ runner.temp }}/pr-filtered.diff
-            ${{ runner.temp }}/suppressions.yml
-          retention-days: 1
-          if-no-files-found: ignore

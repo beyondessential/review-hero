@@ -90,6 +90,15 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
 - [ ] A second look stopped at its time limit leaves the orchestrator posting from consensus as it stood (verifies spec: RUN)
 
+## Posting
+
+- [x] The GitHub App token is minted only in the posting job, on `ubuntu-slim`, and the review job never references the App's private key (verifies spec: RUN)
+- [x] The posting job checks out review-hero and the caller config at the commits recorded before the agents ran (verifies spec: RUN)
+- [x] The posting job reads the results and consensus outcome from the review job's artifact, and suppressions from its own checkout (verifies spec: RUN)
+- [x] The Claude CLI install takes the newest release at least a week old (verifies spec: RUN)
+- [ ] A review job that fails before uploading still leaves the posting job reporting that every agent failed (verifies spec: RUN)
+- [ ] On a real run, the posting job finishes well inside `ubuntu-slim`'s 15 minutes
+
 ## Credentials
 
 - [x] Agent processes get no `GITHUB_TOKEN`, `GH_TOKEN` or `ACTIONS_*` variables, and only the Anthropic and Claude Code variables named in the allowlist (verifies spec: RUN)
@@ -107,7 +116,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [ ] A consensus step that fails still leaves the orchestrator posting every agent finding, with a warning (verifies spec: RUN)
 - [ ] A review whose consensus or second look fails or times out still finishes with the job passing (verifies spec: RUN)
 - [ ] Agents stopped at the step's time limit still leave the orchestrator posting from finished voters (verifies spec: RUN)
-- [ ] A ticked checkbox runs the whole review as one job and posts a summary (verifies spec: RUN)
+- [x] A ticked checkbox runs the review job and then the posting job, which posts a summary (verifies spec: RUN)
 - [ ] An agent failure part way through still leaves the orchestrator posting from the finished voters (verifies spec: RUN)
 - [ ] A caller with no config on the default branch and a bootstrap branch set reads config from the bootstrap branch
 - [ ] On a self-hosted runner, a second review reads none of the first review's results or consensus outcome (verifies spec: RUN)
