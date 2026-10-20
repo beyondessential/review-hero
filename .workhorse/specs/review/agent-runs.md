@@ -4,30 +4,40 @@ id: RUN
 
 # Review agent runs
 
-A review runs as a single GitHub Actions job: triage, every review agent and each of its voters, and the orchestrator that posts the result.
+A review runs as two GitHub Actions jobs.
+The review job runs triage, every review agent and each of its voters, consensus and the second look; the posting job then posts the result.
 The agents spend their time waiting on the model, so one runner carries them all as concurrent processes, and the shared setup happens once per review.
+Posting runs apart from them, so the GitHub App token never exists on a runner the agents ran on.
 
 ## The review job
 
-- [ ] A review is one job, running triage, the review agents and the orchestrator in turn.
-- [ ] The job runs on the workflow's `runner` input, which defaults to `ubuntu-latest`.
+- [ ] The review job runs triage, the review agents, consensus and the second look in turn.
+- [ ] The review job runs on the workflow's `runner` input, which defaults to `ubuntu-latest`.
 - [ ] An event that cannot start a review skips the job without starting a runner: a pull request action other than opened, reopened or edited in checkbox mode, or a description with no ticked Review Hero checkbox.
 - [ ] The exact checkbox match runs as the job's first step, and a mismatch ends the job before any setup.
 - [ ] Every description the exact match accepts also passes the job's skip condition, so a ticked checkbox always starts a review.
-- [ ] Checkouts, dependency installs and the Claude CLI install happen once per review.
+- [ ] Checkouts, dependency installs and the Claude CLI install happen once per review job.
+- [ ] The Claude CLI installed is the newest release published at least a week before the review, its dependencies included, so a broken or compromised release has time to be caught before a review runs it.
 - [ ] A review keeps its working files where the runner empties them for every job, so a reused runner never reads one review's results, consensus or rules into the next.
-- [ ] The orchestrator runs even when agents fail, and posts from whatever results were written.
 - [ ] Consensus has a time limit of its own, and when it leaves no outcome the orchestrator posts every agent finding without consensus, with a warning in the job log.
 - [ ] Consensus or a second look failing or running out of time does not fail the review job, since the review still posts.
-- [ ] The agents have a time limit inside the job's, so the orchestrator still has time to post when agents run long.
-- [ ] Every step that reaches the network or a model has a time limit of its own, and the job's limit covers them all, so a hung step cannot take the orchestrator's time to post.
-- [ ] A review running on `ubuntu-slim` warns in the job log that the runner stops a job at 15 minutes.
+- [ ] The agents have a time limit inside the job's, so the review job still hands its results on when agents run long.
+- [ ] Every step that reaches the network or a model has a time limit of its own, and each job's limit covers its steps, so a hung step cannot keep a review from posting.
+- [ ] A review job running on `ubuntu-slim` warns in the job log that the runner stops a job at 15 minutes.
 - [ ] The agents and the second look each work to a deadline a little inside their time limit: every process stops by it, so its result is written before the limit is reached.
 - [ ] A fresh run for a crashed or empty voter starts only when at least half a voter's time limit is left before the deadline, judged when it would start.
 - [ ] An agent process due to start with no time left before its deadline does not start, and is recorded as not started.
 - [ ] An agent process stopped at its time limit is stopped along with every process it spawned.
 - [ ] The job keeps running while agent processes wait out a provider pause, even with none running.
 - [ ] An agent whose prompt cannot be read is left out with a warning, and the other agents still run.
+
+## Posting
+
+- [ ] The posting job runs after the review job, on `ubuntu-slim`, even when the review job failed, and posts from whatever results it handed on.
+- [ ] The review job hands on its results, consensus outcome, logs and the diff the agents were shown as one artifact, which the posting job reads only as data.
+- [ ] The posting job checks out review-hero and the trusted caller config afresh, at the commits the review job recorded before any agent ran, so nothing written on the review job's runner runs in it.
+- [ ] The posting job reads suppressions from its own trusted checkout.
+- [ ] When the review job handed on no results, the posting job reports that every agent failed.
 
 ## Voters
 
@@ -98,7 +108,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 
 - [ ] Agent processes run with no GitHub token in their environment.
 - [ ] Agent processes load no settings, hooks, MCP servers or skills from the pull request's checkout.
-- [ ] The GitHub App token is created after the agents and any second look have finished, just before the orchestrator posts.
+- [ ] The GitHub App token is created only in the posting job, just before the orchestrator posts.
 - [ ] The pull request checkout the agents read holds no stored credentials.
 
 ## Logs
@@ -113,5 +123,5 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 
 ## Documentation
 
-- [ ] The README documents the single review job, the `runner` default, the `concurrency` input, how the voter count follows the diff, and the second look.
-- [ ] The README warns that `ubuntu-slim` caps a job at 15 minutes, which the whole review has to fit within.
+- [ ] The README documents the review and posting jobs, the `runner` default, the `concurrency` input, how the voter count follows the diff, and the second look.
+- [ ] The README warns that `ubuntu-slim` caps a job at 15 minutes, which every agent in the review job has to fit within.
