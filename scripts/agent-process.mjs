@@ -8,10 +8,12 @@
  */
 
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { processTree } from "./scheduler.mjs";
+import { getEnvOrThrow, readOptional } from "./lib.mjs";
+import { parseCeiling, processTree } from "./scheduler.mjs";
 import { extractJsonArray, isValidAgentKey } from "../src/index.mjs";
 
 /**
@@ -286,6 +288,28 @@ export async function runWithWrapUp({
 // ── Reporting ────────────────────────────────────────────────────────────────
 
 /**
+ * A collapsible log group around `body`, as one string, so concurrent
+ * processes finishing together cannot interleave their lines. The body is the
+ * model's and the CLI's output, which quotes the pull request: a line in it
+ * starting with `::` would otherwise run as a workflow command (a forged
+ * annotation, or a mask that hides later log lines). Command processing is
+ * off for the body, under a token it cannot guess.
+ */
+// spec: RUN#logs
+export function logGroup(title, body) {
+  const token = randomUUID();
+  const lines = [`::group::${title}`];
+  if (body.trim()) lines.push(`::stop-commands::${token}`, body.trimEnd(), `::${token}::`);
+  lines.push("::endgroup::");
+  return lines.join("\n") + "\n";
+}
+
+/** Model-controlled text for a single log line: one line, so it cannot start a command. */
+export function oneLine(text) {
+  return String(text ?? "").replace(/[\r\n]+/g, " ");
+}
+
+/**
  * The share of cacheable input read from the cache. A run that reported usage
  * but touched no cache shows as "none", so a missed prefix stands out rather
  * than reading like a blank cell.
@@ -431,6 +455,44 @@ export async function primeRun({ timed, label, prompt, model, timeoutMs = PRIMER
     out(`::warning::${label} wrote no cache tokens; the runs after it will not share a prefix\n`);
   }
   return { result, envelope, outcome, ...timing };
+}
+
+// ── Driver setup ─────────────────────────────────────────────────────────────
+
+/**
+ * Start a driver from its step's environment: the settings the agent driver
+ * and the second look both read, under the same names, so the two cannot
+ * drift apart on them. Creates the logs directory, and opens the driver's
+ * table in the job summary; `onRow` appends a row to it, a row at a time, so
+ * the table survives the step being stopped at its time limit.
+ *
+ * `maxTurns` goes into the prompt inputs, and `defaultTimeoutMs` is the
+ * per-process limit when `PROCESS_TIMEOUT_MS` is unset.
+ */
+export function startDriver({ maxTurns, defaultTimeoutMs, summaryTitle }) {
+  const logsDir = getEnvOrThrow("LOGS_DIR");
+  mkdirSync(logsDir, { recursive: true });
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (summaryPath) appendFileSync(summaryPath, `\n${summaryHeader(summaryTitle)}`);
+  return {
+    model: getEnvOrThrow("AGENT_MODEL"),
+    provider: process.env.AGENT_PROVIDER || "anthropic",
+    concurrency: parseCeiling(process.env.CONCURRENCY),
+    logsDir,
+    reviewHeroDir: getEnvOrThrow("REVIEW_HERO_DIR"),
+    callerBaseDir: getEnvOrThrow("CALLER_BASE_DIR"),
+    common: {
+      projectContext: process.env.PROJECT_CONTEXT || "",
+      aiRules: readOptional(process.env.AI_RULES_PATH),
+      maxTurns,
+      prTitle: process.env.PR_TITLE || "",
+      diff: readFileSync(getEnvOrThrow("DIFF_PATH"), "utf-8"),
+    },
+    env: agentEnv(process.env),
+    timeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || "") || defaultTimeoutMs,
+    deadline: deadlineFrom(process.env.TIME_BUDGET_MS),
+    onRow: summaryPath ? (row) => appendFileSync(summaryPath, summaryRow(row)) : undefined,
+  };
 }
 
 // ── Trusted prompts ──────────────────────────────────────────────────────────

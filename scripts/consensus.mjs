@@ -19,6 +19,7 @@
 import { appendFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { oneLine } from "./agent-process.mjs";
 import { RESULT_FILE_PATTERN, votersFromEnv } from "./lib.mjs";
 import {
   applyConsensus,
@@ -175,7 +176,8 @@ async function main() {
   const { kept, dropped, contested } = await runConsensus({ findings, voters, callModel });
 
   for (const area of contested) {
-    console.log(`Contested: ${area.agent}, ${area.area} (${area.groups.length} finding(s))`);
+    // The label is the consensus model's, so it is kept to one line.
+    console.log(`Contested: ${area.agent}, ${oneLine(area.area)} (${area.groups.length} finding(s))`);
   }
 
   writeConsensus(consensusPath, {

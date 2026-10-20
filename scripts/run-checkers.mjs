@@ -30,27 +30,26 @@
 
 // spec: RUN#second-look
 
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  agentEnv,
   agentPromptPath,
   cacheReadShare,
   createProcessRunner,
-  deadlineFrom,
+  logGroup,
+  oneLine,
   primeRun,
   PRIMER_TIMEOUT_MS,
   runOutput,
   runWithWrapUp,
   WRAP_UP_TIMEOUT_MS,
   spawnClaude,
-  summaryHeader,
-  summaryRow,
+  startDriver,
 } from "./agent-process.mjs";
 import { writeConsensus } from "./consensus.mjs";
-import { getEnvOrThrow, readOptional } from "./lib.mjs";
-import { ceilingFor, createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
+import { getEnvOrThrow } from "./lib.mjs";
+import { ceilingFor, createScheduler, linuxMemoryProbe } from "./scheduler.mjs";
 import { buildCheckerPrompt, extractJsonArray } from "../src/index.mjs";
 
 export const DEFAULT_CHECKER_MAX_TURNS = 10;
@@ -187,7 +186,7 @@ export async function runSecondLook({
         logPath: join(logsDir, `${area.agent}-area-${i}-primer.json`),
         out,
       });
-      out(`::group::${label}: ${outcome}\n${result.stderr.trim() ? `${result.stderr.trimEnd()}\n` : ""}::endgroup::\n`);
+      out(logGroup(`${label}: ${outcome}`, result.stderr));
       record({
         agent: area.agent,
         run: `area ${i} primer`,
@@ -241,9 +240,7 @@ export async function runSecondLook({
                   ? "timed out"
                   : "no verdicts";
             if (wrappedUp) outcome += " after wrap-up";
-            out(
-              `::group::${label}: ${outcome}\n${stderr.trim() ? `${stderr.trimEnd()}\n` : ""}${answer ?? ""}\n::endgroup::\n`,
-            );
+            out(logGroup(`${label}: ${outcome}`, [stderr.trimEnd(), answer ?? ""].filter(Boolean).join("\n")));
             record({
               agent: area.agent,
               run: `area ${i} checker ${checker}`,
@@ -307,39 +304,25 @@ async function main() {
     return;
   }
 
-  const logsDir = getEnvOrThrow("LOGS_DIR");
-  mkdirSync(logsDir, { recursive: true });
   const maxTurns = parseInt(process.env.CHECKER_MAX_TURNS || "") || DEFAULT_CHECKER_MAX_TURNS;
-
+  const { reviewHeroDir, callerBaseDir, common, ...driver } = startDriver({
+    maxTurns,
+    defaultTimeoutMs: DEFAULT_CHECKER_TIMEOUT_MS,
+    summaryTitle: "Second look",
+  });
   const prompts = buildCheckerPrompts({
     consensus,
     agents: JSON.parse(getEnvOrThrow("AGENTS")),
-    reviewHeroDir: getEnvOrThrow("REVIEW_HERO_DIR"),
-    callerBaseDir: getEnvOrThrow("CALLER_BASE_DIR"),
-    common: {
-      projectContext: process.env.PROJECT_CONTEXT || "",
-      aiRules: readOptional(process.env.AI_RULES_PATH),
-      maxTurns,
-      prTitle: process.env.PR_TITLE || "",
-      diff: readFileSync(getEnvOrThrow("DIFF_PATH"), "utf-8"),
-    },
+    reviewHeroDir,
+    callerBaseDir,
+    common,
   });
 
-  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
-  if (summaryPath) appendFileSync(summaryPath, `\n${summaryHeader("Second look")}`);
-
   const { confirmationsByArea } = await runSecondLook({
+    ...driver,
     consensus,
     prompts,
-    model: getEnvOrThrow("AGENT_MODEL"),
-    provider: process.env.AGENT_PROVIDER || "anthropic",
     maxTurns,
-    concurrency: parseCeiling(process.env.CONCURRENCY),
-    logsDir,
-    env: agentEnv(process.env),
-    timeoutMs: parseInt(process.env.PROCESS_TIMEOUT_MS || "") || DEFAULT_CHECKER_TIMEOUT_MS,
-    deadline: deadlineFrom(process.env.TIME_BUDGET_MS),
-    onRow: summaryPath ? (row) => appendFileSync(summaryPath, summaryRow(row)) : undefined,
     // Each settled area's verdicts are saved straight away, so they count
     // even when the step's time limit stops the areas still running.
     onProgress: (partial) => writeConsensus(consensusPath, applySecondLook(consensus, partial)),
@@ -350,7 +333,7 @@ async function main() {
     for (const group of area.groups) {
       const f = group.representative;
       console.log(
-        `${area.agent} ${f.file}:${f.line}: ${group.supporters} voter(s) + ${group.confirmations} checker(s) → ${group.confirmed ? "kept" : "dropped"}`,
+        `${area.agent} ${oneLine(f.file)}:${oneLine(f.line)}: ${group.supporters} voter(s) + ${group.confirmations} checker(s) → ${group.confirmed ? "kept" : "dropped"}`,
       );
     }
   }

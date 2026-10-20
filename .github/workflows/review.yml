@@ -235,6 +235,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ steps.node-version.outputs.version }}
+          # npm's download cache, keyed on review-hero's own lockfile (checked
+          # out above). `npm ci` still checks every package against it.
+          cache: npm
+          cache-dependency-path: .review-hero/package-lock.json
 
       - name: Install review-hero dependencies
         if: steps.check.outputs.should_run == 'true'

@@ -42,7 +42,6 @@
  */
 
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -52,25 +51,32 @@ import {
 import { join } from "node:path";
 
 import {
-  agentEnv,
   agentPromptPath,
   cacheReadShare,
   createProcessRunner,
-  deadlineFrom,
+  logGroup,
   primeRun,
   PRIMER_TIMEOUT_MS,
   runWithWrapUp,
   spawnClaude,
+  startDriver,
   summaryHeader,
   summaryRow,
 } from "./agent-process.mjs";
-import { formatCacheStats, getEnvOrThrow, readOptional, resultFileName, votersFromEnv } from "./lib.mjs";
-import { ceilingFor, createScheduler, linuxMemoryProbe, parseCeiling } from "./scheduler.mjs";
+import { formatCacheStats, getEnvOrThrow, resultFileName, votersFromEnv } from "./lib.mjs";
+import { ceilingFor, createScheduler, linuxMemoryProbe } from "./scheduler.mjs";
 import { buildReviewAgentPrompt, parseAgentResult } from "../src/index.mjs";
 
 export const DEFAULT_PROCESS_TIMEOUT_MS = 20 * 60 * 1000;
-/** A fresh run for a crashed or empty voter only starts with this much time left. */
-export const MIN_FRESH_RUN_MS = 5 * 60 * 1000;
+/**
+ * The time a fresh run for a crashed or empty voter needs left to start: half
+ * a voter's time limit. Voters often run most of their limit, so one started
+ * with less would most likely be stopped before it answered, its cost spent
+ * for nothing.
+ */
+export function freshRunMinimum(timeoutMs) {
+  return timeoutMs / 2;
+}
 
 // ── Reporting ────────────────────────────────────────────────────────────────
 
@@ -88,19 +94,14 @@ function sessionStats(envelope) {
   return stats;
 }
 
-/**
- * One process's log as a single collapsible group. It is written in one call
- * so concurrent processes finishing together cannot interleave their lines.
- */
-// spec: RUN#logs
-function logGroup(out, { label, outcome, envelope, stderr }) {
-  const lines = [`::group::${label}: ${outcome}`];
+/** One process's log: its stats, stderr and answer, as one group. */
+function logRun(out, { label, outcome, envelope, stderr }) {
+  const lines = [];
   const stats = sessionStats(envelope);
   if (stats.length > 0) lines.push(stats.join(" | "));
   if (stderr.trim()) lines.push(stderr.trimEnd());
   if (typeof envelope?.result === "string") lines.push(envelope.result);
-  lines.push("::endgroup::");
-  out(lines.join("\n") + "\n");
+  out(logGroup(`${label}: ${outcome}`, lines.join("\n")));
 }
 
 export const SUMMARY_HEADER = summaryHeader("Review agent runs");
@@ -175,7 +176,7 @@ export async function runAgents({
       logPath: join(logsDir, `${agent.key}-primer.json`),
       out,
     });
-    logGroup(out, { label, outcome, envelope, stderr: result.stderr });
+    logRun(out, { label, outcome, envelope, stderr: result.stderr });
     record({
       agent: agent.key,
       run: "primer",
@@ -249,7 +250,7 @@ export async function runAgents({
 
     writeFileSync(`${logBase}.log`, stderr);
     const shown = wrappedUp ? `${outcome} after wrap-up` : outcome;
-    logGroup(out, { label: fullLabel, outcome: shown, envelope, stderr });
+    logRun(out, { label: fullLabel, outcome: shown, envelope, stderr });
     record({
       agent: agent.key,
       run: voters > 1 ? `voter ${voter}` : "voter",
@@ -273,12 +274,12 @@ export async function runAgents({
     const name = `${agent.key}${voters > 1 ? ` voter ${voter}` : ""}`;
     try {
       const first = await attempt(agent, voter, 1);
-      if ((first === "crashed" || first === "empty") && timeLeft() < MIN_FRESH_RUN_MS) {
+      if ((first === "crashed" || first === "empty") && timeLeft() < freshRunMinimum(timeoutMs)) {
         out(`::warning::Agent ${name} ${first}, with too little time left for a fresh run; it contributes nothing\n`);
       } else if (first === "crashed" || first === "empty") {
         const what = first === "crashed" ? "retrying it" : "replacing it with a fresh voter";
         out(`::warning::Agent ${name} ${first}; ${what}\n`);
-        const second = await attempt(agent, voter, 2, { minTimeMs: MIN_FRESH_RUN_MS });
+        const second = await attempt(agent, voter, 2, { minTimeMs: freshRunMinimum(timeoutMs) });
         if (second !== "usable") {
           out(`::warning::Agent ${name} contributes nothing (${second})\n`);
         }
@@ -355,57 +356,24 @@ async function main() {
   const agents = JSON.parse(getEnvOrThrow("AGENTS"));
   const voters = votersFromEnv();
   const maxTurns = parseInt(getEnvOrThrow("MAX_TURNS"));
-  const model = getEnvOrThrow("AGENT_MODEL");
-  const provider = process.env.AGENT_PROVIDER || "anthropic";
-  const concurrency = parseCeiling(process.env.CONCURRENCY);
   const resultsDir = getEnvOrThrow("RESULTS_DIR");
-  const logsDir = getEnvOrThrow("LOGS_DIR");
-  const timeoutMs =
-    parseInt(process.env.PROCESS_TIMEOUT_MS || "") || DEFAULT_PROCESS_TIMEOUT_MS;
-
   mkdirSync(resultsDir, { recursive: true });
-  mkdirSync(logsDir, { recursive: true });
-
-  const prompts = buildPrompts({
-    agents,
-    reviewHeroDir: getEnvOrThrow("REVIEW_HERO_DIR"),
-    callerBaseDir: getEnvOrThrow("CALLER_BASE_DIR"),
-    common: {
-      projectContext: process.env.PROJECT_CONTEXT || "",
-      aiRules: readOptional(process.env.AI_RULES_PATH),
-      maxTurns,
-      prTitle: process.env.PR_TITLE || "",
-      diff: readFileSync(getEnvOrThrow("DIFF_PATH"), "utf-8"),
-    },
+  const { reviewHeroDir, callerBaseDir, common, ...driver } = startDriver({
+    maxTurns,
+    defaultTimeoutMs: DEFAULT_PROCESS_TIMEOUT_MS,
+    summaryTitle: "Review agent runs",
   });
+
+  const prompts = buildPrompts({ agents, reviewHeroDir, callerBaseDir, common });
   const runnable = agents.filter((agent) => agent.key in prompts);
   for (const agent of runnable) {
     console.log(`Prompt for ${agent.key}: ${Buffer.byteLength(prompts[agent.key])} bytes`);
   }
   console.log(
-    `Running ${runnable.length} agent(s) × ${voters} voter(s), ${concurrency === Infinity ? "as many at once as memory and the provider allow" : `at most ${concurrency} at once`}`,
+    `Running ${runnable.length} agent(s) × ${voters} voter(s), ${driver.concurrency === Infinity ? "as many at once as memory and the provider allow" : `at most ${driver.concurrency} at once`}`,
   );
 
-  // The summary is written a row at a time, so it survives the step being
-  // stopped at its time limit.
-  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
-  if (summaryPath) appendFileSync(summaryPath, SUMMARY_HEADER);
-
-  await runAgents({
-    agents: runnable,
-    prompts,
-    voters,
-    maxTurns,
-    model,
-    provider,
-    concurrency,
-    resultsDir,
-    logsDir,
-    env: agentEnv(process.env),
-    timeoutMs,
-    deadline: deadlineFrom(process.env.TIME_BUDGET_MS),
-    onRow: summaryPath ? (row) => appendFileSync(summaryPath, summaryRow(row)) : undefined,
-  });
+  await runAgents({ ...driver, agents: runnable, prompts, voters, maxTurns, resultsDir });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

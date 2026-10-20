@@ -155,7 +155,7 @@ Steps:
 - [x] `scripts/consensus.mjs`: result scanning and collection moved from the orchestrator, consensus per agent, outcome file and `second_look` output
 - [x] `scripts/run-checkers.mjs`: checkers per area under the concurrency cap with the shared wrap-up (`runWithWrapUp`, extracted from the driver), verdict tally, promotion, outcome rewritten
 - [x] `scripts/orchestrate.mjs` reads the outcome; summary filtering line and `counts.secondLook`
-- [x] Workflow: consensus and second-look steps before the token, time limits 40 / 15 / 75 minutes
+- [x] Workflow: consensus and second-look steps before the token, each with its own time limit
 - [x] README, DEVELOPING, completion comments spec
 - [x] Observe a real second look on a PR
 

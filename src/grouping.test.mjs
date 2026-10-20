@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { applyConsensus, parseConsensusReply, MAX_CONTESTED_AREAS } from "./index.mjs";
-import { consensusMaxTokens } from "./grouping.mjs";
+import { applyConsensus, groupAllFindings, parseConsensusReply, MAX_CONTESTED_AREAS } from "./index.mjs";
+import { indexReplyMaxTokens } from "./grouping.mjs";
 
 const finding = (voter, line, comment = `finding at ${line}`) => ({
   file: "a.ts",
@@ -69,9 +69,18 @@ test("the consensus reply may grow with the number of findings", async () => {
     asked = maxTokens;
     return JSON.stringify({ keep: [], contested: [] });
   });
-  assert.equal(asked, consensusMaxTokens(400));
-  assert.ok(consensusMaxTokens(400) > consensusMaxTokens(10));
-  assert.ok(consensusMaxTokens(0) >= 3000);
+  assert.equal(asked, indexReplyMaxTokens(400, 3000));
+  assert.ok(indexReplyMaxTokens(400, 3000) > indexReplyMaxTokens(10, 3000));
+});
+
+test("the cross-agent grouping reply may grow with the number of findings", async () => {
+  const many = Array.from({ length: 300 }, (_, i) => ({ ...finding(0, i + 1), voter: undefined }));
+  let asked;
+  await groupAllFindings(many.slice(0, 200), many.slice(200), async ({ maxTokens }) => {
+    asked = maxTokens;
+    return "{}";
+  });
+  assert.equal(asked, indexReplyMaxTokens(300, 2000));
 });
 
 test("consensus names at most the cap of contested areas", async () => {
@@ -116,6 +125,22 @@ test("only integer indices count, so junk entries never stand for finding 0", ()
     parseConsensusReply('{"keep": [null, "", false, true, "0", 2], "contested": [{"area": "a", "groups": [[null, 3]]}]}'),
     { keep: [2], contested: [{ area: "a", groups: [[3]] }] },
   );
+});
+
+test("a reply cut off mid-object keeps only its explicit keep list, and says the areas were lost", () => {
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (line) => warnings.push(line);
+  try {
+    assert.deepEqual(parseConsensusReply('{"keep": [0, 3], "contested": [{"area": "x", "groups": [[5]'), { keep: [0, 3], contested: [] });
+    assert.match(warnings.join("\n"), /contested areas lost/);
+    // Cut off inside the keep list: the first complete array is a contested
+    // group's or nothing, never the kept findings.
+    assert.equal(parseConsensusReply('{"keep": [0, 3'), null);
+    assert.equal(parseConsensusReply('{"contested": [{"groups": [[5]]}], "keep": [0'), null);
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test("an object reply without a keep array is unreadable, not mined for indices", () => {

@@ -51,7 +51,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A primer gets the short primer time limit (verifies spec: RUN)
 - [x] A wrap-up gets the short wrap-up limit, for voters and checkers alike (verifies spec: RUN)
 - [x] Every process's time limit is cut to what is left before the deadline (verifies spec: RUN)
-- [x] A crashed voter gets no fresh run with too little time left, and does with time to spare (verifies spec: RUN)
+- [x] A crashed voter gets no fresh run with less than half a voter's time limit left, and does with time to spare (verifies spec: RUN)
 - [x] A fresh run queued with time to spare but admitted with too little left starts no process (verifies spec: RUN)
 - [x] Work admitted after the deadline starts no process and is recorded as not started (verifies spec: RUN)
 - [x] A step budget becomes a deadline; no budget means none
@@ -79,7 +79,8 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] Checkers start under the same limits as voters (verifies spec: RUN)
 - [x] With several checkers on Anthropic, each area's primer starts before any checker, and a failed primer still releases them (verifies spec: RUN)
 - [x] One checker per area, or OpenRouter, runs without a primer (verifies spec: RUN)
-- [x] The consensus reply's token limit grows with the number of findings
+- [x] The consensus reply's token limit grows with the number of findings, and so does cross-agent grouping's
+- [x] A consensus reply cut off mid-object keeps only an explicit keep list, warns that contested areas were lost, and is unreadable when the keep list itself is cut off (verifies spec: RUN)
 - [x] Checker prompts come from the area agent's own prompt in the trusted checkout, and fence the quoted findings (verifies spec: RUN)
 - [x] The review result carries `counts.secondLook` (verifies spec: CMPL)
 - [x] On a real review with contested areas, the summary's filtering line reports findings a second look confirmed (verifies spec: RUN)
@@ -105,6 +106,7 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [ ] The completion block's `counts.voters` matches the voter tier for the diff (verifies spec: RUN)
 - [ ] A review on `ubuntu-slim` shows the 15-minute warning in the job log (verifies spec: RUN)
 - [ ] The second look step runs with the same environment as the agents step, through the shared anchor
+- [ ] A second review on the same caller restores npm's download cache in setup
 
 ## Logs
 
@@ -115,4 +117,6 @@ Scenarios for the single review job. Driver behaviour is covered by `scripts/run
 - [x] A run that reports usage but touched no cache shows "none" in the cache column
 
 - [x] Each process's log is one collapsible group (verifies spec: RUN)
+- [x] A planted `::error` or `::add-mask` line in an answer or stderr does not run as a workflow command (verifies spec: RUN)
+- [x] A consensus area label with newlines is logged on one line (verifies spec: RUN)
 - [x] The job summary has a row per process with agent, run, attempt, turns, cache read and outcome (verifies spec: RUN)

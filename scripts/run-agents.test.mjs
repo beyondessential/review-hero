@@ -4,7 +4,10 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildPrompts, runAgents, summaryTable, MIN_FRESH_RUN_MS } from "./run-agents.mjs";
+import { buildPrompts, runAgents, summaryTable, freshRunMinimum, DEFAULT_PROCESS_TIMEOUT_MS } from "./run-agents.mjs";
+
+/** The time a fresh run needs left, at the voter time limit tests run with. */
+const MIN_FRESH_RUN_MS = freshRunMinimum(DEFAULT_PROCESS_TIMEOUT_MS);
 import { WRAP_UP_TIMEOUT_MS } from "./agent-process.mjs";
 import { RESULT_FILE_PATTERN, resultFileName } from "./lib.mjs";
 import { parseAgentResult } from "../src/index.mjs";
@@ -271,6 +274,21 @@ test("each process's log is written as one group", async () => {
   assert.ok(group.trimEnd().endsWith("::endgroup::"));
 });
 
+test("an answer cannot run workflow commands from the job log", async () => {
+  const planted = '::error title=Forged::owned\n::add-mask::secret\n[]';
+  const fake = fakeClaude(() => ({ code: 0, timedOut: false, stdout: envelope(planted), stderr: "::warning::from stderr" }));
+  const { output, rows } = review(fake, { voters: 1 });
+  await rows;
+  const group = output.find((text) => text.startsWith("::group::bugs: usable"));
+  const lines = group.trimEnd().split("\n");
+  const token = lines[1].match(/^::stop-commands::(.+)$/)?.[1];
+  assert.ok(token, "command processing is stopped before the body");
+  const resume = lines.indexOf(`::${token}::`);
+  assert.equal(resume, lines.length - 2);
+  assert.ok(lines.slice(2, resume).includes("::error title=Forged::owned"));
+  assert.equal(lines.at(-1), "::endgroup::");
+});
+
 test("a voter's row covers its wrap-up, with turns summed over both runs", async () => {
   const fake = fakeClaude((call) => (call.kind === "resume" ? USABLE : CAPPED));
   const [row] = await review(fake, { voters: 1 }).rows;
@@ -365,6 +383,10 @@ test("a crashed voter still gets its fresh run with time to spare", async () => 
   const fake = fakeClaude((call, calls) => (calls.length === 1 ? CRASH : USABLE));
   const result = await review(fake, { voters: 1, now: () => clock, deadline: MIN_FRESH_RUN_MS + 1 }).rows;
   assert.deepEqual(result.map((r) => r.outcome), ["crashed", "usable"]);
+});
+
+test("a fresh run needs half a voter's time limit left", () => {
+  assert.equal(freshRunMinimum(20 * 60 * 1000), 10 * 60 * 1000);
 });
 
 test("work admitted after the deadline starts no process", async () => {

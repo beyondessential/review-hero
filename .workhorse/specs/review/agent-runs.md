@@ -22,7 +22,7 @@ The agents spend their time waiting on the model, so one runner carries them all
 - [ ] Every step that reaches the network or a model has a time limit of its own, and the job's limit covers them all, so a hung step cannot take the orchestrator's time to post.
 - [ ] A review running on `ubuntu-slim` warns in the job log that the runner stops a job at 15 minutes.
 - [ ] The agents and the second look each work to a deadline a little inside their time limit: every process stops by it, so its result is written before the limit is reached.
-- [ ] A fresh run for a crashed or empty voter starts only when enough time is left before the deadline for it to be useful, judged when it would start.
+- [ ] A fresh run for a crashed or empty voter starts only when at least half a voter's time limit is left before the deadline, judged when it would start.
 - [ ] An agent process due to start with no time left before its deadline does not start, and is recorded as not started.
 - [ ] An agent process stopped at its time limit is stopped along with every process it spawned.
 - [ ] The job keeps running while agent processes wait out a provider pause, even with none running.
@@ -77,6 +77,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] Consensus runs as its own step after the agents finish, before the GitHub App token is created.
 - [ ] While grouping an agent's findings, the consensus model names its contested areas: parts of the code where findings below the majority suggest a real problem worth a second look.
 - [ ] An agent has at most three contested areas.
+- [ ] A consensus reply that cannot be read whole still filters findings when its list of kept findings is complete, names no contested areas, and says so in the job log.
 - [ ] Every finding in a contested area belongs to a group below the majority.
 - [ ] A review that runs one voter per agent has no consensus, so no second look.
 - [ ] Each contested area gets as many checkers as a finding from a single voter needs to reach the majority.
@@ -101,6 +102,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 
 - [ ] The job log has a line when each agent process starts.
 - [ ] Each agent process's output appears in the job log as its own collapsible group, written when that process finishes.
+- [ ] Text from the model or the CLI never runs as a workflow command in the job log: command processing is off inside each process's group, and a model's label written on a single log line stays on that line.
 - [ ] The job summary has a table of every agent process, with its agent, voter, attempt, time waiting to start, time running, peak memory, API retries, turns used, prompt cache use and outcome.
 - [ ] The job log says why further agent processes are being held back whenever the reason changes.
 - [ ] A voter's row covers its wrap-up as well, with turns and cache use summed over both.

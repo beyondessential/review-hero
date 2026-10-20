@@ -16,13 +16,14 @@ import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 export const MAX_CONTESTED_AREAS = 3;
 
 /**
- * The consensus reply's token limit. The reply lists each finding's index at
- * most once, in `keep` or in a contested group, so it grows with the number
- * of findings. Cut off, it no longer parses, and consensus falls back to
- * keeping everything on exactly the large reviews it exists to filter.
+ * The token limit for a reply that lists findings by index: consensus lists
+ * each at most once, in `keep` or a contested group, and grouping once as a
+ * member and once more as a representative, so either grows with the number
+ * of findings. Cut off, the reply no longer parses, and the stage falls back
+ * to doing nothing on exactly the large reviews it exists to filter.
  */
-export function consensusMaxTokens(findingCount) {
-  return 3000 + 8 * findingCount;
+export function indexReplyMaxTokens(findingCount, base) {
+  return base + 8 * findingCount;
 }
 
 /**
@@ -70,7 +71,7 @@ export async function applyConsensus(findings, voterCount, callModel) {
   try {
     const text = await callModel({
       model: "claude-sonnet-5",
-      maxTokens: consensusMaxTokens(findings.length),
+      maxTokens: indexReplyMaxTokens(findings.length, 3000),
       // Mechanical grouping — no reasoning needed, and thinking would eat
       // into the token budget the JSON output needs.
       thinking: { type: "disabled" },
@@ -199,8 +200,19 @@ export function parseConsensusReply(text) {
       // contested groups or junk, never the kept indices.
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return null;
     } catch {
-      // Not an object reply; try a bare array below
+      // Not readable as a whole; see below
     }
+  }
+
+  // An object reply that did not parse, most likely cut off: only an
+  // explicit `keep` list can stand for the kept findings, never whatever
+  // array comes first, which may be a contested group. The contested areas
+  // are lost, so say so.
+  if (/"keep"\s*:/.test(text)) {
+    const keepMatch = text.match(/"keep"\s*:\s*(\[[\d\s,]*\])/);
+    if (!keepMatch) return null;
+    console.warn("Consensus reply was not a readable object; kept findings recovered, contested areas lost");
+    return { keep: asIndices(JSON.parse(keepMatch[1])), contested: [] };
   }
 
   const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
@@ -244,7 +256,7 @@ export async function groupAllFindings(kept, dropped, callModel) {
   try {
     const text = await callModel({
       model: "claude-sonnet-5",
-      maxTokens: 2000,
+      maxTokens: indexReplyMaxTokens(all.length, 2000),
       // Mechanical grouping — no reasoning needed, and thinking would eat
       // into the token budget the JSON output needs.
       thinking: { type: "disabled" },
