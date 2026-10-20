@@ -24,7 +24,7 @@ PR checkbox checked
                                         └─────────────────┘
 ```
 
-Triage, the agents, consensus and the second look run in one job. The agents spend their time waiting on the model, so one runner carries them all, and checkouts and installs happen once per review. The orchestrator posts from a second, short job on `ubuntu-slim`.
+Triage, the agents, consensus and the second look run in one job. The orchestrator posts from a second, short job on `ubuntu-slim`.
 
 1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
 2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt. The CLI installed is the newest release at least a week old, so a broken or compromised release has time to be caught first. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
