@@ -351,6 +351,7 @@ jobs:
           DEFAULT_MODEL: ${{ inputs.model }}
           PR_BODY: ${{ github.event.pull_request.body }}
           HAS_OPENROUTER_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY != '' }}
+          OPENROUTER_API_KEY: ${{ inputs.reviewers == 'generated' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/review"

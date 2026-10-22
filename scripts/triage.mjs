@@ -5,7 +5,7 @@
  * 2. Discovers base agents (from review-hero prompts/) and custom agents
  *    (from the caller repo's .github/review-hero/)
  * 3. Calls Claude Haiku to select which agents are relevant, or with
- *    REVIEWERS=generated has the review model read the diff and write them
+ *    REVIEWERS=generated has the agents' model read the diff and write them
  * 4. Calculates max-turns based on filtered diff size
  * 5. Sets the voter count every agent runs, scaled to the diff
  * 6. Outputs agents, voters, max_turns, and agent_names for later steps
@@ -19,6 +19,7 @@
  *   FILTERED_DIFF_PATH  — Where to write the filtered diff for agents to consume
  *   PR_BODY             — PR description, read for the model checkbox and marker
  *   HAS_OPENROUTER_KEY  — "true" when REVIEW_HERO_OPENROUTER_API_KEY is set
+ *   OPENROUTER_API_KEY  — That key, for planning reviewers on the agents' OpenRouter model
  *   VOTERS              — Requested voters per agent, before scaling to the diff
  *   REVIEWERS           — "generated" to plan reviewers from the diff, else the fixed agents
  */
@@ -123,11 +124,15 @@ const agentList = allAgents
   .map((a) => `- ${a.key}: ${a.description}`)
   .join("\n");
 
-async function callTool({ model, maxTokens, prompt, tool }) {
-  const response = await fetch(`${baseUrl}/v1/messages`, {
+// OpenRouter serves the Anthropic Messages API, which is how the agents reach it too.
+async function callTool({ model, maxTokens, prompt, tool, provider = "anthropic" }) {
+  const openRouter = provider === "openrouter";
+  const response = await fetch(openRouter ? "https://openrouter.ai/api/v1/messages" : `${baseUrl}/v1/messages`, {
     method: "POST",
     headers: {
-      "x-api-key": apiKey,
+      ...(openRouter
+        ? { authorization: `Bearer ${envOrDie("OPENROUTER_API_KEY")}` }
+        : { "x-api-key": apiKey }),
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
@@ -188,8 +193,8 @@ ${changedFiles.join("\n")}`,
 
 const PLAN_DIFF_CHARS = 60_000;
 
-// Ask the model to read the diff and write the reviewers this PR needs. It may
-// plan as many as fixed triage could run, so a plan never costs more.
+// Ask the agents' own model to read the diff and write the reviewers this PR
+// needs. It may plan as many as fixed triage could run, so a plan never costs more.
 async function planReviewers() {
   const limit = allAgents.length;
   const diffShown = filteredDiff.length > PLAN_DIFF_CHARS
@@ -197,7 +202,8 @@ async function planReviewers() {
     : filteredDiff;
   const project = config.project ? `${config.project}${config.description ? `, ${config.description}` : ""}` : "this repository";
   const input = await callTool({
-    model: defaultModel,
+    model: agentModel,
+    provider: agentProvider,
     maxTokens: 2000,
     prompt: `You are planning the code review of a pull request to ${project}. Decide which reviewers it needs: between 1 and ${limit}, each looking for a different kind of problem this change could plausibly have. Plan fewer when the change is small or of one kind.
 
