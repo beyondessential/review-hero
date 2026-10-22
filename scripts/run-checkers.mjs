@@ -10,7 +10,7 @@
  *
  * Environment variables:
  *   CONSENSUS_PATH      — Consensus outcome, read and rewritten
- *   AGENTS              — JSON array of { key, source } from triage
+ *   AGENTS              — JSON array of { key, source } from triage, with name and focus for a generated reviewer
  *   AGENT_MODEL         — Model the checkers run on
  *   AGENT_PROVIDER      — "anthropic" or "openrouter"
  *   CONCURRENCY         — Most checker processes running at once (0 or unset: no ceiling)
@@ -34,7 +34,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  agentPromptPath,
+  readAgentPrompt,
   cacheReadShare,
   createProcessRunner,
   primeRun,
@@ -274,12 +274,11 @@ export async function runSecondLook({
  */
 export function buildCheckerPrompts({ consensus, agents, reviewHeroDir, callerBaseDir, common, out = console.log }) {
   const checkerPrompt = readFileSync(join(reviewHeroDir, "prompts", "checker-prompt.md"), "utf-8");
-  const sources = new Map(agents.map((a) => [a.key, a.source]));
+  const byKey = new Map(agents.map((a) => [a.key, a]));
   return consensus.contested.map((area) => {
     let agentPrompt;
     try {
-      const path = agentPromptPath({ key: area.agent, source: sources.get(area.agent) }, { reviewHeroDir, callerBaseDir });
-      agentPrompt = readFileSync(path, "utf-8");
+      agentPrompt = readAgentPrompt(byKey.get(area.agent) ?? { key: area.agent }, { reviewHeroDir, callerBaseDir });
     } catch (err) {
       out(`::warning::No second look for ${JSON.stringify(area.agent)}: cannot read its prompt (${err.message})`);
       return undefined;

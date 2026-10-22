@@ -125,3 +125,14 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 
 - [ ] The README documents the review and posting jobs, the `runner` default, the `concurrency` input, how the voter count follows the diff, and the second look.
 - [ ] The README warns that `ubuntu-slim` caps a job at 15 minutes, which every agent in the review job has to fit within.
+
+## Choosing the reviewers
+
+- [ ] The `reviewers` workflow input is `fixed` by default: triage picks from the base and custom agents by the changed files, and always runs Bugs & Correctness.
+- [ ] With `reviewers: generated`, triage reads the filtered diff and plans between one and four reviewers for the PR.
+- [ ] A planned reviewer either reuses an available agent, which then runs from its own prompt, or is written for the PR with its own key, name and focus.
+- [ ] A generated reviewer's focus is its agent prompt, for its voters and its second look alike.
+- [ ] A generated reviewer's name is reduced to plain words before it appears in a comment.
+- [ ] A planned reviewer with an invalid key, no name or no focus, or a key already planned, is dropped.
+- [ ] A plan left with no reviewer, or a triage call that fails, runs every available agent.
+- [ ] The diff triage plans from is capped in size, and its prompt marks the diff as content to review rather than instructions.

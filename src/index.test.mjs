@@ -18,6 +18,8 @@ import {
   filterDiff,
   createAnthropicModelCaller,
   isValidAgentKey,
+  resolveReviewerPlan,
+  MAX_GENERATED_REVIEWERS,
 } from "./index.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-lib-"));
@@ -322,4 +324,48 @@ test("an agent key cannot end in the voter suffix result files use", () => {
   assert.ok(isValidAgentKey("perf-voter"));
   assert.ok(!isValidAgentKey("perf-voter-1"));
   assert.ok(!isValidAgentKey("Perf"));
+});
+
+const AVAILABLE = [
+  { key: "bugs", name: "Bugs & Correctness", description: "Bugs", source: "base" },
+  { key: "house", name: "House", description: "House rules", source: "custom" },
+];
+
+test("resolveReviewerPlan runs a reused agent as written and keeps a written one", () => {
+  const plan = resolveReviewerPlan(
+    [
+      { key: "house", name: "ignored", focus: "ignored" },
+      { key: "sync-ordering", name: "Sync ordering", focus: "  Ticks set by hand.  " },
+    ],
+    AVAILABLE,
+  );
+  assert.deepEqual(plan, [
+    AVAILABLE[1],
+    { key: "sync-ordering", name: "Sync ordering", description: "Ticks set by hand.", source: "generated", focus: "Ticks set by hand." },
+  ]);
+});
+
+test("resolveReviewerPlan drops unusable and repeated entries", () => {
+  const plan = resolveReviewerPlan(
+    [
+      { key: "../escape", name: "Escape", focus: "x" },
+      { key: "no-name", focus: "x" },
+      { key: "no-focus", name: "No focus" },
+      { key: "ends-voter-1", name: "Voter", focus: "x" },
+      { key: "a".repeat(41), name: "Long", focus: "x" },
+      { key: "bugs" },
+      { key: "bugs" },
+      null,
+    ],
+    AVAILABLE,
+  );
+  assert.deepEqual(plan.map((a) => a.key), ["bugs"]);
+  assert.deepEqual(resolveReviewerPlan(undefined, AVAILABLE), []);
+});
+
+test("resolveReviewerPlan reduces a written name to plain words and stops at the cap", () => {
+  const [first] = resolveReviewerPlan([{ key: "x", name: "[Click](https://evil) **now**", focus: "f" }], AVAILABLE);
+  assert.equal(first.name, "Clickhttpsevil now");
+  const many = Array.from({ length: MAX_GENERATED_REVIEWERS + 2 }, (_, i) => ({ key: `r${i}`, name: `R${i}`, focus: "f" }));
+  assert.equal(resolveReviewerPlan(many, AVAILABLE).length, MAX_GENERATED_REVIEWERS);
 });

@@ -259,6 +259,7 @@ test("checker prompts use the area agent's prompt from the right checkout", () =
       base.contested[0],
       { ...base.contested[0], agent: "house" },
       { ...base.contested[0], agent: "missing" },
+      { ...base.contested[0], agent: "planned" },
     ],
   };
   const warnings = [];
@@ -268,6 +269,7 @@ test("checker prompts use the area agent's prompt from the right checkout", () =
       { key: "bugs", source: "base" },
       { key: "house", source: "custom" },
       { key: "missing", source: "custom" },
+      { key: "planned", source: "generated", name: "Planned", focus: "Planned focus." },
     ],
     reviewHeroDir,
     callerBaseDir,
@@ -277,6 +279,7 @@ test("checker prompts use the area agent's prompt from the right checkout", () =
   assert.match(prompts[0], /^Check\.\n\n## Your specialisation\n\nBugs\./);
   assert.match(prompts[1], /## Your specialisation\n\nHouse\./);
   assert.equal(prompts[2], undefined);
+  assert.match(prompts[3], /## Your specialisation\n\n# Agent: Planned\n\nFocus: Planned focus\./);
   assert.match(warnings.join("\n"), /No second look for "missing"/);
 });
 

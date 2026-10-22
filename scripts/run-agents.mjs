@@ -18,7 +18,7 @@
  *    scans for, plus a log group per process and a job summary table
  *
  * Environment variables:
- *   AGENTS              — JSON array of { key, source } from triage
+ *   AGENTS              — JSON array of { key, source } from triage, with name and focus for a generated reviewer
  *   VOTERS              — Voters per agent, from triage
  *   MAX_TURNS           — Turn cap per voter run, from triage
  *   AGENT_MODEL         — Model the agents run on
@@ -51,7 +51,7 @@ import {
 import { join } from "node:path";
 
 import {
-  agentPromptPath,
+  readAgentPrompt,
   cacheReadShare,
   createProcessRunner,
   primeRun,
@@ -333,7 +333,7 @@ export function buildPrompts({ agents, reviewHeroDir, callerBaseDir, common, out
   for (const agent of agents) {
     let agentPrompt;
     try {
-      agentPrompt = readFileSync(agentPromptPath(agent, { reviewHeroDir, callerBaseDir }), "utf-8");
+      agentPrompt = readAgentPrompt(agent, { reviewHeroDir, callerBaseDir });
     } catch (err) {
       out(`::warning::Skipping agent ${JSON.stringify(agent.key)}: cannot read its prompt (${err.message})`);
       continue;

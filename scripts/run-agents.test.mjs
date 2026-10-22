@@ -520,6 +520,15 @@ test("an agent whose prompt cannot be read is skipped, and the rest still run", 
   assert.match(warnings.join("\n"), /::warning::Skipping agent "house": cannot read its prompt/);
 });
 
+test("a generated reviewer's focus is its prompt, with no file read", () => {
+  const prompts = buildPrompts({
+    ...promptDirs(),
+    agents: [{ key: "sync-ordering", source: "generated", name: "Sync ordering", focus: "Ticks set by hand." }],
+    common: { maxTurns: 20, diff: "" },
+  });
+  assert.ok(prompts["sync-ordering"].startsWith("Base.\n\n# Agent: Sync ordering\n\nFocus: Ticks set by hand."));
+});
+
 // ── Streaming ────────────────────────────────────────────────────────────────
 
 test("the CLI loads no settings, MCP servers or skills from the PR checkout, wrap-ups included", async () => {
