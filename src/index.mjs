@@ -40,7 +40,6 @@ export {
   loadCallerConfig,
   discoverBaseAgents,
   discoverCustomAgents,
-  MAX_GENERATED_REVIEWERS,
   resolveReviewerPlan,
 } from "./agents.mjs";
 

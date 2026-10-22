@@ -31,7 +31,6 @@ import {
   loadCallerConfig,
   discoverBaseAgents,
   discoverCustomAgents,
-  MAX_GENERATED_REVIEWERS,
   resolveReviewerPlan,
 } from "../src/index.mjs";
 
@@ -197,7 +196,7 @@ async function planReviewers() {
   const input = await callTool({
     model: defaultModel,
     maxTokens: 2000,
-    prompt: `You are planning the code review of a pull request. Decide which reviewers it needs: between 1 and ${MAX_GENERATED_REVIEWERS}, each looking for a different kind of problem this change could plausibly have. Plan fewer when the change is small or of one kind.
+    prompt: `You are planning the code review of a pull request. Decide which reviewers it needs: between 1 and ${allAgents.length}, each looking for a different kind of problem this change could plausibly have. Plan fewer when the change is small or of one kind.
 
 For each reviewer, either:
 - reuse an available agent by its key when it fits as written. Agents outside bugs, performance, design and security carry this repository's own rules, which you cannot see, so reuse one whenever the change falls in its area; or
@@ -219,7 +218,7 @@ ${diffShown}`,
           reviewers: {
             type: "array",
             minItems: 1,
-            maxItems: MAX_GENERATED_REVIEWERS,
+            maxItems: allAgents.length,
             items: {
               type: "object",
               properties: {

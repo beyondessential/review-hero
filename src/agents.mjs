@@ -129,14 +129,14 @@ export function discoverCustomAgents(callerDir, config) {
   return agents;
 }
 
-/** The most reviewers a generated plan runs, so planning never costs more than the fixed agents. */
-export const MAX_GENERATED_REVIEWERS = 4;
 const MAX_KEY_CHARS = 40;
 const MAX_NAME_CHARS = 60;
 const MAX_FOCUS_CHARS = 2000;
 
 /**
- * The agents a generated plan runs, in the order planned. A key naming an
+ * The agents a generated plan runs, in the order planned, and no more of them
+ * than there are available agents, so a plan never costs more than running
+ * every fixed agent. A key naming an
  * available agent runs that agent as written; any other entry is a reviewer
  * the plan wrote, kept only when its key, name and focus are usable. The plan
  * comes from a model that read the PR, so its name is reduced to plain words
@@ -146,7 +146,7 @@ export function resolveReviewerPlan(planned, available) {
   const byKey = new Map(available.map((a) => [a.key, a]));
   const chosen = new Map();
   for (const entry of Array.isArray(planned) ? planned : []) {
-    if (chosen.size >= MAX_GENERATED_REVIEWERS) break;
+    if (chosen.size >= available.length) break;
     const key = typeof entry?.key === "string" ? entry.key : "";
     if (chosen.has(key)) continue;
     if (byKey.has(key)) {

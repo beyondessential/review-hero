@@ -19,7 +19,6 @@ import {
   createAnthropicModelCaller,
   isValidAgentKey,
   resolveReviewerPlan,
-  MAX_GENERATED_REVIEWERS,
 } from "./index.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-lib-"));
@@ -366,6 +365,6 @@ test("resolveReviewerPlan drops unusable and repeated entries", () => {
 test("resolveReviewerPlan reduces a written name to plain words and stops at the cap", () => {
   const [first] = resolveReviewerPlan([{ key: "x", name: "[Click](https://evil) **now**", focus: "f" }], AVAILABLE);
   assert.equal(first.name, "Clickhttpsevil now");
-  const many = Array.from({ length: MAX_GENERATED_REVIEWERS + 2 }, (_, i) => ({ key: `r${i}`, name: `R${i}`, focus: "f" }));
-  assert.equal(resolveReviewerPlan(many, AVAILABLE).length, MAX_GENERATED_REVIEWERS);
+  const many = Array.from({ length: AVAILABLE.length + 2 }, (_, i) => ({ key: `r${i}`, name: `R${i}`, focus: "f" }));
+  assert.equal(resolveReviewerPlan(many, AVAILABLE).length, AVAILABLE.length);
 });
