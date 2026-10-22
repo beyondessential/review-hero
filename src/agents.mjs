@@ -134,25 +134,17 @@ const MAX_NAME_CHARS = 60;
 const MAX_FOCUS_CHARS = 2000;
 
 /**
- * The agents a generated plan runs, in the order planned, and no more of them
- * than there are available agents, so a plan never costs more than running
- * every fixed agent. A key naming an
- * available agent runs that agent as written; any other entry is a reviewer
- * the plan wrote, kept only when its key, name and focus are usable. The plan
- * comes from a model that read the PR, so its name is reduced to plain words
- * before it reaches a comment.
+ * The reviewers a generated plan runs, in the order planned and at most
+ * `limit` of them, each kept only when its key, name and focus are usable. The
+ * plan comes from a model that read the PR, so its name is reduced to plain
+ * words before it reaches a comment.
  */
-export function resolveReviewerPlan(planned, available) {
-  const byKey = new Map(available.map((a) => [a.key, a]));
+export function resolveReviewerPlan(planned, limit) {
   const chosen = new Map();
   for (const entry of Array.isArray(planned) ? planned : []) {
-    if (chosen.size >= available.length) break;
+    if (chosen.size >= limit) break;
     const key = typeof entry?.key === "string" ? entry.key : "";
     if (chosen.has(key)) continue;
-    if (byKey.has(key)) {
-      chosen.set(key, byKey.get(key));
-      continue;
-    }
     const name = typeof entry?.name === "string"
       ? entry.name.replace(/[^\p{L}\p{N} &-]/gu, "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME_CHARS)
       : "";

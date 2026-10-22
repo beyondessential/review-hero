@@ -325,22 +325,17 @@ test("an agent key cannot end in the voter suffix result files use", () => {
   assert.ok(!isValidAgentKey("Perf"));
 });
 
-const AVAILABLE = [
-  { key: "bugs", name: "Bugs & Correctness", description: "Bugs", source: "base" },
-  { key: "house", name: "House", description: "House rules", source: "custom" },
-];
-
-test("resolveReviewerPlan runs a reused agent as written and keeps a written one", () => {
+test("resolveReviewerPlan keeps written reviewers in the order planned", () => {
   const plan = resolveReviewerPlan(
     [
-      { key: "house", name: "ignored", focus: "ignored" },
       { key: "sync-ordering", name: "Sync ordering", focus: "  Ticks set by hand.  " },
+      { key: "bugs", name: "Bugs", focus: "Logic errors." },
     ],
-    AVAILABLE,
+    7,
   );
   assert.deepEqual(plan, [
-    AVAILABLE[1],
     { key: "sync-ordering", name: "Sync ordering", description: "Ticks set by hand.", source: "generated", focus: "Ticks set by hand." },
+    { key: "bugs", name: "Bugs", description: "Logic errors.", source: "generated", focus: "Logic errors." },
   ]);
 });
 
@@ -352,19 +347,19 @@ test("resolveReviewerPlan drops unusable and repeated entries", () => {
       { key: "no-focus", name: "No focus" },
       { key: "ends-voter-1", name: "Voter", focus: "x" },
       { key: "a".repeat(41), name: "Long", focus: "x" },
-      { key: "bugs" },
-      { key: "bugs" },
+      { key: "kept", name: "Kept", focus: "x" },
+      { key: "kept", name: "Again", focus: "y" },
       null,
     ],
-    AVAILABLE,
+    7,
   );
-  assert.deepEqual(plan.map((a) => a.key), ["bugs"]);
-  assert.deepEqual(resolveReviewerPlan(undefined, AVAILABLE), []);
+  assert.deepEqual(plan.map((a) => a.name), ["Kept"]);
+  assert.deepEqual(resolveReviewerPlan(undefined, 7), []);
 });
 
-test("resolveReviewerPlan reduces a written name to plain words and stops at the cap", () => {
-  const [first] = resolveReviewerPlan([{ key: "x", name: "[Click](https://evil) **now**", focus: "f" }], AVAILABLE);
+test("resolveReviewerPlan reduces a written name to plain words and stops at the limit", () => {
+  const [first] = resolveReviewerPlan([{ key: "x", name: "[Click](https://evil) **now**", focus: "f" }], 7);
   assert.equal(first.name, "Clickhttpsevil now");
-  const many = Array.from({ length: AVAILABLE.length + 2 }, (_, i) => ({ key: `r${i}`, name: `R${i}`, focus: "f" }));
-  assert.equal(resolveReviewerPlan(many, AVAILABLE).length, AVAILABLE.length);
+  const many = Array.from({ length: 9 }, (_, i) => ({ key: `r${i}`, name: `R${i}`, focus: "f" }));
+  assert.equal(resolveReviewerPlan(many, 7).length, 7);
 });
