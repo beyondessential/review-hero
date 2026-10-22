@@ -151,7 +151,7 @@ async function callTool({ model, maxTokens, prompt, tool, provider = "anthropic"
   const result = await response.json();
   const toolUse = result.content.find((block) => block.type === "tool_use");
   if (!toolUse) {
-    throw new Error(`Unexpected triage output: ${JSON.stringify(result.content)}`);
+    throw new Error(`No tool call (stop reason ${result.stop_reason}): ${JSON.stringify(result.content).slice(0, 300)}`);
   }
   return toolUse.input;
 }
@@ -205,7 +205,8 @@ async function planReviewers() {
   const input = await callTool({
     model: agentModel,
     provider: agentProvider,
-    maxTokens: 2000,
+    // GLM thinks before it calls the tool, and runs out of a smaller budget first.
+    maxTokens: 16000,
     prompt: `You are planning the code review of a pull request to ${project}. Decide which reviewers it needs: between 1 and ${limit}, each looking for a different kind of problem this change could plausibly have. Plan fewer when the change is small or of one kind.
 
 Divide the work by what could break, not by kind of file. Plan no reviewer only for tests, specs or documentation unless they are most of the change: the reviewer of an area also judges whether its tests cover it and whether its docs still hold.
