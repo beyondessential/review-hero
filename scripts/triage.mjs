@@ -194,10 +194,12 @@ ${changedFiles.join("\n")}`,
 
 const PLAN_DIFF_CHARS = 60_000;
 
-// Ask the agents' own model to read the diff and write the reviewers this PR
-// needs. It may plan as many as fixed triage could run, so a plan never costs more.
+// Bugs & Correctness reads the whole diff, so a bug that crosses the planned
+// areas still has a reviewer. The agents' own model reads the diff and writes
+// the specialists, no more than fixed triage could run alongside it.
 async function planReviewers() {
-  const limit = allAgents.length;
+  const generalist = allAgents.find((a) => a.key === "bugs");
+  const limit = allAgents.length - 1;
   const diffShown = filteredDiff.length > PLAN_DIFF_CHARS
     ? `${filteredDiff.slice(0, PLAN_DIFF_CHARS)}\n[diff truncated; ${changedFiles.length} files changed in all: ${changedFiles.join(", ")}]`
     : filteredDiff;
@@ -207,7 +209,7 @@ async function planReviewers() {
     provider: agentProvider,
     // GLM thinks before it calls the tool, and runs out of a smaller budget first.
     maxTokens: 16000,
-    prompt: `You are planning the code review of a pull request to ${project}. Decide which reviewers it needs: between 1 and ${limit}, each looking for a different kind of problem this change could plausibly have. Plan fewer when the change is small or of one kind.
+    prompt: `You are planning the code review of a pull request to ${project}. A correctness reviewer already reads the whole diff for logic errors, edge cases and bugs that cross files. Decide which specialist reviewers it needs alongside: between 0 and ${limit}, each looking closely at one area of the change for problems it could plausibly have. Plan none when the change is small enough for the correctness reviewer alone, and fewer when it is of one kind.
 
 Divide the work by what could break, not by kind of file. Plan no reviewer only for tests, specs or documentation unless they are most of the change: the reviewer of an area also judges whether its tests cover it and whether its docs still hold.
 
@@ -225,7 +227,6 @@ ${diffShown}`,
         properties: {
           reviewers: {
             type: "array",
-            minItems: 1,
             maxItems: limit,
             items: {
               type: "object",
@@ -242,11 +243,14 @@ ${diffShown}`,
       },
     },
   });
-  const planned = dropTestsAndDocsReviewers(resolveReviewerPlan(input.reviewers, limit), changedFiles);
-  if (planned.length === 0) {
+  if (!Array.isArray(input.reviewers)) {
+    throw new Error(`No reviewer list in the plan: ${JSON.stringify(input)}`);
+  }
+  const planned = resolveReviewerPlan(input.reviewers.filter((r) => r?.key !== generalist.key), limit);
+  if (input.reviewers.length > 0 && planned.length === 0) {
     throw new Error(`No usable reviewer in the plan: ${JSON.stringify(input)}`);
   }
-  return planned;
+  return [generalist, ...dropTestsAndDocsReviewers(planned, changedFiles)];
 }
 
 const generated = process.env.REVIEWERS === "generated";

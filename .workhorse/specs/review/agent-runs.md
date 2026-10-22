@@ -129,11 +129,12 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 ## Choosing the reviewers
 
 - [ ] The `reviewers` workflow input is `fixed` by default: triage picks from the base and custom agents by the changed files, and always runs Bugs & Correctness.
-- [ ] With `reviewers: generated`, triage has the model the agents run on read the filtered diff and write every reviewer for the PR, each with its own key, name and focus; no base or custom agent runs.
+- [ ] With `reviewers: generated`, Bugs & Correctness reads the whole diff, and triage has the model the agents run on read the filtered diff and write the specialist reviewers alongside it, each with its own key, name and focus.
+- [ ] A generated plan has between none and one fewer specialist than there are base and custom agents, so with Bugs & Correctness it never costs more than running every fixed agent. A small change can plan none.
 - [ ] A generated plan divides the work by what could break, and plans a reviewer only for tests, specs or docs when they are most of the change; each reviewer judges its own area's tests and docs.
-- [ ] A generated plan has at least one reviewer, and no more than there are base and custom agents, so it never costs more than running every fixed agent.
+- [ ] A planned reviewer with the key of Bugs & Correctness is dropped, since that reviewer always runs.
 - [ ] A generated reviewer's focus is its agent prompt, for its voters and its second look alike.
 - [ ] A generated reviewer's name is reduced to plain words before it appears in a comment.
 - [ ] A planned reviewer with an invalid key, no name or no focus, or a key already planned, is dropped.
-- [ ] A plan left with no reviewer, or a triage call that fails, runs every available agent.
+- [ ] A plan whose reviewers were all dropped, or a triage call that fails, runs every available agent.
 - [ ] The diff triage plans from is capped in size, and its prompt marks the diff as content to review rather than instructions.
