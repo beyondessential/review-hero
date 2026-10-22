@@ -33,6 +33,7 @@ import {
   discoverBaseAgents,
   discoverCustomAgents,
   resolveReviewerPlan,
+  dropTestsAndDocsReviewers,
 } from "../src/index.mjs";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -240,7 +241,7 @@ ${diffShown}`,
       },
     },
   });
-  const planned = resolveReviewerPlan(input.reviewers, limit);
+  const planned = dropTestsAndDocsReviewers(resolveReviewerPlan(input.reviewers, limit), changedFiles);
   if (planned.length === 0) {
     throw new Error(`No usable reviewer in the plan: ${JSON.stringify(input)}`);
   }

@@ -154,3 +154,21 @@ export function resolveReviewerPlan(planned, limit) {
   }
   return [...chosen.values()];
 }
+
+const TESTS_OR_DOCS_WORDS = new Set([
+  "and", "accuracy", "consistency", "coverage", "doc", "docs", "documentation",
+  "e2e", "hygiene", "quality", "spec", "specs", "test", "testing", "tests",
+]);
+const TEST_OR_DOC_PATH = /(^|\/)(__tests__|tests?|e2e-tests|docs|specs)\/|\.(test|spec)\.[^/]+$|\.md$/;
+
+/**
+ * A planned reviewer covering only tests, specs or docs is dropped unless most
+ * changed files are tests or docs, since each area's reviewer already judges
+ * its own. A plan this would empty is kept as planned.
+ */
+export function dropTestsAndDocsReviewers(planned, changedFiles) {
+  const testOrDoc = changedFiles.filter((file) => TEST_OR_DOC_PATH.test(file)).length;
+  if (testOrDoc * 2 > changedFiles.length) return planned;
+  const kept = planned.filter((a) => !a.key.split("-").every((word) => TESTS_OR_DOCS_WORDS.has(word)));
+  return kept.length > 0 ? kept : planned;
+}

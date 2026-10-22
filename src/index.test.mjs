@@ -19,6 +19,7 @@ import {
   createAnthropicModelCaller,
   isValidAgentKey,
   resolveReviewerPlan,
+  dropTestsAndDocsReviewers,
 } from "./index.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-lib-"));
@@ -362,4 +363,18 @@ test("resolveReviewerPlan reduces a written name to plain words and stops at the
   assert.equal(first.name, "Clickhttpsevil now");
   const many = Array.from({ length: 9 }, (_, i) => ({ key: `r${i}`, name: `R${i}`, focus: "f" }));
   assert.equal(resolveReviewerPlan(many, 7).length, 7);
+});
+
+const reviewers = (...keys) => keys.map((key) => ({ key }));
+
+test("dropTestsAndDocsReviewers drops a tests-only or docs-only reviewer from a code change", () => {
+  const plan = reviewers("sync-manager", "e2e-and-test-hygiene", "spec-tests", "test-coverage", "data-privacy-docs");
+  const kept = dropTestsAndDocsReviewers(plan, ["app/sync.js", "app/syncRuns.js", "app/sync.test.js"]);
+  assert.deepEqual(kept.map((a) => a.key), ["sync-manager", "data-privacy-docs"]);
+});
+
+test("dropTestsAndDocsReviewers keeps the plan when most files are tests or docs, or when it would empty it", () => {
+  const plan = reviewers("e2e-tests", "docs");
+  assert.deepEqual(dropTestsAndDocsReviewers(plan, ["a.test.js", "b.spec.ts", "app/x.js"]), plan);
+  assert.deepEqual(dropTestsAndDocsReviewers(plan, ["app/x.js"]), plan);
 });

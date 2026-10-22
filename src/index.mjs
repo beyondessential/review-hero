@@ -41,6 +41,7 @@ export {
   discoverBaseAgents,
   discoverCustomAgents,
   resolveReviewerPlan,
+  dropTestsAndDocsReviewers,
 } from "./agents.mjs";
 
 export {
