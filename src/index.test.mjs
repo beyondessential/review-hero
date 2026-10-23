@@ -18,6 +18,9 @@ import {
   filterDiff,
   createAnthropicModelCaller,
   isValidAgentKey,
+  resolveReviewerPlan,
+  dropTestsAndDocsReviewers,
+  summariseDiffFiles,
 } from "./index.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-lib-"));
@@ -322,4 +325,97 @@ test("an agent key cannot end in the voter suffix result files use", () => {
   assert.ok(isValidAgentKey("perf-voter"));
   assert.ok(!isValidAgentKey("perf-voter-1"));
   assert.ok(!isValidAgentKey("Perf"));
+});
+
+const EXISTING = [
+  { key: "bugs", name: "Bugs & Correctness", description: "", source: "base" },
+  { key: "security", name: "Security", description: "", source: "base" },
+];
+
+test("resolveReviewerPlan keeps written reviewers in order, with the focus on one line", () => {
+  const plan = resolveReviewerPlan(
+    [
+      { key: "sync-ordering", name: "Sync ordering", focus: "  Ticks set\n::error::by hand.  " },
+      { key: "auth-flow", name: "Auth flow", focus: "Token refresh." },
+    ],
+    7,
+    EXISTING,
+  );
+  assert.deepEqual(plan, [
+    { key: "sync-ordering", name: "Sync ordering", description: "Ticks set ::error::by hand.", source: "generated", focus: "Ticks set ::error::by hand." },
+    { key: "auth-flow", name: "Auth flow", description: "Token refresh.", source: "generated", focus: "Token refresh." },
+  ]);
+});
+
+test("resolveReviewerPlan drops unusable, repeated and impersonating entries", () => {
+  const plan = resolveReviewerPlan(
+    [
+      { key: "../escape", name: "Escape", focus: "x" },
+      { key: "no-name", focus: "x" },
+      { key: "no-focus", name: "No focus" },
+      { key: "ends-voter-1", name: "Voter", focus: "x" },
+      { key: "a".repeat(41), name: "Long", focus: "x" },
+      { key: "security", name: "Looks fine", focus: "x" },
+      { key: "posing", name: "bugs & correctness", focus: "x" },
+      { key: "kept", name: "Kept", focus: "x" },
+      { key: "kept", name: "Again", focus: "y" },
+      null,
+    ],
+    7,
+    EXISTING,
+  );
+  assert.deepEqual(plan.map((a) => a.name), ["Kept"]);
+  assert.deepEqual(resolveReviewerPlan(undefined, 7), []);
+});
+
+test("resolveReviewerPlan reduces a written name to plain words and stops at the limit", () => {
+  const [first] = resolveReviewerPlan([{ key: "x", name: "[Click](https://evil) **now**", focus: "f" }], 7);
+  assert.equal(first.name, "Clickhttpsevil now");
+  const many = Array.from({ length: 9 }, (_, i) => ({ key: `r${i}`, name: `R${i}`, focus: "f" }));
+  assert.equal(resolveReviewerPlan(many, 7).length, 7);
+});
+
+const reviewers = (...keys) => keys.map((key) => ({ key }));
+
+test("dropTestsAndDocsReviewers drops a tests-only or docs-only reviewer from a code change", () => {
+  const plan = reviewers("sync-manager", "e2e-and-test-hygiene", "spec-tests", "test-coverage", "data-privacy-docs", "naming-consistency", "quality");
+  const kept = dropTestsAndDocsReviewers(plan, ["app/sync.js", "app/syncRuns.js", "app/sync.test.js"]);
+  assert.deepEqual(kept.map((a) => a.key), ["sync-manager", "data-privacy-docs", "naming-consistency", "quality"]);
+});
+
+test("dropTestsAndDocsReviewers keeps the plan when most files are tests or docs", () => {
+  const plan = reviewers("e2e-tests", "docs");
+  assert.deepEqual(dropTestsAndDocsReviewers(plan, ["a.test.js", "b.spec.ts", "app/x.js"]), plan);
+  assert.deepEqual(dropTestsAndDocsReviewers(plan, ["app/x.js"]), []);
+});
+
+test("summariseDiffFiles lists every file with its added and removed lines", () => {
+  const diff = [
+    "diff --git a/app/a.js b/app/a.js",
+    "--- a/app/a.js",
+    "+++ b/app/a.js",
+    "@@ -1,2 +1,2 @@",
+    "-old",
+    "+new",
+    "+more",
+    "diff --git a/docs/b.md b/docs/b.md",
+    "--- a/docs/b.md",
+    "+++ b/docs/b.md",
+    "-gone",
+  ].join("\n");
+  assert.equal(summariseDiffFiles(diff), "app/a.js (+2/-1)\ndocs/b.md (+0/-1)");
+  assert.equal(summariseDiffFiles(diff, 1), "app/a.js (+2/-1)\nand 1 more files");
+  const quoted = ['diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"', "+x", "diff --git a/z.js b/z.js", "-y"].join("\n");
+  assert.equal(summariseDiffFiles(quoted), "caf\\303\\251.md (+1/-0)\nz.js (+0/-1)");
+});
+
+test("resolveReviewerPlan keeps reviewer names unique and strips control characters from a focus", () => {
+  const plan = resolveReviewerPlan(
+    [
+      { key: "auth-flow", name: "Auth flow", focus: "Token\u001b[31m refresh\u0007." },
+      { key: "auth-flow-2", name: "auth FLOW", focus: "Again." },
+    ],
+    7,
+  );
+  assert.deepEqual(plan.map((a) => [a.key, a.focus]), [["auth-flow", "Token [31m refresh ."]]);
 });

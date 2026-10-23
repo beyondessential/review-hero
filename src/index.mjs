@@ -40,6 +40,8 @@ export {
   loadCallerConfig,
   discoverBaseAgents,
   discoverCustomAgents,
+  resolveReviewerPlan,
+  dropTestsAndDocsReviewers,
 } from "./agents.mjs";
 
 export {
@@ -47,6 +49,7 @@ export {
   globMatch,
   simpleWildcard,
   filterDiff,
+  summariseDiffFiles,
 } from "./scope.mjs";
 
 export {
