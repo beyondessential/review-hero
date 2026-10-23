@@ -374,10 +374,10 @@ test("dropTestsAndDocsReviewers drops a tests-only or docs-only reviewer from a 
   assert.deepEqual(kept.map((a) => a.key), ["sync-manager", "data-privacy-docs"]);
 });
 
-test("dropTestsAndDocsReviewers keeps the plan when most files are tests or docs, or when it would empty it", () => {
+test("dropTestsAndDocsReviewers keeps the plan when most files are tests or docs", () => {
   const plan = reviewers("e2e-tests", "docs");
   assert.deepEqual(dropTestsAndDocsReviewers(plan, ["a.test.js", "b.spec.ts", "app/x.js"]), plan);
-  assert.deepEqual(dropTestsAndDocsReviewers(plan, ["app/x.js"]), plan);
+  assert.deepEqual(dropTestsAndDocsReviewers(plan, ["app/x.js"]), []);
 });
 
 test("summariseDiffFiles lists every file with its added and removed lines", () => {

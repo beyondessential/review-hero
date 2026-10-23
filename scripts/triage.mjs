@@ -194,8 +194,8 @@ ${changedFiles.join("\n")}`,
   return allAgents.filter((a) => keys.includes(a.key));
 }
 
-// GLM's thinking grows with what it reads, and on a very large diff it ran out
-// of output before planning; past this it reads the start and a file list.
+// GLM's thinking grows with what it reads and can use up the output before the
+// plan, so past this the planner reads the start of the diff and a file list.
 const PLAN_DIFF_CHARS = 30_000;
 
 // Bugs & Correctness reads the whole diff, so a bug that crosses the planned

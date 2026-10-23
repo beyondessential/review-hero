@@ -486,18 +486,18 @@ export function startDriver({ maxTurns, defaultTimeoutMs, summaryTitle }) {
 
 // ── Trusted prompts ──────────────────────────────────────────────────────────
 
-/**
- * Where an agent's own prompt is read from. Base agents come from the
- * review-hero checkout, and every other agent from the caller's checkout at
- * the trusted ref, never the PR branch, so a pull request cannot inject an
- * agent prompt. Throws for a key that is not safe in a path.
- */
 /** An agent's own prompt: a generated reviewer carries its focus, every other agent reads its prompt file. */
 export function readAgentPrompt(agent, dirs) {
   if (agent.source === "generated") return `# Agent: ${agent.name}\n\nFocus: ${agent.focus}\n`;
   return readFileSync(agentPromptPath(agent, dirs), "utf-8");
 }
 
+/**
+ * Where an agent's own prompt is read from. Base agents come from the
+ * review-hero checkout, and every other agent from the caller's checkout at
+ * the trusted ref, never the PR branch, so a pull request cannot inject an
+ * agent prompt. Throws for a key that is not safe in a path.
+ */
 export function agentPromptPath({ key, source }, { reviewHeroDir, callerBaseDir }) {
   if (!isValidAgentKey(key)) throw new Error(`invalid agent key ${JSON.stringify(key)}`);
   return source === "base"

@@ -24,7 +24,7 @@ on:
         type: number
         default: 0
       reviewers:
-        description: "'fixed' = triage picks from the base and custom agents, 'generated' = triage reads the diff and plans the reviewers this PR needs"
+        description: "'fixed' = triage picks from the base and custom agents, 'generated' = Bugs & Correctness and the chosen custom agents run, and triage reads the diff and writes specialist reviewers in place of the other base agents"
         type: string
         default: fixed
       ref:
