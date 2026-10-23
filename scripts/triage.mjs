@@ -126,7 +126,7 @@ const agentList = allAgents
   .join("\n");
 
 // OpenRouter serves the Anthropic Messages API, which is how the agents reach it too.
-async function callTool({ model, maxTokens, prompt, tool, provider = "anthropic" }) {
+async function callTool({ model, maxTokens, prompt, tool, provider = "anthropic", timeoutMs }) {
   const openRouter = provider === "openrouter";
   if (openRouter && !process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
   const response = await fetch(openRouter ? "https://openrouter.ai/api/v1/messages" : `${baseUrl}/v1/messages`, {
@@ -138,6 +138,7 @@ async function callTool({ model, maxTokens, prompt, tool, provider = "anthropic"
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
+    signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
@@ -163,6 +164,7 @@ async function selectFixedAgents() {
   const input = await callTool({
     model: "claude-haiku-4-5-20251001",
     maxTokens: 200,
+    timeoutMs: 60_000,
     prompt: `You are triaging a PR for code review. Given the changed files below, decide which review agents are relevant. Only include agents that are likely to find issues for these specific changes. Always include "bugs".
 
 ## Available agents
@@ -202,8 +204,7 @@ const PLAN_DIFF_CHARS = 30_000;
 // the repo's own checklists. The agents' own model reads the diff and writes
 // specialists into the slots left, so a plan never costs more than fixed triage could.
 async function planReviewers(customAgents) {
-  const generalist = allAgents.find((a) => a.key === "bugs");
-  const running = [generalist, ...customAgents];
+  const running = [...allAgents.filter((a) => a.key === "bugs"), ...customAgents];
   const limit = allAgents.length - running.length;
   if (limit === 0) return running;
   const diffShown = filteredDiff.length > PLAN_DIFF_CHARS
@@ -215,6 +216,8 @@ async function planReviewers(customAgents) {
     provider: agentProvider,
     // GLM thinks before it calls the tool, and runs out of a smaller budget first.
     maxTokens: 16000,
+    // Inside the triage step's five minutes, so a stalled call still falls back.
+    timeoutMs: 180_000,
     prompt: `You are planning the code review of a pull request to ${project}. These reviewers already run:
 ${running.map((a) => `- ${a.name}: ${a.description}`).join("\n")}
 
@@ -255,29 +258,37 @@ ${diffShown}`,
   if (!Array.isArray(input.reviewers)) {
     throw new Error(`No reviewer list in the plan: ${JSON.stringify(input)}`);
   }
-  const runningKeys = new Set(running.map((a) => a.key));
-  const planned = resolveReviewerPlan(input.reviewers.filter((r) => !runningKeys.has(r?.key)), limit);
-  if (input.reviewers.length > 0 && planned.length === 0) {
-    throw new Error(`No usable reviewer in the plan: ${JSON.stringify(input)}`);
+  const kept = dropTestsAndDocsReviewers(input.reviewers, changedFiles);
+  const planned = resolveReviewerPlan(kept, limit, allAgents);
+  const dropped = input.reviewers.map((r) => r?.key).filter((key) => !planned.some((a) => a.key === key));
+  if (dropped.length > 0) {
+    console.log(`::warning::Dropped planned reviewers ${JSON.stringify(dropped)}: tests or docs only, unusable, an existing agent's key or name, or over the limit`);
   }
-  return [...running, ...dropTestsAndDocsReviewers(planned, changedFiles)];
+  if (input.reviewers.length > 0 && planned.length === 0) {
+    throw new Error("No usable reviewer in the plan");
+  }
+  return [...running, ...planned];
 }
 
 let selectedAgents;
+let fixedSelected = true;
 try {
   selectedAgents = await selectFixedAgents();
 } catch (err) {
   console.warn(`Triage failed, running all agents: ${err.message}`);
   selectedAgents = allAgents;
+  fixedSelected = false;
 }
 // A plan that fails leaves the fixed selection, so it costs what fixed triage would.
-try {
-  selectedAgents = await planReviewers(selectedAgents.filter((a) => a.source === "custom"));
-} catch (err) {
-  console.warn(`Planning failed, running the fixed selection: ${err.message}`);
+if (fixedSelected) {
+  try {
+    selectedAgents = await planReviewers(selectedAgents.filter((a) => a.source === "custom"));
+  } catch (err) {
+    console.warn(`Planning failed, running the fixed selection: ${err.message}`);
+  }
 }
 for (const a of selectedAgents.filter((agent) => agent.source === "generated")) {
-  console.log(`Generated reviewer ${a.key} (${a.name}): ${a.focus}`);
+  console.log(`Generated reviewer ${JSON.stringify(a.key)} (${JSON.stringify(a.name)}): ${JSON.stringify(a.focus)}`);
 }
 
 // Build agent_names map for the orchestrator

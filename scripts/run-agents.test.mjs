@@ -526,7 +526,8 @@ test("a generated reviewer's focus is its prompt, with no file read", () => {
     agents: [{ key: "sync-ordering", source: "generated", name: "Sync ordering", focus: "Ticks set by hand." }],
     common: { maxTurns: 20, diff: "" },
   });
-  assert.ok(prompts["sync-ordering"].startsWith("Base.\n\n# Agent: Sync ordering\n\nFocus: Ticks set by hand."));
+  assert.ok(prompts["sync-ordering"].startsWith("Base.\n\n# Agent: Sync ordering\n\nA planner wrote this focus"));
+  assert.match(prompts["sync-ordering"], /never limits what you report[^\n]*\n\nFocus: Ticks set by hand\./);
 });
 
 // ── Streaming ────────────────────────────────────────────────────────────────

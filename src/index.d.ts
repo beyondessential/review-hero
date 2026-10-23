@@ -31,7 +31,9 @@ export interface Agent {
   key: string;
   name: string;
   description: string;
-  source: "base" | "custom";
+  source: "base" | "custom" | "generated";
+  /** A generated reviewer's focus, which is its prompt. */
+  focus?: string;
 }
 
 /** A single suppression rule loaded from YAML. */
@@ -178,6 +180,8 @@ export function discoverCustomAgents(
   callerDir: string,
   config: Record<string, unknown>,
 ): Agent[];
+export function resolveReviewerPlan(planned: unknown, limit: number, existing?: Agent[]): Agent[];
+export function dropTestsAndDocsReviewers<T extends { key?: unknown }>(planned: T[], changedFiles: string[]): T[];
 
 // ── Scope filtering ──────────────────────────────────────────────────────────
 
@@ -188,6 +192,7 @@ export function filterDiff(
   rawDiff: string,
   patterns: string[],
 ): { filtered: string; removedFiles: string[] };
+export function summariseDiffFiles(diff: string, maxFiles?: number): string;
 
 // ── Prompt assembly ──────────────────────────────────────────────────────────
 

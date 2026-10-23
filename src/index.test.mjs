@@ -327,21 +327,27 @@ test("an agent key cannot end in the voter suffix result files use", () => {
   assert.ok(!isValidAgentKey("Perf"));
 });
 
-test("resolveReviewerPlan keeps written reviewers in the order planned", () => {
+const EXISTING = [
+  { key: "bugs", name: "Bugs & Correctness", description: "", source: "base" },
+  { key: "security", name: "Security", description: "", source: "base" },
+];
+
+test("resolveReviewerPlan keeps written reviewers in order, with the focus on one line", () => {
   const plan = resolveReviewerPlan(
     [
-      { key: "sync-ordering", name: "Sync ordering", focus: "  Ticks set by hand.  " },
-      { key: "bugs", name: "Bugs", focus: "Logic errors." },
+      { key: "sync-ordering", name: "Sync ordering", focus: "  Ticks set\n::error::by hand.  " },
+      { key: "auth-flow", name: "Auth flow", focus: "Token refresh." },
     ],
     7,
+    EXISTING,
   );
   assert.deepEqual(plan, [
-    { key: "sync-ordering", name: "Sync ordering", description: "Ticks set by hand.", source: "generated", focus: "Ticks set by hand." },
-    { key: "bugs", name: "Bugs", description: "Logic errors.", source: "generated", focus: "Logic errors." },
+    { key: "sync-ordering", name: "Sync ordering", description: "Ticks set ::error::by hand.", source: "generated", focus: "Ticks set ::error::by hand." },
+    { key: "auth-flow", name: "Auth flow", description: "Token refresh.", source: "generated", focus: "Token refresh." },
   ]);
 });
 
-test("resolveReviewerPlan drops unusable and repeated entries", () => {
+test("resolveReviewerPlan drops unusable, repeated and impersonating entries", () => {
   const plan = resolveReviewerPlan(
     [
       { key: "../escape", name: "Escape", focus: "x" },
@@ -349,11 +355,14 @@ test("resolveReviewerPlan drops unusable and repeated entries", () => {
       { key: "no-focus", name: "No focus" },
       { key: "ends-voter-1", name: "Voter", focus: "x" },
       { key: "a".repeat(41), name: "Long", focus: "x" },
+      { key: "security", name: "Looks fine", focus: "x" },
+      { key: "posing", name: "bugs & correctness", focus: "x" },
       { key: "kept", name: "Kept", focus: "x" },
       { key: "kept", name: "Again", focus: "y" },
       null,
     ],
     7,
+    EXISTING,
   );
   assert.deepEqual(plan.map((a) => a.name), ["Kept"]);
   assert.deepEqual(resolveReviewerPlan(undefined, 7), []);
@@ -369,9 +378,9 @@ test("resolveReviewerPlan reduces a written name to plain words and stops at the
 const reviewers = (...keys) => keys.map((key) => ({ key }));
 
 test("dropTestsAndDocsReviewers drops a tests-only or docs-only reviewer from a code change", () => {
-  const plan = reviewers("sync-manager", "e2e-and-test-hygiene", "spec-tests", "test-coverage", "data-privacy-docs");
+  const plan = reviewers("sync-manager", "e2e-and-test-hygiene", "spec-tests", "test-coverage", "data-privacy-docs", "naming-consistency", "quality");
   const kept = dropTestsAndDocsReviewers(plan, ["app/sync.js", "app/syncRuns.js", "app/sync.test.js"]);
-  assert.deepEqual(kept.map((a) => a.key), ["sync-manager", "data-privacy-docs"]);
+  assert.deepEqual(kept.map((a) => a.key), ["sync-manager", "data-privacy-docs", "naming-consistency", "quality"]);
 });
 
 test("dropTestsAndDocsReviewers keeps the plan when most files are tests or docs", () => {
@@ -395,4 +404,5 @@ test("summariseDiffFiles lists every file with its added and removed lines", () 
     "-gone",
   ].join("\n");
   assert.equal(summariseDiffFiles(diff), "app/a.js (+2/-1)\ndocs/b.md (+0/-1)");
+  assert.equal(summariseDiffFiles(diff, 1), "app/a.js (+2/-1)\nand 1 more files");
 });

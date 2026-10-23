@@ -279,7 +279,7 @@ test("checker prompts use the area agent's prompt from the right checkout", () =
   assert.match(prompts[0], /^Check\.\n\n## Your specialisation\n\nBugs\./);
   assert.match(prompts[1], /## Your specialisation\n\nHouse\./);
   assert.equal(prompts[2], undefined);
-  assert.match(prompts[3], /## Your specialisation\n\n# Agent: Planned\n\nFocus: Planned focus\./);
+  assert.match(prompts[3], /## Your specialisation\n\n# Agent: Planned\n\nA planner wrote this focus[^\n]*\n\nFocus: Planned focus\./);
   assert.match(warnings.join("\n"), /No second look for "missing"/);
 });
 

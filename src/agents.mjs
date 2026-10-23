@@ -135,31 +135,39 @@ const MAX_FOCUS_CHARS = 2000;
 
 /**
  * The reviewers a generated plan runs, in the order planned and at most
- * `limit` of them, each kept only when its key, name and focus are usable. The
- * plan comes from a model that read the PR, so its name is reduced to plain
- * words before it reaches a comment.
+ * `limit` of them, each kept only when its key, name and focus are usable and
+ * neither its key nor its name is an existing agent's, so it cannot post as
+ * one. The plan comes from a model that read the PR, so its name is reduced to
+ * plain words and its focus to one line before either reaches a comment or log.
  */
-export function resolveReviewerPlan(planned, limit) {
+export function resolveReviewerPlan(planned, limit, existing = []) {
+  const takenKeys = new Set(existing.map((a) => a.key));
+  const takenNames = new Set(existing.map((a) => a.name.toLowerCase()));
   const chosen = new Map();
   for (const entry of Array.isArray(planned) ? planned : []) {
     if (chosen.size >= limit) break;
     const key = typeof entry?.key === "string" ? entry.key : "";
-    if (chosen.has(key)) continue;
+    if (chosen.has(key) || takenKeys.has(key)) continue;
     const name = typeof entry?.name === "string"
       ? entry.name.replace(/[^\p{L}\p{N} &-]/gu, "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME_CHARS)
       : "";
-    const focus = typeof entry?.focus === "string" ? entry.focus.trim().slice(0, MAX_FOCUS_CHARS) : "";
-    if (key.length > MAX_KEY_CHARS || !isValidAgentKey(key) || !name || !focus) continue;
+    const focus = typeof entry?.focus === "string" ? entry.focus.replace(/\s+/g, " ").trim().slice(0, MAX_FOCUS_CHARS) : "";
+    if (key.length > MAX_KEY_CHARS || !isValidAgentKey(key) || !name || !focus || takenNames.has(name.toLowerCase())) continue;
     chosen.set(key, { key, name, description: focus, source: "generated", focus });
   }
   return [...chosen.values()];
 }
 
-const TESTS_OR_DOCS_WORDS = new Set([
-  "and", "accuracy", "consistency", "coverage", "doc", "docs", "documentation",
-  "e2e", "hygiene", "quality", "spec", "specs", "test", "testing", "tests",
-]);
+const TESTS_OR_DOCS_MARKERS = new Set(["doc", "docs", "documentation", "e2e", "spec", "specs", "test", "testing", "tests"]);
+const TESTS_OR_DOCS_QUALIFIERS = new Set(["and", "accuracy", "consistency", "coverage", "hygiene", "quality"]);
 const TEST_OR_DOC_PATH = /(^|\/)(__tests__|tests?|e2e-tests|docs|specs)\/|\.(test|spec)\.[^/]+$|\.md$/;
+
+/** A key made only of tests or docs words, with at least one that names tests or docs. */
+function isTestsOrDocsKey(key) {
+  const words = String(key ?? "").split("-");
+  return words.some((w) => TESTS_OR_DOCS_MARKERS.has(w)) &&
+    words.every((w) => TESTS_OR_DOCS_MARKERS.has(w) || TESTS_OR_DOCS_QUALIFIERS.has(w));
+}
 
 /**
  * A planned reviewer covering only tests, specs or docs is dropped unless most
@@ -169,5 +177,5 @@ const TEST_OR_DOC_PATH = /(^|\/)(__tests__|tests?|e2e-tests|docs|specs)\/|\.(tes
 export function dropTestsAndDocsReviewers(planned, changedFiles) {
   const testOrDoc = changedFiles.filter((file) => TEST_OR_DOC_PATH.test(file)).length;
   if (testOrDoc * 2 > changedFiles.length) return planned;
-  return planned.filter((a) => !a.key.split("-").every((word) => TESTS_OR_DOCS_WORDS.has(word)));
+  return planned.filter((a) => !isTestsOrDocsKey(a?.key));
 }
