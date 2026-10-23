@@ -49,6 +49,7 @@ export {
   globMatch,
   simpleWildcard,
   filterDiff,
+  summariseDiffFiles,
 } from "./scope.mjs";
 
 export {

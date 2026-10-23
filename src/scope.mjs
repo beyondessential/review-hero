@@ -82,3 +82,21 @@ export function filterDiff(rawDiff, patterns) {
 
   return { filtered: kept.join("\n"), removedFiles };
 }
+
+/** One line per file in a diff with its added and removed line counts, for a reader shown only part of it. */
+export function summariseDiffFiles(diff) {
+  const files = [];
+  let current = null;
+  for (const line of diff.split("\n")) {
+    const header = /^diff --git a\/.+ b\/(.+)$/.exec(line);
+    if (header) {
+      current = { path: header[1], added: 0, removed: 0 };
+      files.push(current);
+    } else if (current && line.startsWith("+") && !line.startsWith("+++")) {
+      current.added += 1;
+    } else if (current && line.startsWith("-") && !line.startsWith("---")) {
+      current.removed += 1;
+    }
+  }
+  return files.map((f) => `${f.path} (+${f.added}/-${f.removed})`).join("\n");
+}

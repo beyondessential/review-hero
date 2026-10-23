@@ -20,6 +20,7 @@ import {
   isValidAgentKey,
   resolveReviewerPlan,
   dropTestsAndDocsReviewers,
+  summariseDiffFiles,
 } from "./index.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-lib-"));
@@ -377,4 +378,21 @@ test("dropTestsAndDocsReviewers keeps the plan when most files are tests or docs
   const plan = reviewers("e2e-tests", "docs");
   assert.deepEqual(dropTestsAndDocsReviewers(plan, ["a.test.js", "b.spec.ts", "app/x.js"]), plan);
   assert.deepEqual(dropTestsAndDocsReviewers(plan, ["app/x.js"]), plan);
+});
+
+test("summariseDiffFiles lists every file with its added and removed lines", () => {
+  const diff = [
+    "diff --git a/app/a.js b/app/a.js",
+    "--- a/app/a.js",
+    "+++ b/app/a.js",
+    "@@ -1,2 +1,2 @@",
+    "-old",
+    "+new",
+    "+more",
+    "diff --git a/docs/b.md b/docs/b.md",
+    "--- a/docs/b.md",
+    "+++ b/docs/b.md",
+    "-gone",
+  ].join("\n");
+  assert.equal(summariseDiffFiles(diff), "app/a.js (+2/-1)\ndocs/b.md (+0/-1)");
 });

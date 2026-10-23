@@ -29,6 +29,7 @@ import { chooseAgentModel, voterCountForDiff } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
   filterDiff,
+  summariseDiffFiles,
   loadCallerConfig,
   discoverBaseAgents,
   discoverCustomAgents,
@@ -128,11 +129,12 @@ const agentList = allAgents
 // OpenRouter serves the Anthropic Messages API, which is how the agents reach it too.
 async function callTool({ model, maxTokens, prompt, tool, provider = "anthropic" }) {
   const openRouter = provider === "openrouter";
+  if (openRouter && !process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
   const response = await fetch(openRouter ? "https://openrouter.ai/api/v1/messages" : `${baseUrl}/v1/messages`, {
     method: "POST",
     headers: {
       ...(openRouter
-        ? { authorization: `Bearer ${envOrDie("OPENROUTER_API_KEY")}` }
+        ? { authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` }
         : { "x-api-key": apiKey }),
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
@@ -192,16 +194,21 @@ ${changedFiles.join("\n")}`,
   return allAgents.filter((a) => keys.includes(a.key));
 }
 
-const PLAN_DIFF_CHARS = 60_000;
+// GLM's thinking grows with what it reads, and on a very large diff it ran out
+// of output before planning; past this it reads the start and a file list.
+const PLAN_DIFF_CHARS = 30_000;
 
 // Bugs & Correctness reads the whole diff, so a bug that crosses the planned
-// areas still has a reviewer. The agents' own model reads the diff and writes
-// the specialists, no more than fixed triage could run alongside it.
-async function planReviewers() {
+// areas still has a reviewer, and the custom agents fixed triage chose carry
+// the repo's own checklists. The agents' own model reads the diff and writes
+// specialists into the slots left, so a plan never costs more than fixed triage could.
+async function planReviewers(customAgents) {
   const generalist = allAgents.find((a) => a.key === "bugs");
-  const limit = allAgents.length - 1;
+  const running = [generalist, ...customAgents];
+  const limit = allAgents.length - running.length;
+  if (limit === 0) return running;
   const diffShown = filteredDiff.length > PLAN_DIFF_CHARS
-    ? `${filteredDiff.slice(0, PLAN_DIFF_CHARS)}\n[diff truncated; ${changedFiles.length} files changed in all: ${changedFiles.join(", ")}]`
+    ? `${filteredDiff.slice(0, PLAN_DIFF_CHARS)}\n[diff truncated here; every changed file:]\n${summariseDiffFiles(filteredDiff)}`
     : filteredDiff;
   const project = config.project ? `${config.project}${config.description ? `, ${config.description}` : ""}` : "this repository";
   const input = await callTool({
@@ -209,7 +216,10 @@ async function planReviewers() {
     provider: agentProvider,
     // GLM thinks before it calls the tool, and runs out of a smaller budget first.
     maxTokens: 16000,
-    prompt: `You are planning the code review of a pull request to ${project}. A correctness reviewer already reads the whole diff for logic errors, edge cases and bugs that cross files. Decide which specialist reviewers it needs alongside: between 0 and ${limit}, each looking closely at one area of the change for problems it could plausibly have. Plan none when the change is small enough for the correctness reviewer alone, and fewer when it is of one kind.
+    prompt: `You are planning the code review of a pull request to ${project}. These reviewers already run:
+${running.map((a) => `- ${a.name}: ${a.description}`).join("\n")}
+
+The first reads the whole diff for logic errors, edge cases and bugs that cross files. Decide which specialist reviewers the change needs alongside them, covering what they do not: between 0 and ${limit}, each looking closely at one area of the change for problems it could plausibly have. Plan none when the change is small enough for the correctness reviewer alone, and fewer when it is of one kind.
 
 Divide the work by what could break, not by kind of file. Plan no reviewer only for tests, specs or documentation unless they are most of the change: the reviewer of an area also judges whether its tests cover it and whether its docs still hold.
 
@@ -246,20 +256,29 @@ ${diffShown}`,
   if (!Array.isArray(input.reviewers)) {
     throw new Error(`No reviewer list in the plan: ${JSON.stringify(input)}`);
   }
-  const planned = resolveReviewerPlan(input.reviewers.filter((r) => r?.key !== generalist.key), limit);
+  const runningKeys = new Set(running.map((a) => a.key));
+  const planned = resolveReviewerPlan(input.reviewers.filter((r) => !runningKeys.has(r?.key)), limit);
   if (input.reviewers.length > 0 && planned.length === 0) {
     throw new Error(`No usable reviewer in the plan: ${JSON.stringify(input)}`);
   }
-  return [generalist, ...dropTestsAndDocsReviewers(planned, changedFiles)];
+  return [...running, ...dropTestsAndDocsReviewers(planned, changedFiles)];
 }
 
 const generated = process.env.REVIEWERS === "generated";
 let selectedAgents;
 try {
-  selectedAgents = generated ? await planReviewers() : await selectFixedAgents();
+  selectedAgents = await selectFixedAgents();
 } catch (err) {
   console.warn(`Triage failed, running all agents: ${err.message}`);
   selectedAgents = allAgents;
+}
+if (generated) {
+  // A plan that fails leaves the fixed selection, so it costs what fixed triage would.
+  try {
+    selectedAgents = await planReviewers(selectedAgents.filter((a) => a.source === "custom"));
+  } catch (err) {
+    console.warn(`Planning failed, running the fixed selection: ${err.message}`);
+  }
 }
 for (const a of selectedAgents.filter((agent) => agent.source === "generated")) {
   console.log(`Generated reviewer ${a.key} (${a.name}): ${a.focus}`);
