@@ -23,10 +23,6 @@ on:
         description: "Most review agent processes running at once, or 0 to leave the runner's memory and the provider's rate limits as the only limits"
         type: number
         default: 0
-      reviewers:
-        description: "'fixed' = triage picks from the base and custom agents, 'generated' = Bugs & Correctness and the chosen custom agents run, and triage reads the diff and writes specialist reviewers in place of the other base agents"
-        type: string
-        default: fixed
       ref:
         description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
         type: string
@@ -347,11 +343,10 @@ jobs:
           REVIEW_HERO_DIR: .review-hero
           CALLER_REPO_DIR: .caller-base
           VOTERS: ${{ inputs.voters }}
-          REVIEWERS: ${{ inputs.reviewers }}
           DEFAULT_MODEL: ${{ inputs.model }}
           PR_BODY: ${{ github.event.pull_request.body }}
           HAS_OPENROUTER_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY != '' }}
-          OPENROUTER_API_KEY: ${{ inputs.reviewers == 'generated' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
+          OPENROUTER_API_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/review"

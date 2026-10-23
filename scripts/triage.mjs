@@ -4,8 +4,8 @@
  * 1. Reads the PR diff and strips ignored file patterns
  * 2. Discovers base agents (from review-hero prompts/) and custom agents
  *    (from the caller repo's .github/review-hero/)
- * 3. Calls Claude Haiku to select which agents are relevant, or with
- *    REVIEWERS=generated has the agents' model read the diff and write them
+ * 3. Calls Claude Haiku to select which agents are relevant, then has the
+ *    agents' model read the diff and write specialists in place of the base ones
  * 4. Calculates max-turns based on filtered diff size
  * 5. Sets the voter count every agent runs, scaled to the diff
  * 6. Outputs agents, voters, max_turns, and agent_names for later steps
@@ -21,7 +21,6 @@
  *   HAS_OPENROUTER_KEY  — "true" when REVIEW_HERO_OPENROUTER_API_KEY is set
  *   OPENROUTER_API_KEY  — That key, for planning reviewers on the agents' OpenRouter model
  *   VOTERS              — Requested voters per agent, before scaling to the diff
- *   REVIEWERS           — "generated" to plan reviewers from the diff, else the fixed agents
  */
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -264,7 +263,6 @@ ${diffShown}`,
   return [...running, ...dropTestsAndDocsReviewers(planned, changedFiles)];
 }
 
-const generated = process.env.REVIEWERS === "generated";
 let selectedAgents;
 try {
   selectedAgents = await selectFixedAgents();
@@ -272,13 +270,11 @@ try {
   console.warn(`Triage failed, running all agents: ${err.message}`);
   selectedAgents = allAgents;
 }
-if (generated) {
-  // A plan that fails leaves the fixed selection, so it costs what fixed triage would.
-  try {
-    selectedAgents = await planReviewers(selectedAgents.filter((a) => a.source === "custom"));
-  } catch (err) {
-    console.warn(`Planning failed, running the fixed selection: ${err.message}`);
-  }
+// A plan that fails leaves the fixed selection, so it costs what fixed triage would.
+try {
+  selectedAgents = await planReviewers(selectedAgents.filter((a) => a.source === "custom"));
+} catch (err) {
+  console.warn(`Planning failed, running the fixed selection: ${err.message}`);
 }
 for (const a of selectedAgents.filter((agent) => agent.source === "generated")) {
   console.log(`Generated reviewer ${a.key} (${a.name}): ${a.focus}`);
