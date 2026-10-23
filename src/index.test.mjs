@@ -405,4 +405,17 @@ test("summariseDiffFiles lists every file with its added and removed lines", () 
   ].join("\n");
   assert.equal(summariseDiffFiles(diff), "app/a.js (+2/-1)\ndocs/b.md (+0/-1)");
   assert.equal(summariseDiffFiles(diff, 1), "app/a.js (+2/-1)\nand 1 more files");
+  const quoted = ['diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"', "+x", "diff --git a/z.js b/z.js", "-y"].join("\n");
+  assert.equal(summariseDiffFiles(quoted), "caf\\303\\251.md (+1/-0)\nz.js (+0/-1)");
+});
+
+test("resolveReviewerPlan keeps reviewer names unique and strips control characters from a focus", () => {
+  const plan = resolveReviewerPlan(
+    [
+      { key: "auth-flow", name: "Auth flow", focus: "Token\u001b[31m refresh\u0007." },
+      { key: "auth-flow-2", name: "auth FLOW", focus: "Again." },
+    ],
+    7,
+  );
+  assert.deepEqual(plan.map((a) => [a.key, a.focus]), [["auth-flow", "Token [31m refresh ."]]);
 });

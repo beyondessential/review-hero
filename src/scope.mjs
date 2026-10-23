@@ -87,14 +87,15 @@ export function filterDiff(rawDiff, patterns) {
  * One line per file in a diff with its added and removed line counts, for a
  * reader shown only part of it, up to `maxFiles` lines.
  */
-export function summariseDiffFiles(diff, maxFiles = 400) {
+export function summariseDiffFiles(diff, maxFiles = 2000) {
   const files = [];
   let current = null;
   for (const line of diff.split("\n")) {
-    const header = /^diff --git a\/.+ b\/(.+)$/.exec(line);
-    if (header) {
-      current = { path: header[1], added: 0, removed: 0 };
-      files.push(current);
+    if (line.startsWith("diff --git ")) {
+      // Git quotes a path holding unusual characters: diff --git "a/café.md" "b/café.md"
+      const header = /^diff --git .* "?b\/(.+?)"?$/.exec(line);
+      current = header ? { path: header[1], added: 0, removed: 0 } : null;
+      if (current) files.push(current);
     } else if (current && line.startsWith("+") && !line.startsWith("+++")) {
       current.added += 1;
     } else if (current && line.startsWith("-") && !line.startsWith("---")) {

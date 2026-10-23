@@ -136,14 +136,16 @@ const MAX_FOCUS_CHARS = 2000;
 /**
  * The reviewers a generated plan runs, in the order planned and at most
  * `limit` of them, each kept only when its key, name and focus are usable and
- * neither its key nor its name is an existing agent's, so it cannot post as
- * one. The plan comes from a model that read the PR, so its name is reduced to
- * plain words and its focus to one line before either reaches a comment or log.
+ * neither its key nor its name is an existing agent's or another planned one's,
+ * so comments stay attributable. The plan comes from a model that read the PR,
+ * so its name is reduced to plain words and its focus to one line of printable
+ * text before either reaches a comment or log.
  */
 export function resolveReviewerPlan(planned, limit, existing = []) {
   const takenKeys = new Set(existing.map((a) => a.key));
   const takenNames = new Set(existing.map((a) => a.name.toLowerCase()));
   const chosen = new Map();
+  const chosenNames = new Set();
   for (const entry of Array.isArray(planned) ? planned : []) {
     if (chosen.size >= limit) break;
     const key = typeof entry?.key === "string" ? entry.key : "";
@@ -151,9 +153,13 @@ export function resolveReviewerPlan(planned, limit, existing = []) {
     const name = typeof entry?.name === "string"
       ? entry.name.replace(/[^\p{L}\p{N} &-]/gu, "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME_CHARS)
       : "";
-    const focus = typeof entry?.focus === "string" ? entry.focus.replace(/\s+/g, " ").trim().slice(0, MAX_FOCUS_CHARS) : "";
-    if (key.length > MAX_KEY_CHARS || !isValidAgentKey(key) || !name || !focus || takenNames.has(name.toLowerCase())) continue;
+    const focus = typeof entry?.focus === "string"
+      ? entry.focus.replace(/[\p{Cc}\s]+/gu, " ").trim().slice(0, MAX_FOCUS_CHARS)
+      : "";
+    const nameKey = name.toLowerCase();
+    if (key.length > MAX_KEY_CHARS || !isValidAgentKey(key) || !name || !focus || takenNames.has(nameKey) || chosenNames.has(nameKey)) continue;
     chosen.set(key, { key, name, description: focus, source: "generated", focus });
+    chosenNames.add(nameKey);
   }
   return [...chosen.values()];
 }

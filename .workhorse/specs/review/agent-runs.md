@@ -132,9 +132,9 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] Bugs & Correctness and the custom agents in the fixed selection run, and triage has the model the agents run on read the filtered diff and write specialist reviewers alongside them, each with its own key, name and focus. No other base agent runs.
 - [ ] The plan is told which reviewers already run, and has between none and as many specialists as there are base and custom agents less those already running, so it never costs more than running every fixed agent. A small change can plan none.
 - [ ] A generated plan divides the work by what could break, and plans a reviewer only for tests, specs or docs when they are most of the change; each reviewer judges its own area's tests and docs. Such reviewers are dropped before the limit is applied, so they never take a usable reviewer's place.
-- [ ] A planned reviewer with the key or name of any base or custom agent is dropped, so it can never post as one. Dropped reviewers are named in a warning.
+- [ ] A planned reviewer with the key or name of any base or custom agent, or the name of another planned reviewer, is dropped, so every comment stays attributable to one reviewer. Dropped reviewers are named in a warning.
 - [ ] A generated reviewer's focus is its agent prompt, for its voters and its second look alike, framed as written by a planner that read the PR: it says where to look first and never limits what the reviewer reports.
-- [ ] A generated reviewer's name is reduced to plain words and its focus to one line before either appears in a comment or the job log.
+- [ ] A generated reviewer's name is reduced to plain words and its focus to one line of printable text before either appears in a comment or the job log.
 - [ ] A planned reviewer with an invalid key, no name or no focus, or a key already planned, is dropped.
 - [ ] A failed fixed selection runs every available agent, with no plan made. A plan that fails, times out, or whose reviewers were all dropped, runs the fixed selection, so it costs no more than fixed triage.
-- [ ] The diff triage plans from is capped in size, with every changed file and its line counts listed past the cap, and its prompt marks the diff as content to review rather than instructions.
+- [ ] The diff triage plans from is capped in size, with every changed file and its line counts listed past the cap, and its prompt holds the diff between delimiters it declares to be data, never instructions.
