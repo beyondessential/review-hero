@@ -129,7 +129,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 ## Choosing the reviewers
 
 - [ ] Triage picks from the base and custom agents by the changed files, as it always has; that pick is the fixed selection.
-- [ ] Bugs & Correctness and the custom agents in the fixed selection run, and triage has the model the agents run on read the filtered diff and write specialist reviewers alongside them, each with its own key, name and focus. No other base agent runs.
+- [ ] Bugs & Correctness, the custom agents in the fixed selection, and Design & Architecture when the fixed selection includes it, run; triage has the model the agents run on read the filtered diff and write specialist reviewers alongside them, each with its own key, name and focus. No other base agent runs.
 - [ ] The plan is told which reviewers already run, and has between none and as many specialists as there are base and custom agents less those already running, so it never costs more than running every fixed agent. A small change can plan none.
 - [ ] A generated plan divides the work by what could break, and plans a reviewer only for tests, specs or docs when they are most of the change; each reviewer judges its own area's tests and docs. Such reviewers are dropped before the limit is applied, so they never take a usable reviewer's place.
 - [ ] A planned reviewer with the key or name of any base or custom agent, or the name of another planned reviewer, is dropped, so every comment stays attributable to one reviewer. Dropped reviewers are named in a warning.

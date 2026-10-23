@@ -203,11 +203,12 @@ ${changedFiles.join("\n")}`,
 const PLAN_DIFF_CHARS = 30_000;
 
 // Bugs & Correctness reads the whole diff, so a bug that crosses the planned
-// areas still has a reviewer, and the custom agents fixed triage chose carry
-// the repo's own checklists. The agents' own model reads the diff and writes
+// areas still has a reviewer. The custom agents fixed triage chose carry the
+// repo's own checklists, and Design & Architecture, when chosen, covers
+// structure no planned specialist is asked for. The agents' own model writes
 // specialists into the slots left, so a plan never costs more than fixed triage could.
-async function planReviewers(customAgents) {
-  const running = [...allAgents.filter((a) => a.key === "bugs"), ...customAgents];
+async function planReviewers(keptAgents) {
+  const running = [...allAgents.filter((a) => a.key === "bugs"), ...keptAgents];
   const limit = allAgents.length - running.length;
   if (limit === 0) return running;
   const diffShown = (filteredDiff.length > PLAN_DIFF_CHARS
@@ -287,7 +288,7 @@ try {
 // A plan that fails leaves the fixed selection, so it costs what fixed triage would.
 if (fixedSelected) {
   try {
-    selectedAgents = await planReviewers(selectedAgents.filter((a) => a.source === "custom"));
+    selectedAgents = await planReviewers(selectedAgents.filter((a) => a.source === "custom" || a.key === "design"));
   } catch (err) {
     console.warn(`Planning failed, running the fixed selection: ${err.message}`);
   }

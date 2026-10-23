@@ -26,7 +26,7 @@ PR checkbox checked
 
 Triage, the agents, consensus and the second look run in one job. The orchestrator posts from a second, short job on `ubuntu-slim`.
 
-1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which of the repo's custom agents are relevant, then has the agents' own model (GLM on OpenRouter, or Claude) read the diff and write specialist reviewers to run alongside them and Bugs & Correctness, in place of the other base agents and never more than all the agents together, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
+1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which of the repo's custom agents, and whether Design & Architecture, are relevant, then has the agents' own model (GLM on OpenRouter, or Claude) read the diff and write specialist reviewers to run alongside them and Bugs & Correctness, in place of Performance and Security and never more than all the agents together, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
 2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt. The CLI installed is the newest release at least a week old, so a broken or compromised release has time to be caught first. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
 3. **Consensus and second look** — applies voter consensus per agent (when enabled). Where findings below the majority cluster in a part of the code, fresh checkers take a second look at them (see [Second look](#second-look)).
 4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
@@ -450,7 +450,7 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 
 ### Review
 
-- **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
+- **Triage**: one Haiku call and one planning call on the agents' model per run. Very cheap.
 - **Agents**: one GLM (or Claude) session per selected agent, with a capped number of tool-use turns (below). This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
 
