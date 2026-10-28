@@ -14,7 +14,7 @@ A review can post its round's findings as JSON to a caller-named URL, authentica
 ## Implementation notes
 
 - **Identity token only in `post`.** A called workflow's jobs inherit the caller's `id-token: write`. Declaring it on `post` would fail the workflow at startup for callers that don't grant it, so `post` stays undeclared and inherits. The `review` job declares its own `permissions:` without `id-token` (it needs `contents: read` for checkouts and `pull-requests: read` for the compare API call in "Get PR diff"; check every step before narrowing).
-- **Redirects.** Post with `redirect: "manual"` and re-send the POST only when `Location` resolves to the findings URL's origin, so 301/302 don't turn it into a bodiless GET.
+- **Redirects.** Post with `redirect: "manual"`, since `fetch` would otherwise follow a cross-origin redirect (minus the token). Re-send only on a 307/308 whose `Location` resolves to the findings URL's origin.
 - **Requesting the token.** In the orchestrator, from `ACTIONS_ID_TOKEN_REQUEST_URL` + `&audience=<origin>` with `ACTIONS_ID_TOKEN_REQUEST_TOKEN` as bearer. Missing env means `no-token`.
 - **Comment ids.** The review POST returns the review, not its comments. List the review's comments (`GET /pulls/{n}/reviews/{id}/comments`) and match by path and line to the findings posted inline. The fallback issue comment carries no per-finding id.
 - **Range from agents.** `prompts/agent-prompt.md` output schema gains an optional `endLine`. `validateFindings` keeps it when it is an integer at or after `line`. The checker prompt shows the range.

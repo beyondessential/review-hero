@@ -29,8 +29,8 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A review posts its findings after its inline review and before its summary comment, so each finding posted inline carries its GitHub comment and the summary's completion block can say how the post went.
 - [ ] A review where every agent failed posts a round with a `failed` outcome and no findings, before its completion comment.
 - [ ] A post that gets no answer, or a server error, is tried once more, and the whole post including its retry is bounded in time.
-- [ ] A redirect to the findings URL's own origin is followed by sending the same post to its target, up to a small number of redirects.
-- [ ] A redirect to any other origin is not followed, so the identity token only ever goes to the origin it is addressed to, and the post counts as refused.
+- [ ] A 307 or 308 redirect to the findings URL's own origin is followed, up to a small number of redirects.
+- [ ] Any other redirect is not followed, so the identity token only ever goes to the origin it is addressed to, and the post counts as refused.
 - [ ] A post counts as accepted when the receiver answers with a 2xx status.
 - [ ] A post that is not accepted never fails the review: it is logged, the completion block says how it went (see `reporting/completion-comments.md`), and the review's GitHub comments are posted as usual.
 - [ ] The job log says how the post went, with the receiver's status and the start of its reply when it was refused.
