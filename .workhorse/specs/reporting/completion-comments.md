@@ -66,7 +66,7 @@ A completion comment quotes text from the pull request, and anyone who can comme
 - [ ] `outcome` is `completed` when at least one agent returned results, and `failed` when every agent failed.
 - [ ] `reviewedSha` is the reviewed commit.
 - [ ] `model` is the model the review agents ran on.
-- [ ] `findingsPost` says how posting the round's findings went (see `reporting/posting-findings.md`): `accepted` when the receiver answered with a 2xx status, `refused` when it answered with any other status, `unreachable` when no answer came, and `no-token` when the run could not get an identity token.
+- [ ] `findingsPost` says how posting the round's findings went (see `reporting/posting-findings.md`): `accepted` when the receiver answered with a 2xx status, `refused` when it answered with any other status, `unreachable` when no answer came, `no-token` when the run could not get an identity token, and `invalid-url` when the findings URL is not an `https` URL.
 - [ ] `findingsPost` is left out when the review has no findings URL.
 - [ ] `counts` holds `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, and `secondLook`, matching the figures in the visible summary.
 - [ ] `secondLook` is the number of findings below the majority that a second look confirmed, and 0 when the review took none (see `review/agent-runs.md`).

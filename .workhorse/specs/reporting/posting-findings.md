@@ -12,6 +12,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 
 - [ ] The workflow's `findings-url` input names the URL a review posts its findings to.
 - [ ] `findings-url` is empty by default, and a review with no findings URL posts nothing and requests no identity token.
+- [ ] A findings URL must be an `https` URL, and a review whose findings URL is not one posts nothing, requests no identity token, and says so in the job log.
 - [ ] A caller that sets `findings-url` grants its workflow permission to request a GitHub Actions identity token, since a called workflow cannot grant itself more than its caller allows.
 - [ ] The README documents `findings-url`, the permission it needs, and a caller example with both.
 
@@ -28,6 +29,8 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A review posts its findings after its inline review and before its summary comment, so each finding posted inline carries its GitHub comment and the summary's completion block can say how the post went.
 - [ ] A review where every agent failed posts a round with a `failed` outcome and no findings, before its completion comment.
 - [ ] A post that gets no answer, or a server error, is tried once more, and the whole post including its retry is bounded in time.
+- [ ] A redirect to the findings URL's own origin is followed by sending the same post to its target, up to a small number of redirects.
+- [ ] A redirect to any other origin is not followed, so the identity token only ever goes to the origin it is addressed to, and the post counts as refused.
 - [ ] A post counts as accepted when the receiver answers with a 2xx status.
 - [ ] A post that is not accepted never fails the review: it is logged, the completion block says how it went (see `reporting/completion-comments.md`), and the review's GitHub comments are posted as usual.
 - [ ] The job log says how the post went, with the receiver's status and the start of its reply when it was refused.

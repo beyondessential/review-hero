@@ -6,7 +6,7 @@ A review can post its round's findings as JSON to a caller-named URL, authentica
 
 - Generic, not Workhorse-specific: the input is `findings-url`, the completion field is `findingsPost`, and the payload's JSON Schema is published in the repo for any receiver.
 - Off by default. A caller that wants it sets `findings-url` and grants `id-token: write`. This avoids sending a third party's findings (which quote their code) to our Workhorse because they granted the permission for something else.
-- `findingsPost` is a status (`accepted | refused | unreachable | no-token`), absent with no URL, so a receiver falling back to comments can log why. `runId` and `runAttempt` are top-level run metadata on every completion block.
+- `findingsPost` is a status (`accepted | refused | unreachable | no-token | invalid-url`), absent with no URL, so a receiver falling back to comments can log why. `runId` and `runAttempt` are top-level run metadata on every completion block.
 - Inline comments span the finding's range when start and end lie in one diff hunk, otherwise anchor on the start line. GitHub refuses a multi-line comment across hunks, and one refusal fails the whole review post into the fallback comment.
 - A second-look-confirmed finding's voter count includes its confirming checkers.
 - Voter count is null where consensus was not applied, 1 in a single-voter review.
@@ -14,6 +14,7 @@ A review can post its round's findings as JSON to a caller-named URL, authentica
 ## Implementation notes
 
 - **Identity token only in `post`.** A called workflow's jobs inherit the caller's `id-token: write`. Declaring it on `post` would fail the workflow at startup for callers that don't grant it, so `post` stays undeclared and inherits. The `review` job declares its own `permissions:` without `id-token` (it needs `contents: read` for checkouts and `pull-requests: read` for the compare API call in "Get PR diff"; check every step before narrowing).
+- **Redirects.** Post with `redirect: "manual"` and re-send the POST only when `Location` resolves to the findings URL's origin, so 301/302 don't turn it into a bodiless GET.
 - **Requesting the token.** In the orchestrator, from `ACTIONS_ID_TOKEN_REQUEST_URL` + `&audience=<origin>` with `ACTIONS_ID_TOKEN_REQUEST_TOKEN` as bearer. Missing env means `no-token`.
 - **Comment ids.** The review POST returns the review, not its comments. List the review's comments (`GET /pulls/{n}/reviews/{id}/comments`) and match by path and line to the findings posted inline. The fallback issue comment carries no per-finding id.
 - **Range from agents.** `prompts/agent-prompt.md` output schema gains an optional `endLine`. `validateFindings` keeps it when it is an integer at or after `line`. The checker prompt shows the range.
