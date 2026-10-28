@@ -53,7 +53,7 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] A diff of 100 or more changed lines runs the `voters` input's count of voters per agent.
 - [ ] The voter count never exceeds 10.
 - [ ] A finding survives consensus when a strict majority of the review's voter count reports it, with voters that contributed nothing still counting toward that number.
-- [ ] A kept finding's voter count is the number of distinct voters whose findings consensus grouped with it, counted from the group's members rather than taken from the consensus model's reply.
+- [ ] A kept finding's voter count is the number of distinct voters whose findings consensus grouped with it, counted from the group's members rather than taken from the consensus model's reply, plus any checkers that confirmed it on a second look.
 - [ ] With one voter per agent, each finding's voter count is 1.
 - [ ] A finding kept because consensus was not applied to its agent has no voter count.
 - [ ] A group of findings merged across agents takes its representative's voter count.
@@ -108,7 +108,6 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] A checker is a fresh run of the area's agent, given the diff and the area's findings, which reads the code with the same read-only tools and confirms or rejects each finding.
 - [ ] A checker sees each finding's text and location, not which voters reported it.
 - [ ] A finding below the majority is kept when its voters and the checkers confirming it together reach the majority.
-- [ ] A finding a second look confirmed has its confirming checkers counted in its voter count.
 - [ ] A review takes at most one second look.
 - [ ] Checkers start under the same memory, provider and `concurrency` limits as voters, use the same wrap-up, and have a time limit of their own inside the job's.
 - [ ] With more than one checker per area on Anthropic, each area first makes a primer run, and its checkers start once it has returned, as an agent's voters do.

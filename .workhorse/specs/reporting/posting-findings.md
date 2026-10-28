@@ -49,6 +49,6 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 
 - [ ] Each finding has an identifier, unique within its run attempt, which says nothing about whether a finding in another round is the same one.
 - [ ] Each finding carries its severity, the key and display name of the agent that raised it, its file path, and its start and end line.
-- [ ] Each finding carries how many of the review's voters support it, or null when the review cannot tell (see `review/agent-runs.md`).
+- [ ] Each finding carries its voter count, how many voters and second-look checkers support it, or null when the review cannot tell (see `review/agent-runs.md`).
 - [ ] A finding posted inline carries the id of its GitHub review comment, and a finding not posted inline carries none.
 - [ ] Each finding carries its full comment text, unshortened.
