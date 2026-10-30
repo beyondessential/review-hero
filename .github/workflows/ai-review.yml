@@ -6,10 +6,13 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # Lets the review request the identity token that authenticates its findings post.
+  id-token: write
 
 jobs:
   review:
     uses: ./.github/workflows/review.yml
     with:
       ref: ${{ github.event.pull_request.head.ref }}
+      findings-url: https://workhorse.bes.au
     secrets: inherit

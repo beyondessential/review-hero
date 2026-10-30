@@ -29,7 +29,7 @@ Triage, the agents, consensus and the second look run in one job. The orchestrat
 1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
 2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt. The CLI installed is the newest release at least a week old, so a broken or compromised release has time to be caught first. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
 3. **Consensus and second look** — applies voter consensus per agent (when enabled). Where findings below the majority cluster in a part of the code, fresh checkers take a second look at them (see [Second look](#second-look)).
-4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table).
+4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table). It can also post the round's findings as JSON to a URL you name (see [Posting findings as data](#posting-findings-as-data)).
 
 ## Prerequisites (once per owner — user or org)
 
@@ -325,6 +325,32 @@ Review Hero automatically learns from developer feedback:
 To reject a Review Hero finding: add a 👎 reaction to the comment. Optionally reply in the thread explaining why — this helps generate better suppression rules.
 
 
+## Posting findings as data
+
+Alongside the comments it posts for people, a review can send each round's findings as JSON to a URL you name, so a service gets every finding whole, with its severity, location and origin as fields, rather than parsing them back out of comment text. It is off by default.
+
+To turn it on, set the `findings-url` input to an `https` URL and let the workflow request a GitHub Actions identity token with `id-token: write`:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    uses: beyondessential/review-hero/.github/workflows/review.yml@v1
+    with:
+      findings-url: https://findings.example.com/api/rounds
+    secrets: inherit
+```
+
+Only the posting job requests a token, just before the post, with the URL's origin as its audience. The token is the post's bearer, so the receiver needs no secret shared with you and can check who sent it with GitHub. A review with no `id-token: write` can't request one, and nor can a review on a pull request from a fork, because GitHub gives a fork's workflow none. Either reports `no-token` in the [completion block](#review) and posts nothing.
+
+The post happens after the inline review and before the summary comment, so each finding carries the id of its GitHub review comment, and the completion block's `findingsPost` says how it went. A post that gets no answer or a server error is tried once more, and the two attempts together are bounded to about a minute. A post that fails never fails the review: it is logged, `findingsPost` says it was not accepted, and the GitHub comments go out as usual. A 307 or 308 redirect within the URL's own origin is followed, and any other redirect is not, so the token only goes to the origin it is addressed to.
+
+The payload's JSON Schema is in [`schemas/findings-round.v1.json`](schemas/findings-round.v1.json), and [Receiving findings](docs/receiving-findings.md) tells a service how to check a post and what to expect from it. The library's `buildRoundFindings(…)` and `buildFindingsPayload(…)` build the same payload from a review pipeline's outputs.
+
 ## Completion comments
 
 When a review or auto-fix run ends, Review Hero posts a completion comment on the PR. Each one names the commit the run worked on, as a short SHA linked to the commit within the PR, and ends with a hidden, machine-readable block so other tools can track Review Hero without parsing the visible text:
@@ -347,6 +373,7 @@ The block is a single-line JSON object inside an HTML comment, so GitHub doesn't
 | `kind` | `review`, `auto-fix`, or `save-suppressions` |
 | `outcome` | How the run ended; see below for the values each `kind` can have |
 | `runUrl` | The GitHub Actions run that posted the comment |
+| `runId`, `runAttempt` | The GitHub Actions run id and run attempt that posted the comment, as integers |
 | `reviewHero.ref` | The Review Hero ref the caller asked for, e.g. `v1` |
 | `reviewHero.sha` | The Review Hero commit that ref resolved to |
 
@@ -361,6 +388,7 @@ Posted at the end of a review round, or when a review could not complete.
 | `outcome` | `completed` when at least one agent returned results, `failed` when every agent failed |
 | `reviewedSha` | The commit that was reviewed |
 | `model` | The model the review agents ran on |
+| `findingsPost` | How [posting the round's findings](#posting-findings-as-data) went: `accepted` (the receiver answered with a 2xx), `refused` (any other answer), `unreachable` (no answer), `no-token` (the run could not get an identity token) or `invalid-url` (`findings-url` is not an `https` URL). Left out when `findings-url` is empty |
 | `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, `secondLook` (findings below the majority a second look confirmed) |
 
 ### `auto-fix`
@@ -398,6 +426,7 @@ jobs:
       runner: ubuntu-latest    # Runner for the review job
       voters: 3                # Voters per agent on a typical diff (1 to disable consensus)
       concurrency: 0           # Most agent processes at once (0 = limited by memory and the provider only)
+      findings-url: ''         # https URL to post each round's findings to as JSON (empty = off)
     secrets: inherit
 ```
 
@@ -408,6 +437,7 @@ jobs:
 | `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job, which runs the agents. Posting always runs on `ubuntu-slim`. |
 | `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
 | `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits; on a runner whose memory cannot be read, it runs at most 8. |
+| `findings-url` | empty         | An `https` URL to post each round's findings to as JSON. Empty posts nothing. Needs `id-token: write` in the caller; see [Posting findings as data](#posting-findings-as-data). |
 
 > [!NOTE]
 > `ubuntu-slim` caps a job at 15 minutes, and setup and every agent run in the review job, so they have to fit within that. A review job on `ubuntu-slim` warns about this in the job log.

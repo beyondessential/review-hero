@@ -16,11 +16,14 @@ You are reviewing a pull request. Find real, actionable issues — not formattin
   {
     "file": "path/to/file.ts",
     "line": 42,
+    "endLine": 47,
     "severity": "critical | suggestion | nitpick",
     "comment": "Problem, why it matters, suggested fix"
   }
 ]
 ```
+
+**Location**: `line` is where the issue starts. Give `endLine` only when the issue spans several lines, as the last line of the range, and leave it out when it sits on one line.
 
 **Severity**: `critical` = bugs/security/data loss, `suggestion` = meaningful improvement, `nitpick` = minor convention issue. Most findings should be `suggestion`.
 

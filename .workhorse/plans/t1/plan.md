@@ -26,16 +26,24 @@ A review can post its round's findings as JSON to a caller-named URL, authentica
 - **Dogfood.** This repo's own `ai-review.yml` sets `findings-url: https://workhorse.bes.au` and grants `id-token: write`.
 - **S43 needs to know** the input name (its canonical setup must set `findings-url` too), the `findingsPost` statuses, and the top-level `runId`/`runAttempt`.
 
+## As built
+
+- The consensus reply gains `members`, mapping each kept index to its group's indices. Kept findings carry `supporters` (the payload field has the same name). Consensus token budget rose to cover the extra list.
+- `src/hunks.mjs` (`parseHunks`, `commentLines`) and `src/round.mjs` (`buildRoundFindings`, `buildFindingsPayload`, `FINDINGS_SCHEMA`) are exported from `src/index.mjs`. The orchestrator gets the diff through `DIFF_PATH`.
+- `scripts/findings-post.mjs` holds the token request, redirects, retry and time bound. The orchestrator's `matchCommentIds` pairs posted comments with the review's listed ones by place, then text.
+- The review job's `permissions` is `contents: read` alone: the only workflow-token use there is checkout and the compare call.
+- The dogfood URL, `https://workhorse.bes.au`, is unconfirmed; check it against the Workhorse deployment before merge.
+
 ## Build
 
-- [ ] Agent prompt and `validateFindings`: optional end line
-- [ ] Consensus: kept groups' members and voter counts; second look adds confirmations; unfiltered findings null
-- [ ] Grouping carries representative's range and count
-- [ ] Inline review: span within a hunk; collect comment ids
-- [ ] Payload builder in `src/`, plus JSON Schema and schema test
-- [ ] Orchestrator: token request, post with one retry and a time bound, `findingsPost`, every-agent-failed post
-- [ ] Completion block: `runId`, `runAttempt`, `findingsPost`
-- [ ] `review.yml`: `findings-url` input, passed to orchestrator; review job permissions without `id-token`
-- [ ] README: input, permission, caller example, fork PRs report `no-token`, block fields, link to receiver guide
-- [ ] Receiver guide (e.g. `docs/receiving-findings.md`): token checks, take repo and run from the token, schema link, repeat deliveries
-- [ ] `ai-review.yml` dogfood
+- [x] Agent prompt and `validateFindings`: optional end line
+- [x] Consensus: kept groups' members and voter counts; second look adds confirmations; unfiltered findings null
+- [x] Grouping carries representative's range and count
+- [x] Inline review: span within a hunk; collect comment ids
+- [x] Payload builder in `src/`, plus JSON Schema and schema test
+- [x] Orchestrator: token request, post with one retry and a time bound, `findingsPost`, every-agent-failed post
+- [x] Completion block: `runId`, `runAttempt`, `findingsPost`
+- [x] `review.yml`: `findings-url` input, passed to orchestrator; review job permissions without `id-token`
+- [x] README: input, permission, caller example, fork PRs report `no-token`, block fields, link to receiver guide
+- [x] Receiver guide (e.g. `docs/receiving-findings.md`): token checks, take repo and run from the token, schema link, repeat deliveries
+- [x] `ai-review.yml` dogfood

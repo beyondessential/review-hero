@@ -498,6 +498,16 @@ export function workflowRunUrl(repo) {
   return `${githubServerUrl()}/${safeRepo}/actions/runs/${runId}`;
 }
 
+/**
+ * The GitHub Actions run id and run attempt as integers, each undefined when
+ * the environment does not hold a plain number.
+ */
+// spec: CMPL#machine-readable-block
+export function runIdentity() {
+  const integer = (value) => (/^[1-9]\d*$/.test(value ?? "") ? Number(value) : undefined);
+  return { runId: integer(process.env.GITHUB_RUN_ID), runAttempt: integer(process.env.GITHUB_RUN_ATTEMPT) };
+}
+
 export function workflowLogsUrl(repo) {
   const runUrl = workflowRunUrl(repo);
   if (runUrl) return runUrl;
@@ -545,9 +555,12 @@ export function reviewHeroVersion() {
 export function createCompletionReporter({ repo, prNumber }) {
   const serverUrl = githubServerUrl();
   const runUrl = workflowRunUrl(repo);
+  const { runId, runAttempt } = runIdentity();
   const reviewHero = reviewHeroVersion();
   return {
     link: (sha) => formatCommitLink({ serverUrl, repo, prNumber, sha }),
-    block: (fields) => buildCompletionBlock({ ...fields, runUrl, reviewHero }),
+    block: (fields) => buildCompletionBlock({ ...fields, runUrl, runId, runAttempt, reviewHero }),
+    /** The run metadata a block carries, for other output that names the run the same way. */
+    run: { runId, runAttempt, reviewHero },
   };
 }

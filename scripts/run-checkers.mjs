@@ -113,7 +113,8 @@ export function applySecondLook(consensus, confirmationsByArea) {
       const confirmations = confirmationsByArea[i]?.[j] ?? 0;
       const confirmed = group.supporters + confirmations >= threshold;
       if (confirmed) {
-        promoted.push(group.representative);
+        // Each voter and each confirming checker backs the finding.
+        promoted.push({ ...group.representative, supporters: group.supporters + confirmations });
         for (const d of group.dropped) removed.add(d);
       }
       return { ...group, confirmations, confirmed };

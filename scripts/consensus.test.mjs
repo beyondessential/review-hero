@@ -42,7 +42,7 @@ test("one voter keeps everything with no consensus call and nothing contested", 
       throw new Error("not called");
     },
   });
-  assert.deepEqual(result, { kept: [{ ...finding(1, "x"), agent: "bugs" }], dropped: [], contested: [], unfiltered: [] });
+  assert.deepEqual(result, { kept: [{ ...finding(1, "x"), agent: "bugs", supporters: 1 }], dropped: [], contested: [], unfiltered: [] });
 });
 
 test("contested groups point into the combined dropped list across agents", async () => {
@@ -83,6 +83,28 @@ test("without a consensus outcome, every agent finding is kept as it stands", ()
   assert.ok(outcome.kept.every((f) => !("voter" in f)));
   assert.deepEqual([outcome.dropped, outcome.contested, outcome.secondLook], [[], [], 0]);
   assert.deepEqual(outcome.unfiltered, ["bugs"]);
+  // No vote happened, so no finding has a voter count.
+  assert.ok(outcome.kept.every((f) => f.supporters === null));
+});
+
+// spec: RUN#voters
+test("with one voter per agent each finding's voter count is 1", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "consensus-single-"));
+  writeFileSync(join(dir, "bugs-result.json"), envelope([finding(1, "x")]));
+  const outcome = outcomeWithoutConsensus(dir, 1);
+  assert.deepEqual(outcome.kept.map((f) => f.supporters), [1]);
+});
+
+// spec: RUN#voters
+test("consensus across agents leaves each kept finding with its own group's voter count", async () => {
+  const tag = (agent, voter, line) => ({ ...finding(line, `${agent} ${line}`), agent, voter: `${agent}-${voter}` });
+  const findings = [tag("bugs", 0, 1), tag("bugs", 1, 2), tag("design", 0, 10), tag("design", 1, 11), tag("design", 2, 12)];
+  const callModel = async ({ messages }) =>
+    messages[0].content.includes("design")
+      ? JSON.stringify({ keep: [0], members: { 0: [0, 1, 2] }, contested: [] })
+      : JSON.stringify({ keep: [0], members: { 0: [0, 1] }, contested: [] });
+  const { kept } = await runConsensus({ findings, voters: 3, callModel });
+  assert.deepEqual(kept.map((f) => [f.agent, f.supporters]), [["bugs", 2], ["design", 3]]);
 });
 
 test("agents whose consensus failed are named as unfiltered, and calls run a few at a time", async () => {

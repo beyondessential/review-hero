@@ -74,6 +74,10 @@ export {
   buildReviewResult,
 } from "./completion.mjs";
 
+export { parseHunks, commentLines } from "./hunks.mjs";
+
+export { FINDINGS_SCHEMA, buildRoundFindings, buildFindingsPayload } from "./round.mjs";
+
 export { createAnthropicModelCaller } from "./anthropic.mjs";
 
 export { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";

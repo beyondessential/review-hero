@@ -13,7 +13,8 @@
   "types": "./src/index.d.ts",
   "files": [
     "src/",
-    "prompts/"
+    "prompts/",
+    "schemas/"
   ],
   "scripts": {
     "test": "node --test \"scripts/**/*.test.mjs\" \"src/**/*.test.mjs\""

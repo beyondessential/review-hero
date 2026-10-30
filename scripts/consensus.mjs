@@ -96,7 +96,7 @@ export const CONSENSUS_CONCURRENCY = 4;
 export async function runConsensus({ findings, voters, callModel }) {
   if (voters <= 1) {
     return {
-      kept: findings.map(({ voter, ...rest }) => rest),
+      kept: findings.map(({ voter, ...rest }) => ({ ...rest, supporters: 1 })),
       dropped: [],
       contested: [],
       unfiltered: [],
@@ -149,7 +149,7 @@ export function outcomeWithoutConsensus(artifactsDir, voters) {
     voters,
     agentsCompleted,
     agentsFailed,
-    kept: findings.map(({ voter, ...rest }) => rest),
+    kept: findings.map(({ voter, ...rest }) => ({ ...rest, supporters: voters > 1 ? null : 1 })),
     dropped: [],
     contested: [],
     unfiltered: voters > 1 ? [...new Set(findings.map((f) => f.agent))] : [],

@@ -127,7 +127,7 @@ test("an unreadable reply keeps everything and names nothing", async () => {
 test("the reply parser drops malformed areas and non-integer indices", () => {
   assert.deepEqual(
     parseConsensusReply('Here: {"keep": [1, "x"], "contested": [{"area": "a", "groups": [[2, "y"], "bad"]}, "junk"]}'),
-    { keep: [1], contested: [{ area: "a", groups: [[2]] }] },
+    { keep: [1], members: {}, contested: [{ area: "a", groups: [[2]] }] },
   );
   assert.equal(parseConsensusReply("nothing here"), null);
 });
@@ -135,7 +135,7 @@ test("the reply parser drops malformed areas and non-integer indices", () => {
 test("only integer indices count, so junk entries never stand for finding 0", () => {
   assert.deepEqual(
     parseConsensusReply('{"keep": [null, "", false, true, "0", 2], "contested": [{"area": "a", "groups": [[null, 3]]}]}'),
-    { keep: [2], contested: [{ area: "a", groups: [[3]] }] },
+    { keep: [2], members: {}, contested: [{ area: "a", groups: [[3]] }] },
   );
 });
 
@@ -144,8 +144,8 @@ test("a reply cut off mid-object keeps only its explicit keep list, and says the
   const warnings = [];
   console.warn = (line) => warnings.push(line);
   try {
-    assert.deepEqual(parseConsensusReply('{"keep": [0, 3], "contested": [{"area": "x", "groups": [[5]'), { keep: [0, 3], contested: [] });
-    assert.match(warnings.join("\n"), /contested areas lost/);
+    assert.deepEqual(parseConsensusReply('{"keep": [0, 3], "contested": [{"area": "x", "groups": [[5]'), { keep: [0, 3], members: {}, contested: [] });
+    assert.match(warnings.join("\n"), /contested areas and voter counts lost/);
     // Cut off inside the keep list: the first complete array is a contested
     // group's or nothing, never the kept findings.
     assert.equal(parseConsensusReply('{"keep": [0, 3'), null);
@@ -154,7 +154,7 @@ test("a reply cut off mid-object keeps only its explicit keep list, and says the
     assert.equal(parseConsensusReply('{"contested": [{"area": "loop", "groups": [[4]]}], "ke'), null);
     assert.equal(parseConsensusReply('Sure: {"contested": [{"groups": [[4]]}]'), null);
     // A bare array, with or without prose, is still the older reply shape.
-    assert.deepEqual(parseConsensusReply("Kept: [1, 2]"), { keep: [1, 2], contested: [] });
+    assert.deepEqual(parseConsensusReply("Kept: [1, 2]"), { keep: [1, 2], members: {}, contested: [] });
   } finally {
     console.warn = warn;
   }
@@ -163,4 +163,46 @@ test("a reply cut off mid-object keeps only its explicit keep list, and says the
 test("an object reply without a keep array is unreadable, not mined for indices", () => {
   assert.equal(parseConsensusReply('{"keep": "0, 1", "contested": [{"area": "a", "groups": [[4, 5]]}]}'), null);
   assert.equal(parseConsensusReply('{"kept": [0]}'), null);
+});
+
+// spec: RUN#voters
+test("a kept finding's voter count is the distinct voters among its group's members", async () => {
+  // Findings 0 and 1 are one issue from two voters, and finding 0 is listed
+  // twice over by the model to show repeats do not count.
+  const reply = JSON.stringify({ keep: [0, 2], members: { 0: [0, 1, 0], 2: [2] }, contested: [] });
+  const { kept } = await applyConsensus(findings, 3, async () => reply);
+  assert.deepEqual(kept.map((f) => [f.line, f.supporters]), [[10, 2], [40, 1]]);
+  assert.ok(kept.every((f) => f.voter === undefined));
+});
+
+test("members the model invents or leaves out do not count towards a voter count", async () => {
+  const reply = JSON.stringify({ keep: [0], members: { 0: [0, 99, "x", 3] }, contested: [] });
+  const { kept } = await applyConsensus(findings, 3, async () => reply);
+  assert.equal(kept[0].supporters, 2);
+});
+
+test("a kept finding whose group the reply does not give has no voter count", async () => {
+  const noMembers = await applyConsensus(findings, 3, async () => JSON.stringify({ keep: [0, 2], contested: [] }));
+  assert.deepEqual(noMembers.kept.map((f) => f.supporters), [null, null]);
+  const partial = await applyConsensus(findings, 3, async () => JSON.stringify({ keep: [0, 2], members: { 0: [0, 1] } }));
+  assert.deepEqual(partial.kept.map((f) => f.supporters), [2, null]);
+  const bare = await applyConsensus(findings, 3, async () => "[0, 2]");
+  assert.deepEqual(bare.kept.map((f) => f.supporters), [null, null]);
+});
+
+test("findings kept because consensus was not applied have no voter count, and a single voter counts 1", async () => {
+  for (const callModel of [null, async () => "no idea"]) {
+    const { kept } = await applyConsensus(findings, 3, callModel);
+    assert.ok(kept.every((f) => f.supporters === null));
+  }
+  const single = await applyConsensus(findings, 1, null);
+  assert.ok(single.kept.every((f) => f.supporters === 1));
+});
+
+test("the reply parser reads the members of each kept group", () => {
+  assert.deepEqual(parseConsensusReply('{"keep": [0, 3], "members": {"0": [0, 1], "3": [3, "x"], "z": [9], "5": "bad"}}'), {
+    keep: [0, 3],
+    members: { 0: [0, 1], 3: [3] },
+    contested: [],
+  });
 });

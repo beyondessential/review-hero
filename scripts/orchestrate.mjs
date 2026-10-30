@@ -21,11 +21,19 @@
  *   APP_SLUG            — Slug of the GitHub App (e.g. "review-hero")
  *   SUPPRESSIONS_PATH   — Path to local suppressions YAML file (optional)
  *   GLOBAL_SUPPRESSIONS_PATH — Path to global suppressions YAML file (optional)
+ *   DIFF_PATH           — The diff the agents reviewed, for the hunks an inline comment may
+ *                         span (optional; without it comments sit on a finding's first line)
+ *   FINDINGS_URL        — URL to post the round's findings to as JSON (optional; empty posts nothing)
+ *   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT — The Actions run, named in completion blocks and posted findings
+ *   ACTIONS_ID_TOKEN_REQUEST_URL, ACTIONS_ID_TOKEN_REQUEST_TOKEN — Where GitHub Actions
+ *                         issues the identity token the findings post carries; set only when the
+ *                         caller granted `id-token: write`
  *   ANTHROPIC_API_KEY   — API key for Haiku-based filtering (optional)
  *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
  */
 
 import { readFileSync } from "node:fs";
+import { deliverFindings } from "./findings-post.mjs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 import {
   findRejectedFindings,
@@ -43,6 +51,10 @@ import {
   buildSummaryHeader,
   buildSummaryTable,
   buildReviewResult,
+  buildRoundFindings,
+  buildFindingsPayload,
+  commentLines,
+  parseHunks,
   stripCompletionBlocks,
   createAnthropicModelCaller,
 } from "../src/index.mjs";
@@ -179,6 +191,10 @@ async function resolvePreviousReviewHeroThreads(prNumber, botLogin) {
   }
 }
 
+/**
+ * Post the review and return it. A comment with a `startLine` spans from there
+ * to its `line`.
+ */
 async function postReview(prNumber, commitSha, inlineComments) {
   const body = {
     commit_id: commitSha,
@@ -187,13 +203,45 @@ async function postReview(prNumber, commitSha, inlineComments) {
       path: c.path,
       line: c.line,
       side: "RIGHT",
+      ...(c.startLine !== undefined && { start_line: c.startLine, start_side: "RIGHT" }),
       body: c.body,
     })),
   };
 
-  await githubApi(`/pulls/${prNumber}/reviews`, {
+  return githubApi(`/pulls/${prNumber}/reviews`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+/** Every comment of a review: posting a review returns the review, not its comments. */
+async function listReviewComments(prNumber, reviewId) {
+  const comments = [];
+  for (let page = 1; ; page++) {
+    const batch = await githubApi(
+      `/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100&page=${page}`,
+    );
+    comments.push(...batch);
+    if (batch.length < 100) return comments;
+  }
+}
+
+/**
+ * The id of the review comment each of `posted` became, or null where none can
+ * be found. A listed comment stands for at most one posted one; the same text
+ * at the same place wins over the same place alone, so two findings on one line
+ * keep their own ids.
+ */
+// spec: FPOST#findings
+export function matchCommentIds(posted, listed) {
+  const used = new Set();
+  return posted.map((c) => {
+    const here = (l, i) => !used.has(i) && l.path === c.path && (l.line ?? l.original_line) === c.line;
+    let found = listed.findIndex((l, i) => here(l, i) && l.body === c.body);
+    if (found === -1) found = listed.findIndex(here);
+    if (found === -1) return null;
+    used.add(found);
+    return listed[found].id;
   });
 }
 
@@ -256,6 +304,29 @@ async function main() {
   const repo = getEnvOrThrow("GITHUB_REPOSITORY");
   const completion = createCompletionReporter({ repo, prNumber });
   const reviewedLink = completion.link(reviewedSha);
+  const findingsUrl = process.env.FINDINGS_URL || "";
+
+  // Posts the round's findings as data when the caller named a URL, and says
+  // how that went for the completion block. Never throws.
+  // spec: FPOST
+  const deliver = (result, keptGroups, commentIds) =>
+    deliverFindings({
+      findingsUrl,
+      payload: () => {
+        const { runId, runAttempt, reviewHero } = completion.run;
+        if (!runId || !runAttempt) throw new Error("GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT are not set");
+        return buildFindingsPayload({
+          repository: repo,
+          prNumber: Number(prNumber),
+          runId,
+          runAttempt,
+          reviewHero,
+          result,
+          findings: buildRoundFindings(keptGroups, agentNames),
+          commentIds,
+        });
+      },
+    });
 
   // The filtering stages reach the model through a caller-supplied function;
   // this repo backs it with the Anthropic API. Null when no key is set, which
@@ -321,15 +392,16 @@ async function main() {
   const secondLook = consensus.secondLook ?? 0;
 
   if (agentsCompleted === 0) {
-    const block = completion.block(
-      buildReviewResult({
-        reviewedSha,
-        agentsCompleted,
-        agentsFailed,
-        voters: voterCount,
-        model: process.env.AGENT_MODEL,
-      }),
-    );
+    const failed = buildReviewResult({
+      reviewedSha,
+      agentsCompleted,
+      agentsFailed,
+      voters: voterCount,
+      model: process.env.AGENT_MODEL,
+    });
+    // spec: FPOST#when-a-review-posts
+    const findingsPost = await deliver(failed, [], []);
+    const block = completion.block({ ...failed, findingsPost });
     await postComment(
       prNumber,
       `🦸 **Review Hero** was requested${reviewedLink ? ` for ${reviewedLink}` : ""} but could not complete — all agents failed. Check the workflow logs for details.\n\n${block}`,
@@ -393,11 +465,19 @@ async function main() {
     secondLook,
   });
 
+  // The diff the agents saw says which of a finding's lines share a hunk.
+  let hunks;
+  try {
+    hunks = process.env.DIFF_PATH ? parseHunks(readFileSync(process.env.DIFF_PATH, "utf-8")) : undefined;
+  } catch (err) {
+    console.warn(`Failed to read the diff, so inline comments sit on a finding's first line: ${err.message}`);
+  }
+
   // Split kept groups by severity
   const inlineComments = [];
   const nitpicks = [];
 
-  for (const group of keptGroups) {
+  keptGroups.forEach((group, groupIndex) => {
     const f = group.representative;
 
     if (f.severity === "nitpick") {
@@ -405,23 +485,35 @@ async function main() {
     } else {
       inlineComments.push({
         path: f.file,
-        line: f.line,
+        ...commentLines(f, hunks),
         body: buildInlineComment(f, agentNames),
+        groupIndex,
       });
     }
-  }
+  });
+
+  // The GitHub comment each kept group was posted as, null for one not posted inline.
+  const commentIds = keptGroups.map(() => null);
 
   // Post inline review comments
   // Anchored to the reviewed commit even if the PR has moved on since, so the
   // comments sit on the code the agents actually saw.
   if (inlineComments.length > 0) {
     try {
-      await postReview(prNumber, reviewedSha, inlineComments);
+      const review = await postReview(prNumber, reviewedSha, inlineComments);
       console.log(`Posted ${inlineComments.length} inline review comments`);
+      try {
+        const ids = matchCommentIds(inlineComments, await listReviewComments(prNumber, review.id));
+        inlineComments.forEach((c, i) => {
+          commentIds[c.groupIndex] = ids[i];
+        });
+      } catch (err) {
+        console.warn(`Failed to list the review's comments, so findings carry no comment id: ${err.message}`);
+      }
     } catch (err) {
       console.error(`Failed to post inline review: ${err.message}`);
       const fallbackLines = inlineComments
-        .map((c) => `**\`${c.path}:${c.line}\`**\n\n${c.body}`)
+        .map((c) => `**\`${c.path}:${c.startLine ?? c.line}\`**\n\n${c.body}`)
         .join("\n\n---\n\n");
       await postComment(
         prNumber,
@@ -429,6 +521,11 @@ async function main() {
       );
     }
   }
+
+  // After the inline review, so each finding posted inline names its comment,
+  // and before the summary, whose completion block says how this went.
+  // spec: FPOST#when-a-review-posts
+  const findingsPost = await deliver(result, keptGroups, commentIds);
 
   // Build and post summary
   let round = null;
@@ -520,7 +617,7 @@ async function main() {
   // hole by forgetting to sanitise its own cells.
   // spec: CMPL#telling-review-heros-own-block-apart
   const body = stripCompletionBlocks(summaryParts.join("")) +
-    `\n\n${completion.block(result)}`;
+    `\n\n${completion.block({ ...result, findingsPost })}`;
 
   await postComment(prNumber, body);
   console.log("Posted summary comment");

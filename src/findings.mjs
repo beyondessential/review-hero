@@ -16,7 +16,8 @@ export const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
 /**
  * Keep only entries that are valid findings and normalise them into the shape
  * the rest of the pipeline expects. `voter` is tagged only when supplied, so a
- * single-voter run carries no voter field.
+ * single-voter run carries no voter field. `endLine` is kept only when it is an
+ * integer past `line`; any other value leaves the finding on its start line.
  */
 export function validateFindings(findings, agentKey, voter) {
   return findings
@@ -37,6 +38,8 @@ export function validateFindings(findings, agentKey, voter) {
     .map((f) => ({
       file: f.file,
       line: f.line,
+      // spec: RUN#findings
+      ...(Number.isInteger(f.endLine) && f.endLine > f.line && { endLine: f.endLine }),
       severity: f.severity,
       comment: f.comment,
       agent: agentKey,

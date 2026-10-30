@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Review Hero findings round, schema 1",
+  "description": "What a review posts to its findings URL: the round's result and every kept finding. Adding a field keeps `schema` at 1; removing a field or changing what one means increments it, and a new file is published for that version.",
+  "type": "object",
+  "required": ["schema", "repository", "prNumber", "runId", "runAttempt", "reviewHero", "outcome", "reviewedSha", "counts", "findings"],
+  "properties": {
+    "schema": { "const": 1, "description": "Version of this payload's shape." },
+    "repository": { "type": "string", "description": "The repository the review ran in, as owner/name." },
+    "prNumber": { "type": "integer", "minimum": 1 },
+    "runId": { "type": "integer", "minimum": 1, "description": "GitHub Actions run id." },
+    "runAttempt": { "type": "integer", "minimum": 1, "description": "GitHub Actions run attempt." },
+    "reviewHero": {
+      "type": "object",
+      "required": ["ref", "sha"],
+      "properties": {
+        "ref": { "type": ["string", "null"], "description": "The Review Hero ref the caller asked for." },
+        "sha": { "type": ["string", "null"], "description": "The Review Hero commit that ref resolved to." }
+      }
+    },
+    "outcome": { "enum": ["completed", "failed"], "description": "`failed` when every agent failed." },
+    "reviewedSha": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "The commit that was reviewed." },
+    "model": { "type": "string", "description": "The model the review agents ran on." },
+    "counts": {
+      "type": "object",
+      "required": ["agentsCompleted", "agentsFailed", "voters", "critical", "suggestion", "nitpick", "belowThreshold", "suppressed", "secondLook"],
+      "properties": {
+        "agentsCompleted": { "type": "integer", "minimum": 0 },
+        "agentsFailed": { "type": "integer", "minimum": 0 },
+        "voters": { "type": "integer", "minimum": 0, "description": "Voters per agent the review ran with." },
+        "critical": { "type": "integer", "minimum": 0 },
+        "suggestion": { "type": "integer", "minimum": 0 },
+        "nitpick": { "type": "integer", "minimum": 0 },
+        "belowThreshold": { "type": "integer", "minimum": 0 },
+        "suppressed": { "type": "integer", "minimum": 0 },
+        "secondLook": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "The kept findings, one per group, so their severities add up to `counts`.",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "agent", "path", "startLine", "endLine", "supporters", "commentId", "comment"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "description": "Unique within the run attempt. Says nothing about whether a finding in another round is the same one." },
+          "severity": { "enum": ["critical", "suggestion", "nitpick"] },
+          "agent": {
+            "type": "object",
+            "required": ["key", "name"],
+            "properties": {
+              "key": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 }
+            }
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "startLine": { "type": "integer", "minimum": 1 },
+          "endLine": { "type": ["integer", "null"], "minimum": 1, "description": "Null when the finding covers its start line alone." },
+          "supporters": { "type": ["integer", "null"], "minimum": 1, "description": "Voters and second-look checkers that support the finding; null when the review cannot tell." },
+          "commentId": { "type": ["integer", "null"], "description": "The id of the GitHub review comment the finding was posted as; null when it was not posted inline." },
+          "comment": { "type": "string", "minLength": 1, "description": "The comment as the agent wrote it." }
+        }
+      }
+    }
+  }
+}
