@@ -12,26 +12,53 @@
 
 import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 
+/**
+ * The distinct voters behind `findings`. An untagged finding is no voter's, so
+ * it counts for none.
+ */
+export function countVoters(findings) {
+  return new Set(findings.map((f) => f.voter).filter((v) => v !== undefined)).size;
+}
+
+/**
+ * Every finding kept as it stands, without voter tags. With one voter per agent
+ * each finding is that voter's alone; with more, no vote happened, so none has
+ * a voter count.
+ */
+// spec: RUN#voters
+export function keepWithoutConsensus(findings, voterCount) {
+  const supporters = voterCount <= 1 ? 1 : null;
+  return findings.map(({ voter, ...rest }) => ({ ...rest, supporters }));
+}
+
 /** The most contested areas consensus names for one agent's findings. */
 export const MAX_CONTESTED_AREAS = 3;
 
 /**
  * The token limit for a reply that lists findings by index: consensus lists
- * each at most once, in `keep` or a contested group, and grouping once as a
- * member and once more as a representative, so either grows with the number
- * of findings. Cut off, the reply no longer parses, and the stage falls back
- * to doing nothing on exactly the large reviews it exists to filter.
+ * each finding in `keep` or a contested group and again in a kept group's
+ * `members`, and grouping lists each as a member and once more as a
+ * representative, so either grows with the number of findings. Cut off, the
+ * reply no longer parses, and the stage falls back to doing nothing on exactly
+ * the large reviews it exists to filter.
  */
 export function indexReplyMaxTokens(findingCount, base) {
-  return base + 8 * findingCount;
+  return base + 12 * findingCount;
 }
 
 /**
  * Apply voter consensus to determine whether findings from different voters are
  * about the same issue. The model receives all findings and returns which ones
- * to keep — the deduplicated set that a majority of voters agree on — and the
- * contested areas: groups below the majority that cluster where a second look
- * is worth it.
+ * to keep — the deduplicated set that a majority of voters agree on, each with
+ * the members of its group — and the contested areas: groups below the majority
+ * that cluster where a second look is worth it.
+ *
+ * Each kept finding carries `supporters`, the number of distinct voters among
+ * its group's members, counted here from the voter tags rather than taken from
+ * the model's say-so. A kept finding whose group the reply does not give, or
+ * whose group falls short of the majority it was kept for, has `supporters`
+ * null, as has every finding when consensus is not applied to more than one
+ * voter.
  *
  * Each contested group carries its member findings (voter tags intact), where
  * they sit in `droppedFindings`, and the number of distinct voters behind it.
@@ -40,10 +67,11 @@ export function indexReplyMaxTokens(findingCount, base) {
  * areas on error or when no `callModel` is supplied, with `applied` false so
  * the review can say its findings were not filtered.
  */
+// spec: RUN#voters
 // spec: RUN#second-look
 export async function applyConsensus(findings, voterCount, callModel) {
   const keepAll = () => ({
-    kept: findings.map(({ voter, ...rest }) => rest),
+    kept: keepWithoutConsensus(findings, voterCount),
     dropped: 0,
     droppedFindings: [],
     contested: [],
@@ -95,7 +123,7 @@ Two findings belong in DIFFERENT groups only if fixing one would NOT fix the oth
 
 ## Threshold
 
-For each group, count the number of distinct voters (use the voter= tag). If >= ${threshold} distinct voters flagged it, keep the single best-worded finding as the representative.
+For each group, count the number of distinct voters (use the voter= tag). If >= ${threshold} distinct voters flagged it, keep the single best-worded finding as the representative, and list every finding in its group, the representative included.
 
 ## Contested areas
 
@@ -108,9 +136,10 @@ ${findingsList}
 
 Output a single JSON object and nothing else:
 - "keep": the indices (0-based) of the best-worded representative from each group that meets the ${threshold}-voter threshold
+- "members": for each kept representative's index, the indices of every finding in its group, the representative included
 - "contested": the contested areas, each {"area": "<label>", "groups": [[<indices>], ...]}
 
-Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "groups": [[5], [7, 9]]}]}`,
+Example: {"keep": [0, 3], "members": {"0": [0, 1, 2], "3": [3, 4]}, "contested": [{"area": "retry loop in src/fetch.ts", "groups": [[5], [7, 9]]}]}`,
         },
       ],
     });
@@ -123,9 +152,20 @@ Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "
     }
     const keptIndices = new Set(parsed.keep.filter(validIndex));
 
-    const kept = findings
-      .filter((_, i) => keptIndices.has(i))
-      .map(({ voter, ...rest }) => rest);
+    const supportersOf = (i) => {
+      const members = parsed.members[i];
+      if (!members) return null;
+      // Another kept finding is a group of its own, so its voters are not this one's.
+      const own = [i, ...members.filter((m) => validIndex(m) && !(m !== i && keptIndices.has(m)))];
+      const voters = countVoters(own.map((m) => findings[m]));
+      // Kept with fewer than the majority behind it, the reply contradicts
+      // itself, so its grouping says nothing reliable about the count.
+      return voters >= threshold ? voters : null;
+    };
+    const kept = [];
+    findings.forEach(({ voter, ...rest }, i) => {
+      if (keptIndices.has(i)) kept.push({ ...rest, supporters: supportersOf(i) });
+    });
     const droppedFindings = [];
     const droppedAt = new Map(); // input index → index in droppedFindings
     findings.forEach(({ voter, ...rest }, i) => {
@@ -147,7 +187,7 @@ Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "
         );
         if (members.length === 0) continue;
         const memberFindings = members.map((i) => findings[i]);
-        const supporters = new Set(memberFindings.map((f) => f.voter)).size;
+        const supporters = countVoters(memberFindings);
         if (supporters >= threshold) continue;
         for (const i of members) claimed.add(i);
         const { voter, ...representative } = memberFindings[0];
@@ -172,14 +212,24 @@ Example: {"keep": [0, 3], "contested": [{"area": "retry loop in src/fetch.ts", "
 }
 
 /**
- * Read the consensus model's reply: a `{ keep, contested }` object, or a bare
- * array of kept indices, which names no contested areas. Null when neither
- * can be found.
+ * Read the consensus model's reply: a `{ keep, members, contested }` object, or
+ * a bare array of kept indices, which names no contested areas and no members.
+ * `members` maps a kept index to the indices of its group, and holds only the
+ * groups the reply gave. Null when neither shape can be found.
  */
 export function parseConsensusReply(text) {
   // Only integers count: coercing null, "" or false would read as index 0.
   const asIndices = (value) =>
     Array.isArray(value) ? value.filter((v) => Number.isInteger(v)) : [];
+  const asMembers = (value) => {
+    const members = {};
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const [key, indices] of Object.entries(value)) {
+        if (/^\d+$/.test(key) && Array.isArray(indices)) members[Number(key)] = asIndices(indices);
+      }
+    }
+    return members;
+  };
   const asAreas = (value) =>
     Array.isArray(value)
       ? value
@@ -196,7 +246,11 @@ export function parseConsensusReply(text) {
     try {
       const parsed = JSON.parse(text.slice(start, end + 1));
       if (parsed && Array.isArray(parsed.keep)) {
-        return { keep: asIndices(parsed.keep), contested: asAreas(parsed.contested) };
+        return {
+          keep: asIndices(parsed.keep),
+          members: asMembers(parsed.members),
+          contested: asAreas(parsed.contested),
+        };
       }
       // An object reply without a usable `keep` is unreadable. Its arrays are
       // contested groups or junk, never the kept indices.
@@ -209,20 +263,20 @@ export function parseConsensusReply(text) {
   // An object reply that did not parse, most likely cut off: only an
   // explicit `keep` list can stand for the kept findings, never whatever
   // array comes first, which may be a contested group. The contested areas
-  // are lost, so say so. An object without a complete keep list (cut off
+  // and the groups are lost, so say so. An object without a complete keep list (cut off
   // before or inside it) is unreadable.
   const arrayStart = text.indexOf("[");
   if (start !== -1 && (arrayStart === -1 || start < arrayStart)) {
     const keepMatch = text.match(/"keep"\s*:\s*(\[[\d\s,]*\])/);
     if (!keepMatch) return null;
-    console.warn("Consensus reply was not a readable object; kept findings recovered, contested areas lost");
-    return { keep: asIndices(JSON.parse(keepMatch[1])), contested: [] };
+    console.warn("Consensus reply was not a readable object; kept findings recovered, contested areas and voter counts lost");
+    return { keep: asIndices(JSON.parse(keepMatch[1])), members: {}, contested: [] };
   }
 
   // A bare array of kept indices, the older reply shape.
   const arrMatch = text.match(/\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)?\]/);
   if (!arrMatch) return null;
-  return { keep: asIndices(JSON.parse(arrMatch[0])), contested: [] };
+  return { keep: asIndices(JSON.parse(arrMatch[0])), members: {}, contested: [] };
 }
 
 /**

@@ -14,9 +14,20 @@ import { readFileSync } from "node:fs";
 export const VALID_SEVERITIES = new Set(["critical", "suggestion", "nitpick"]);
 
 /**
+ * The last line a finding covers when it covers more than its start line, and
+ * undefined when it covers its start line alone. The one test of a finding's
+ * range, so its inline comment and its posted data always agree.
+ */
+// spec: RUN#findings
+export function effectiveEndLine({ line, endLine }) {
+  return Number.isInteger(endLine) && endLine > line ? endLine : undefined;
+}
+
+/**
  * Keep only entries that are valid findings and normalise them into the shape
  * the rest of the pipeline expects. `voter` is tagged only when supplied, so a
- * single-voter run carries no voter field.
+ * single-voter run carries no voter field. `endLine` is kept only when it is an
+ * integer past `line`; any other value leaves the finding on its start line.
  */
 export function validateFindings(findings, agentKey, voter) {
   return findings
@@ -31,12 +42,13 @@ export function validateFindings(findings, agentKey, voter) {
         VALID_SEVERITIES.has(f.severity) &&
         typeof f.comment === "string" &&
         f.comment &&
-        typeof f.line === "number" &&
+        Number.isInteger(f.line) &&
         f.line > 0,
     )
     .map((f) => ({
       file: f.file,
       line: f.line,
+      ...(effectiveEndLine(f) !== undefined && { endLine: f.endLine }),
       severity: f.severity,
       comment: f.comment,
       agent: agentKey,

@@ -8,6 +8,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 
+import { effectiveEndLine } from "./findings.mjs";
 import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 
 export function buildBasePromptSections({
@@ -150,7 +151,7 @@ export function buildCheckerPrompt({
   prompt += `\n## Findings to check\n\nArea: ${sanitizeForPrompt(area)}\n\n`;
   findings.forEach((f, i) => {
     const comment = sanitizeForPrompt(f.comment, { maxLength: COMMENT_LIMIT });
-    prompt += `${i}. [${sanitizeForPrompt(f.severity)}] ${sanitizeForPrompt(f.file)}:${sanitizeForPrompt(f.line)} — <comment>${comment}</comment>\n`;
+    prompt += `${i}. [${sanitizeForPrompt(f.severity)}] ${sanitizeForPrompt(f.file)}:${sanitizeForPrompt(f.line)}${effectiveEndLine(f) !== undefined ? `-${sanitizeForPrompt(f.endLine)}` : ""} — <comment>${comment}</comment>\n`;
   });
   return prompt;
 }

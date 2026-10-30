@@ -27,6 +27,10 @@ on:
         description: "Git ref of review-hero to use (e.g. main, v1, v1.2.0)"
         type: string
         default: v1
+      findings-url:
+        description: "https URL to post each round's findings to as JSON, authenticated by a GitHub Actions identity token (the caller needs `id-token: write`). Empty posts nothing"
+        type: string
+        default: ""
     secrets:
       ANTHROPIC_API_KEY:
         description: "Anthropic API key"
@@ -78,6 +82,14 @@ jobs:
       (contains(github.event.pull_request.body, '[x] **Run Review Hero') ||
       contains(github.event.pull_request.body, '[x]  **Run Review Hero')))
     runs-on: ${{ inputs.runner }}
+    # spec: RUN#credentials
+    # What the job reads with the workflow token: the checkouts and the compare
+    # API call that fetches the diff. Naming only that leaves out `id-token`
+    # whatever the caller granted, so no agent process can request an identity
+    # token. The posting job declares no permissions, so it inherits the
+    # caller's, `id-token` included, and requests the token itself.
+    permissions:
+      contents: read
     # Recorded before any agent runs, so the posting job reads them as they
     # were, whatever an agent did to this runner afterwards.
     outputs:
@@ -559,6 +571,11 @@ jobs:
           AGENT_NAMES: ${{ needs.review.outputs.agent_names }}
           AGENT_MODEL: ${{ needs.review.outputs.agent_model }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          # The diff the agents reviewed, for the hunks an inline comment may span.
+          DIFF_PATH: ${{ runner.temp }}/review/pr-filtered.diff
+          # Posted to after the inline review, with an identity token this job
+          # requests only when the URL is set and the caller granted `id-token: write`.
+          FINDINGS_URL: ${{ inputs.findings-url }}
           SUPPRESSIONS_PATH: ${{ runner.temp }}/suppressions.yml
           GLOBAL_SUPPRESSIONS_PATH: .review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}

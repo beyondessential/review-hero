@@ -13,11 +13,18 @@ export type Severity = "critical" | "suggestion" | "nitpick";
 export interface Finding {
   file: string;
   line: number;
+  /** The last line of the range the finding covers; absent when it covers `line` alone. */
+  endLine?: number;
   severity: Severity;
   comment: string;
   agent: string;
   /** Present only on multi-voter runs: `${agent}-${voter}`. */
   voter?: string;
+  /**
+   * Voters and second-look checkers that support the finding. Set on findings
+   * consensus kept: null where the review cannot tell, 1 with one voter per agent.
+   */
+  supporters?: number | null;
 }
 
 /** A group of findings judged to describe the same underlying issue. */
@@ -65,6 +72,9 @@ export type CallModel = (request: ModelRequest) => Promise<string>;
 // ── Finding parsing ──────────────────────────────────────────────────────────
 
 export const VALID_SEVERITIES: ReadonlySet<string>;
+
+/** A finding's last line when it covers more than its start line, else undefined. */
+export function effectiveEndLine(finding: Pick<Finding, "line" | "endLine">): number | undefined;
 
 export function validateFindings(
   findings: unknown[],
@@ -117,10 +127,21 @@ export interface ConsensusResult {
 
 export const MAX_CONTESTED_AREAS: number;
 
+/**
+ * Every finding kept as it stands, without voter tags: each counted as one
+ * voter's with one voter per agent, and with no voter count otherwise.
+ */
+export function keepWithoutConsensus(findings: Finding[], voterCount: number): Finding[];
+
 /** Read the consensus model's reply, or null when it has no usable answer. */
 export function parseConsensusReply(
   text: string,
-): { keep: number[]; contested: Array<{ area: string; groups: number[][] }> } | null;
+): {
+  keep: number[];
+  /** Kept index to the indices of its group, for the groups the reply gave. */
+  members: Record<number, number[]>;
+  contested: Array<{ area: string; groups: number[][] }>;
+} | null;
 
 export function applyConsensus(
   findings: Finding[],
@@ -275,6 +296,9 @@ interface CompletionBase {
   schema: number;
   /** The GitHub Actions run that posted the comment. */
   runUrl: string | null;
+  /** The GitHub Actions run id that posted the comment. */
+  runId?: number;
+  runAttempt?: number;
   reviewHero: {
     /** The Review Hero ref the caller asked for, e.g. `v1`. */
     ref: string | null;
@@ -289,6 +313,11 @@ export interface ReviewCompletion extends CompletionBase {
   reviewedSha: string;
   /** Model the review agents ran on. */
   model?: string;
+  /**
+   * How posting the round's findings went. Absent when the review has no
+   * findings URL.
+   */
+  findingsPost?: FindingsPostStatus;
   counts: {
     agentsCompleted: number;
     agentsFailed: number;
@@ -341,7 +370,19 @@ export type CompletionBlock =
   | SaveSuppressionsCompletion;
 
 /** A review round's result as data: the `review` block without its run metadata. */
-export type ReviewResult = Omit<ReviewCompletion, "schema" | "runUrl" | "reviewHero">;
+export type ReviewResult = Omit<
+  ReviewCompletion,
+  "schema" | "runUrl" | "runId" | "runAttempt" | "reviewHero" | "findingsPost"
+>;
+
+/** How posting a round's findings went. */
+export type FindingsPostStatus =
+  | "accepted"
+  | "refused"
+  | "unreachable"
+  | "no-token"
+  | "invalid-url"
+  | "error";
 
 /**
  * Build a review round's result from the pipeline's outputs. The hosted review
@@ -421,3 +462,107 @@ export function sanitizeForPrompt(
   value: unknown,
   options?: { maxLength?: number },
 ): string;
+
+// ── Diff hunks ───────────────────────────────────────────────────────────────
+
+/** First and last new-side line of one diff hunk, inclusive. */
+export interface Hunk {
+  start: number;
+  end: number;
+}
+
+/** The new-side hunks of each file in a unified diff. */
+export function parseHunks(diff: string): Map<string, Hunk[]>;
+
+/** The new path a `diff --git` header names, decoding a git-quoted path; null for any other line. */
+export function diffGitPath(line: string): string | null;
+
+/** A path as git quotes it, with its C-style and octal escapes decoded. */
+export function unquoteGitPath(quoted: string): string;
+
+/**
+ * Where an inline comment for a finding goes: its range when both ends lie in
+ * one hunk of its file, its start line alone otherwise. `line` is the comment's
+ * last line and `startLine` is present only for a multi-line comment.
+ */
+export function commentLines(
+  finding: Pick<Finding, "file" | "line" | "endLine">,
+  hunks?: Map<string, Hunk[]>,
+): { line: number; startLine?: number };
+
+// ── A review round as data ───────────────────────────────────────────────────
+
+/** Version of the posted findings payload's shape. */
+export const FINDINGS_SCHEMA: number;
+
+/** Where that version's JSON Schema is published. */
+export const FINDINGS_SCHEMA_URL: string;
+
+export interface RoundFinding {
+  severity: Severity;
+  agent: { key: string; name: string };
+  path: string;
+  startLine: number;
+  /** Null when the finding covers its start line alone. */
+  endLine: number | null;
+  /** Voters and second-look checkers behind the finding; null when the review cannot tell. */
+  supporters: number | null;
+  /** The comment as the agent wrote it. */
+  comment: string;
+}
+
+export interface PostedFinding extends RoundFinding {
+  /** Unique within the run attempt. */
+  id: string;
+  /** The GitHub review comment the finding was posted as, or null. */
+  commentId: number | null;
+}
+
+export interface FindingsPayload extends Omit<ReviewResult, "kind"> {
+  /** The URL of the JSON Schema for this payload's `schema` version. */
+  $schema: string;
+  schema: number;
+  repository: string;
+  prNumber: number;
+  runId: number;
+  runAttempt: number;
+  reviewHero: { ref: string | null; sha: string | null };
+  findings: PostedFinding[];
+}
+
+/** The round's kept findings, one per group. */
+export function buildRoundFindings(
+  keptGroups: FindingGroup[],
+  agentNames?: Record<string, string>,
+): RoundFinding[];
+
+/**
+ * The id of the GitHub review comment each posted inline comment became, or
+ * null where none can be told. `listed` is a review's comments as the GitHub
+ * REST API lists them. Matches on path, lines and text first, and on path and
+ * lines alone only where one posted and one listed comment are left there.
+ */
+export function matchCommentIds(
+  posted: Array<{ path: string; line: number; startLine?: number; body: string }>,
+  listed: Array<{
+    id: number;
+    path: string;
+    line?: number | null;
+    start_line?: number | null;
+    original_line?: number | null;
+    original_start_line?: number | null;
+    body: string;
+  }>,
+): Array<number | null>;
+
+/** The payload for one round: its result and findings, with run metadata and comment ids. */
+export function buildFindingsPayload(args: {
+  repository: string;
+  prNumber: number;
+  runId: number;
+  runAttempt: number;
+  reviewHero: { ref: string | null; sha: string | null };
+  result: ReviewResult;
+  findings: RoundFinding[];
+  commentIds?: Array<number | null>;
+}): FindingsPayload;

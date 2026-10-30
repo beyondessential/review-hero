@@ -14,6 +14,7 @@
 
 export {
   VALID_SEVERITIES,
+  effectiveEndLine,
   validateFindings,
   extractJsonArray,
   parseAgentResult,
@@ -21,6 +22,7 @@ export {
 
 export {
   applyConsensus,
+  keepWithoutConsensus,
   parseConsensusReply,
   groupAllFindings,
   MAX_CONTESTED_AREAS,
@@ -73,6 +75,10 @@ export {
   stripCompletionBlocks,
   buildReviewResult,
 } from "./completion.mjs";
+
+export { parseHunks, commentLines, diffGitPath, unquoteGitPath } from "./hunks.mjs";
+
+export { FINDINGS_SCHEMA, FINDINGS_SCHEMA_URL, buildRoundFindings, matchCommentIds, buildFindingsPayload } from "./round.mjs";
 
 export { createAnthropicModelCaller } from "./anthropic.mjs";
 

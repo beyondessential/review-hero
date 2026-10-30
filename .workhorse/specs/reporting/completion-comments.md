@@ -56,6 +56,7 @@ A completion comment quotes text from the pull request, and anyone who can comme
 - [ ] `kind` is `review`, `auto-fix`, or `save-suppressions`.
 - [ ] `outcome` says how the run ended, from the set of outcomes for its `kind` (see below).
 - [ ] `runUrl` links to the GitHub Actions run that posted the comment.
+- [ ] `runId` and `runAttempt` are the GitHub Actions run id and run attempt that posted the comment, as integers.
 - [ ] `reviewHero.ref` is the Review Hero ref the caller asked for (for example `v1`), and `reviewHero.sha` is the Review Hero commit that ref resolved to for the run.
 - [ ] `reviewHero.sha` is null rather than a guess when the running copy of Review Hero is not its own checkout, so a copy installed inside another repository does not report that repository's commit.
 - [ ] All SHAs in the block are full 40-character SHAs.
@@ -65,6 +66,8 @@ A completion comment quotes text from the pull request, and anyone who can comme
 - [ ] `outcome` is `completed` when at least one agent returned results, and `failed` when every agent failed.
 - [ ] `reviewedSha` is the reviewed commit.
 - [ ] `model` is the model the review agents ran on.
+- [ ] `findingsPost` says how posting the round's findings went (see `reporting/posting-findings.md`): `accepted` when the receiver answered with a 2xx status, `refused` when it answered with any other status, `unreachable` when no answer came, `no-token` when the run could not get an identity token, `invalid-url` when the findings URL is not an `https` URL, and `error` when the run failed on its own side before the receiver could answer, such as failing to build the payload.
+- [ ] `findingsPost` is left out when the review has no findings URL.
 - [ ] `counts` holds `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, and `secondLook`, matching the figures in the visible summary.
 - [ ] `secondLook` is the number of findings below the majority that a second look confirmed, and 0 when the review took none (see `review/agent-runs.md`).
 - [ ] The shared library builds a review's result (`kind`, `outcome`, `reviewedSha`, and `counts`) from the review pipeline's outputs, so a consumer that runs the review itself gets the same figures as data.

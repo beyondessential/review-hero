@@ -63,6 +63,12 @@ test("a confirmed finding moves from dropped to kept, with its group's other mem
   assert.deepEqual(updated.contested[0].groups.map((g) => [g.confirmations, g.confirmed]), [[1, true], [0, false]]);
 });
 
+// spec: RUN#voters
+test("a finding a second look confirmed counts its voters and its confirming checkers", () => {
+  assert.equal(applySecondLook(consensus(), [[1, 0]]).kept.find((f) => f.line === 5).supporters, 2);
+  assert.equal(applySecondLook(consensus(5), [[2, 0]]).kept.find((f) => f.line === 5).supporters, 3);
+});
+
 test("with five voters a lone finding needs both checkers", () => {
   const five = consensus(5);
   assert.equal(applySecondLook(five, [[1, 0]]).secondLook, 0);

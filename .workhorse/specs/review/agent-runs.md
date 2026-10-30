@@ -39,6 +39,15 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] The posting job reads suppressions from its own trusted checkout.
 - [ ] When the review job handed on no results, the posting job reports that every agent failed.
 
+## Findings
+
+- [ ] A finding names its file, its start line and, when it covers more than one line, its end line.
+- [ ] A finding with no end line, or with an end line before its start line, covers its start line alone.
+- [ ] An inline comment spans its finding's lines when the start and end line lie in the same hunk of the diff, and otherwise sits on the start line alone.
+- [ ] When GitHub refuses a review that has comments spanning several lines, the review is posted once more with every comment on its start line before falling back to an issue comment.
+- [ ] Every stage that splits a diff by file reads each file's path the same way, decoding a path git quotes.
+- [ ] A group of findings merged across agents takes its representative's location.
+
 ## Voters
 
 - [ ] Triage sets the number of voters each agent runs for the review, the same for every agent.
@@ -46,6 +55,12 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] A diff of 100 or more changed lines runs the `voters` input's count of voters per agent.
 - [ ] The voter count never exceeds 10.
 - [ ] A finding survives consensus when a strict majority of the review's voter count reports it, with voters that contributed nothing still counting toward that number.
+- [ ] A kept finding's voter count is the number of distinct voters whose findings consensus grouped with it, a finding without a voter and another kept finding counting for none, counted from the group's members rather than taken from the consensus model's reply, plus any checkers that confirmed it on a second look.
+- [ ] A kept finding whose group, as consensus gave it, has fewer distinct voters than the majority has no voter count, since the grouping contradicts the finding being kept.
+- [ ] With one voter per agent, each finding's voter count is 1.
+- [ ] In a review with more than one voter per agent, a finding kept because consensus could not be applied to its agent has no voter count.
+- [ ] A group of findings merged across agents takes its representative's voter count, or, when its representative is a finding consensus dropped, the highest voter count among its members.
+- [ ] Posted findings carry their voter count (see `reporting/posting-findings.md`).
 - [ ] The completion block's `counts.voters` is the voter count the review ran with (see `reporting/completion-comments.md`).
 - [ ] The review summary's filtering line reports consensus only where it filtered findings: it says when consensus was not applied for some agents, "no consensus" when it was applied for none, and nothing about consensus when no agent had findings.
 
@@ -89,7 +104,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] Consensus runs as its own step after the agents finish, before the GitHub App token is created.
 - [ ] While grouping an agent's findings, the consensus model names its contested areas: parts of the code where findings below the majority suggest a real problem worth a second look.
 - [ ] An agent has at most three contested areas.
-- [ ] A consensus reply that cannot be read whole still filters findings when its list of kept findings is complete, names no contested areas, and says so in the job log.
+- [ ] A consensus reply that cannot be read whole still filters findings when its list of kept findings is complete, names no contested areas, leaves its kept findings without a voter count, and says so in the job log.
 - [ ] Every finding in a contested area belongs to a group below the majority.
 - [ ] A review that runs one voter per agent has no consensus, so no second look.
 - [ ] Each contested area gets as many checkers as a finding from a single voter needs to reach the majority.
@@ -109,6 +124,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] Agent processes run with no GitHub token in their environment.
 - [ ] Agent processes load no settings, hooks, MCP servers or skills from the pull request's checkout.
 - [ ] The GitHub App token is created only in the posting job, just before the orchestrator posts.
+- [ ] Only the posting job can request a GitHub Actions identity token: the review job's permissions leave it out whatever the caller grants, so no agent process can request one.
 - [ ] The pull request checkout the agents read holds no stored credentials.
 
 ## Logs

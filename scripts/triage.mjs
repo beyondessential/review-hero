@@ -25,6 +25,7 @@ import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { chooseAgentModel, voterCountForDiff } from "./lib.mjs";
 import {
   DEFAULT_IGNORE_PATTERNS,
+  diffGitPath,
   filterDiff,
   loadCallerConfig,
   discoverBaseAgents,
@@ -74,9 +75,10 @@ if (removedFiles.length > 0) {
 }
 
 // Extract changed file paths from the filtered diff
-const changedFiles = [
-  ...filteredDiff.matchAll(/^diff --git a\/.+ b\/(.+)$/gm),
-].map((m) => m[1]);
+const changedFiles = filteredDiff
+  .split("\n")
+  .map(diffGitPath)
+  .filter((path) => path !== null);
 
 const diffLines = filteredDiff
   .split("\n")

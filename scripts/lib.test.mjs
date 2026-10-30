@@ -12,6 +12,7 @@ import {
   workflowLogsUrl,
   reviewHeroVersion,
   createCompletionReporter,
+  runIdentity,
   mapWithConcurrency,
   voterCountForDiff,
   votersFromEnv,
@@ -119,6 +120,40 @@ test("the completion reporter fills in the run URL and Review Hero version", () 
       );
     },
   );
+});
+
+// spec: CMPL#machine-readable-block
+test("every completion block carries the run id and run attempt as integers", () => {
+  withEnv({ GITHUB_RUN_ID: "42", GITHUB_RUN_ATTEMPT: "3", GITHUB_SERVER_URL: undefined }, () => {
+    const reporter = createCompletionReporter({ repo: "o/r", prNumber: "7" });
+    for (const fields of [
+      { kind: "review", outcome: "completed" },
+      { kind: "auto-fix", outcome: "nothing-to-fix" },
+      { kind: "save-suppressions", outcome: "none" },
+    ]) {
+      const block = parseCompletionBlock(reporter.block(fields));
+      assert.deepEqual([block.runId, block.runAttempt], [42, 3]);
+    }
+    assert.equal(reporter.run.runId, 42);
+  });
+});
+
+test("the run id and attempt are left out rather than guessed when the environment holds no plain number", () => {
+  for (const [id, attempt] of [[undefined, undefined], ["", "0"], ["4x2", "-1"], ["1.5", "abc"]]) {
+    withEnv({ GITHUB_RUN_ID: id, GITHUB_RUN_ATTEMPT: attempt }, () => {
+      assert.deepEqual(runIdentity(), { runId: undefined, runAttempt: undefined });
+      const block = parseCompletionBlock(createCompletionReporter({ repo: "o/r", prNumber: "7" }).block({ kind: "review" }));
+      assert.ok(!("runId" in block) && !("runAttempt" in block));
+    });
+  }
+});
+
+test("a review block carries findingsPost when given one and omits it otherwise", () => {
+  const reporter = createCompletionReporter({ repo: "o/r", prNumber: "7" });
+  const posted = parseCompletionBlock(reporter.block({ kind: "review", outcome: "completed", findingsPost: "accepted" }));
+  assert.equal(posted.findingsPost, "accepted");
+  const none = parseCompletionBlock(reporter.block({ kind: "review", outcome: "completed", findingsPost: undefined }));
+  assert.ok(!("findingsPost" in none));
 });
 
 test("the Review Hero SHA is left unknown when the directory is not its own checkout", () => {

@@ -4,7 +4,7 @@ This document is for maintainers of Review Hero. For setup and usage, see [READM
 
 ## Project structure
 
-Source is in `scripts/`. Entrypoints (end-user) are in `.github/workflows`: `review.yml`, `auto-fix.yml`. Base prompts are in `prompts`.
+Source is in `scripts/`, with the library the scripts share in `src/`. The JSON Schema for the findings a review posts is in `schemas/`, and the guide for services that receive them is in `docs/`. Entrypoints (end-user) are in `.github/workflows`: `review.yml`, `auto-fix.yml`. Base prompts are in `prompts`.
 
 We also dog-food Review Hero on its own repo. This is done through the `ai-review.yml` and `ai-auto-fix.yml` workflows.
 
