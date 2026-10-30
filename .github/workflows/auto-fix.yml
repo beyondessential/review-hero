@@ -141,7 +141,7 @@ jobs:
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Detect Node.js version
-        run: "[ -f .node-version ] || echo latest > .node-version"
+        run: "[ -f .node-version ] || echo 'lts/*' > .node-version"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -152,7 +152,9 @@ jobs:
         run: npm ci --prefix .review-hero
 
       - name: Install Claude CLI
-        run: npm install -g @anthropic-ai/claude-code
+        # The postinstall fetches the native binary, and npm blocks install
+        # scripts unless the package is named.
+        run: npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code
 
       # ── Install global Claude rules ──────────────────────────────────
       # Override aggressive defaults in Claude Code's built-in system
