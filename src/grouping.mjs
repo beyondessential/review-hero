@@ -12,6 +12,17 @@
 
 import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 
+/**
+ * Every finding kept as it stands, without voter tags. With one voter per agent
+ * each finding is that voter's alone; with more, no vote happened, so none has
+ * a voter count.
+ */
+// spec: RUN#voters
+export function keepWithoutConsensus(findings, voterCount) {
+  const supporters = voterCount <= 1 ? 1 : null;
+  return findings.map(({ voter, ...rest }) => ({ ...rest, supporters }));
+}
+
 /** The most contested areas consensus names for one agent's findings. */
 export const MAX_CONTESTED_AREAS = 3;
 
@@ -36,9 +47,10 @@ export function indexReplyMaxTokens(findingCount, base) {
  *
  * Each kept finding carries `supporters`, the number of distinct voters among
  * its group's members, counted here from the voter tags rather than taken from
- * the model's say-so. A kept finding whose group the reply does not give has
- * `supporters` null, as has every finding when consensus is not applied to more
- * than one voter.
+ * the model's say-so. A kept finding whose group the reply does not give, or
+ * whose group falls short of the majority it was kept for, has `supporters`
+ * null, as has every finding when consensus is not applied to more than one
+ * voter.
  *
  * Each contested group carries its member findings (voter tags intact), where
  * they sit in `droppedFindings`, and the number of distinct voters behind it.
@@ -51,7 +63,7 @@ export function indexReplyMaxTokens(findingCount, base) {
 // spec: RUN#second-look
 export async function applyConsensus(findings, voterCount, callModel) {
   const keepAll = () => ({
-    kept: findings.map(({ voter, ...rest }) => ({ ...rest, supporters: voterCount <= 1 ? 1 : null })),
+    kept: keepWithoutConsensus(findings, voterCount),
     dropped: 0,
     droppedFindings: [],
     contested: [],
@@ -137,7 +149,9 @@ Example: {"keep": [0, 3], "members": {"0": [0, 1, 2], "3": [3, 4]}, "contested":
       if (!members) return null;
       const voters = new Set([findings[i].voter]);
       for (const m of members) if (validIndex(m)) voters.add(findings[m].voter);
-      return voters.size;
+      // Kept with fewer than the majority behind it, the reply contradicts
+      // itself, so its grouping says nothing reliable about the count.
+      return voters.size >= threshold ? voters.size : null;
     };
     const kept = findings
       .map(({ voter, ...rest }, i) => ({ ...rest, supporters: supportersOf(i) }))

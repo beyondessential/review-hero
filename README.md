@@ -388,7 +388,7 @@ Posted at the end of a review round, or when a review could not complete.
 | `outcome` | `completed` when at least one agent returned results, `failed` when every agent failed |
 | `reviewedSha` | The commit that was reviewed |
 | `model` | The model the review agents ran on |
-| `findingsPost` | How [posting the round's findings](#posting-findings-as-data) went: `accepted` (the receiver answered with a 2xx), `refused` (any other answer), `unreachable` (no answer), `no-token` (the run could not get an identity token) or `invalid-url` (`findings-url` is not an `https` URL). Left out when `findings-url` is empty |
+| `findingsPost` | How [posting the round's findings](#posting-findings-as-data) went: `accepted` (the receiver answered with a 2xx), `refused` (any other answer), `unreachable` (no answer), `no-token` (the run could not get an identity token), `invalid-url` (`findings-url` is not an `https` URL) or `error` (the run failed on its own side before the receiver could answer, such as building the payload). Left out when `findings-url` is empty |
 | `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, `secondLook` (findings below the majority a second look confirmed) |
 
 ### `auto-fix`

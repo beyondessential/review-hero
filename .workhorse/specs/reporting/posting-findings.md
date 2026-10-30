@@ -38,6 +38,9 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A post counts as accepted when the receiver answers with a 2xx status.
 - [ ] A post that is not accepted never fails the review: it is logged, the completion block says how it went (see `reporting/completion-comments.md`), and the review's GitHub comments are posted as usual.
 - [ ] The job log says how the post went, with the receiver's status and the start of its reply when it was refused.
+- [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path.
+- [ ] A refused reply is read only as far as the start the job log shows.
+- [ ] The review looks up its inline comments' GitHub ids only when it has a findings URL.
 
 ## Payload
 

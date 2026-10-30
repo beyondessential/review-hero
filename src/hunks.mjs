@@ -6,6 +6,7 @@
  * multi-line comment whose lines lie in different hunks, and one refused
  * comment fails the whole review post.
  */
+import { effectiveEndLine } from "./findings.mjs";
 
 const HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
@@ -65,8 +66,9 @@ export function parseHunks(diff) {
  */
 // spec: RUN#findings
 export function commentLines(finding, hunks) {
-  const { line, endLine } = finding;
-  if (Number.isInteger(endLine) && endLine > line) {
+  const { line } = finding;
+  const endLine = effectiveEndLine(finding);
+  if (endLine !== undefined) {
     const same = (hunks?.get(finding.file) ?? []).some((h) => line >= h.start && endLine <= h.end);
     if (same) return { line: endLine, startLine: line };
   }

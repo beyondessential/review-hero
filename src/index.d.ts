@@ -73,6 +73,9 @@ export type CallModel = (request: ModelRequest) => Promise<string>;
 
 export const VALID_SEVERITIES: ReadonlySet<string>;
 
+/** A finding's last line when it covers more than its start line, else undefined. */
+export function effectiveEndLine(finding: Pick<Finding, "line" | "endLine">): number | undefined;
+
 export function validateFindings(
   findings: unknown[],
   agentKey: string,
@@ -123,6 +126,12 @@ export interface ConsensusResult {
 }
 
 export const MAX_CONTESTED_AREAS: number;
+
+/**
+ * Every finding kept as it stands, without voter tags: each counted as one
+ * voter's with one voter per agent, and with no voter count otherwise.
+ */
+export function keepWithoutConsensus(findings: Finding[], voterCount: number): Finding[];
 
 /** Read the consensus model's reply, or null when it has no usable answer. */
 export function parseConsensusReply(
@@ -372,7 +381,8 @@ export type FindingsPostStatus =
   | "refused"
   | "unreachable"
   | "no-token"
-  | "invalid-url";
+  | "invalid-url"
+  | "error";
 
 /**
  * Build a review round's result from the pipeline's outputs. The hosted review

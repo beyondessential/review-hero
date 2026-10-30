@@ -168,11 +168,21 @@ test("an object reply without a keep array is unreadable, not mined for indices"
 // spec: RUN#voters
 test("a kept finding's voter count is the distinct voters among its group's members", async () => {
   // Findings 0 and 1 are one issue from two voters, and finding 0 is listed
-  // twice over by the model to show repeats do not count.
-  const reply = JSON.stringify({ keep: [0, 2], members: { 0: [0, 1, 0], 2: [2] }, contested: [] });
+  // twice over by the model to show repeats do not count. Findings 2 and 3
+  // are another, from two others.
+  const reply = JSON.stringify({ keep: [0, 2], members: { 0: [0, 1, 0], 2: [2, 3] }, contested: [] });
   const { kept } = await applyConsensus(findings, 3, async () => reply);
-  assert.deepEqual(kept.map((f) => [f.line, f.supporters]), [[10, 2], [40, 1]]);
+  assert.deepEqual(kept.map((f) => [f.line, f.supporters]), [[10, 2], [40, 2]]);
   assert.ok(kept.every((f) => f.voter === undefined));
+});
+
+// spec: RUN#voters
+test("a kept finding whose group falls short of the majority has no voter count", async () => {
+  // Three voters need two, so a group of one voter contradicts its own keep.
+  for (const members of [{ 0: [0] }, { 0: [] }, { 0: [0, 2] }]) {
+    const { kept } = await applyConsensus(findings, 3, async () => JSON.stringify({ keep: [0], members }));
+    assert.equal(kept[0].supporters, null, JSON.stringify(members));
+  }
 });
 
 test("members the model invents or leaves out do not count towards a voter count", async () => {

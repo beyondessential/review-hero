@@ -7,6 +7,8 @@
  * in `schemas/`, one file per version.
  */
 
+import { effectiveEndLine } from "./findings.mjs";
+
 /**
  * Version of the payload's shape. Adding a field keeps it; removing a field or
  * changing what one means increments it.
@@ -36,7 +38,7 @@ export function buildRoundFindings(keptGroups, agentNames = {}) {
     agent: { key: f.agent, name: agentNames[f.agent] ?? f.agent },
     path: f.file,
     startLine: f.line,
-    endLine: Number.isInteger(f.endLine) && f.endLine > f.line ? f.endLine : null,
+    endLine: effectiveEndLine(f) ?? null,
     supporters: Number.isInteger(f.supporters) ? f.supporters : null,
     comment: f.comment,
   }));

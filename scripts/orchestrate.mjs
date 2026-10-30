@@ -502,13 +502,16 @@ async function main() {
     try {
       const review = await postReview(prNumber, reviewedSha, inlineComments);
       console.log(`Posted ${inlineComments.length} inline review comments`);
-      try {
-        const ids = matchCommentIds(inlineComments, await listReviewComments(prNumber, review.id));
-        inlineComments.forEach((c, i) => {
-          commentIds[c.groupIndex] = ids[i];
-        });
-      } catch (err) {
-        console.warn(`Failed to list the review's comments, so findings carry no comment id: ${err.message}`);
+      // Only posted findings carry comment ids, so only then are they worth a call.
+      if (findingsUrl.trim()) {
+        try {
+          const ids = matchCommentIds(inlineComments, await listReviewComments(prNumber, review.id));
+          inlineComments.forEach((c, i) => {
+            commentIds[c.groupIndex] = ids[i];
+          });
+        } catch (err) {
+          console.warn(`Failed to list the review's comments, so findings carry no comment id: ${err.message}`);
+        }
       }
     } catch (err) {
       console.error(`Failed to post inline review: ${err.message}`);

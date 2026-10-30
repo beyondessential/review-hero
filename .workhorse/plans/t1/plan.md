@@ -32,7 +32,8 @@ A review can post its round's findings as JSON to a caller-named URL, authentica
 - `src/hunks.mjs` (`parseHunks`, `commentLines`) and `src/round.mjs` (`buildRoundFindings`, `buildFindingsPayload`, `FINDINGS_SCHEMA`) are exported from `src/index.mjs`. The orchestrator gets the diff through `DIFF_PATH`.
 - `scripts/findings-post.mjs` holds the token request, redirects, retry and time bound. The orchestrator's `matchCommentIds` pairs posted comments with the review's listed ones by place, then text.
 - The review job's `permissions` is `contents: read` alone: the only workflow-token use there is checkout and the compare call.
-- The dogfood URL, `https://workhorse.bes.au`, is unconfirmed; check it against the Workhorse deployment before merge.
+- The dogfood URL is `https://workhorse.bes.au/api/review-hero/rounds`: the host is the live Workhorse deployment, and the path is S43's endpoint. Until S43 ships, dogfood posts are refused with a 404 and logged.
+- `findingsPost` gained `error` for a failure on the run's own side (such as the payload failing to build), so `unreachable` only means the receiver gave no answer.
 
 ## Build
 

@@ -14,5 +14,5 @@ jobs:
     uses: ./.github/workflows/review.yml
     with:
       ref: ${{ github.event.pull_request.head.ref }}
-      findings-url: https://workhorse.bes.au
+      findings-url: https://workhorse.bes.au/api/review-hero/rounds
     secrets: inherit

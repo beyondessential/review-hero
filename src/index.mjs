@@ -14,6 +14,7 @@
 
 export {
   VALID_SEVERITIES,
+  effectiveEndLine,
   validateFindings,
   extractJsonArray,
   parseAgentResult,
@@ -21,6 +22,7 @@ export {
 
 export {
   applyConsensus,
+  keepWithoutConsensus,
   parseConsensusReply,
   groupAllFindings,
   MAX_CONTESTED_AREAS,

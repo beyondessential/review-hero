@@ -22,6 +22,10 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] A 307 or 308 within the origin is followed, up to a few times, carrying the token and body (verifies spec: FPOST)
 - [x] A redirect to another origin or scheme, or any other redirect status, is refused and the token goes nowhere else (verifies spec: FPOST)
 - [x] The log gives the receiver's status and the start of its reply when refused, on one line (verifies spec: FPOST)
+- [x] The log names the receiver's origin and never the URL's path (verifies spec: FPOST)
+- [x] A refused reply of any size is read only as far as the excerpt, and its stream cancelled (verifies spec: FPOST)
+- [x] A payload that fails to build sends nothing and reports `error`, not `unreachable` (verifies spec: CMPL)
+- [x] A review with no findings URL makes no call to list its review's comments (end to end against a faked GitHub) (verifies spec: FPOST)
 - [x] A post that fails never fails the review, and the GitHub comments go out (end to end against a faked GitHub and receiver) (verifies spec: FPOST)
 - [x] The post happens after the inline review and before the summary, so the completion block reports it (end to end against a faked GitHub and receiver) (verifies spec: FPOST)
 - [x] A review where every agent failed posts a `failed` round with no findings before its completion comment (end to end against a faked GitHub and receiver) (verifies spec: FPOST)
@@ -42,6 +46,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 
 - [x] An agent's end line is kept only when an integer past the start line (verifies spec: RUN)
 - [x] An inline comment spans its range when both ends are in one hunk, and sits on the start line otherwise (verifies spec: RUN)
+- [x] The inline comment and the posted data use the same test for a finding's range (verifies spec: RUN)
 - [x] The hunks of a diff are read per file on the new side, ignoring deleted files and header-like content lines (verifies spec: RUN)
 
 ## Voter counts
@@ -50,6 +55,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] A kept finding whose group the reply does not give, a bare-array reply, and a recovered keep list have no voter count (verifies spec: RUN)
 - [x] Findings kept because consensus was not applied have no voter count with several voters, and 1 with one (verifies spec: RUN)
 - [x] A finding a second look confirms counts its voters plus its confirming checkers (verifies spec: RUN)
+- [x] A kept finding whose group has fewer voters than the majority has no voter count (verifies spec: RUN)
 
 ## Completion block
 

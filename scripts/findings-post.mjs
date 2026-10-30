@@ -26,6 +26,27 @@ export const IDENTITY_TOKEN_TIMEOUT_MS = 15_000;
 /** The reply's first characters kept for the job log. */
 const REPLY_EXCERPT = 200;
 
+/**
+ * The start of a reply, read only as far as the excerpt needs: the receiver is
+ * whatever the caller named, and could send a body of any size.
+ */
+async function replyExcerpt(response) {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length < REPLY_EXCERPT) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return oneLine(text.slice(0, REPLY_EXCERPT));
+}
+
 /** The findings URL as a URL, or null unless it is an `https` URL. */
 // spec: FPOST#turning-it-on
 export function parseFindingsUrl(raw) {
@@ -123,11 +144,10 @@ async function attempt({ url, token, body, fetchImpl, timeoutMs }) {
       }
       let reply = "";
       try {
-        reply = oneLine((await response.text()).slice(0, REPLY_EXCERPT));
+        reply = await replyExcerpt(response);
       } catch {
         // The status stands without the reply.
       }
-      await response.body?.cancel().catch(() => {});
       return {
         status: "refused",
         retry: status >= 500,
@@ -172,7 +192,9 @@ export async function postFindings({
 /**
  * Deliver a round's findings to `findingsUrl` and say how it went: one of the
  * completion block's `findingsPost` values, or undefined when there is no
- * findings URL and so nothing to post. Never throws.
+ * findings URL and so nothing to post. Never throws: a failure of the run's
+ * own, such as the payload failing to build, is `error`, so `unreachable`
+ * only ever means the receiver gave no answer.
  *
  * The identity token is requested only once the URL has passed, and `payload`
  * is a function so a review that posts nothing builds nothing.
@@ -203,9 +225,16 @@ export async function deliverFindings({
       );
       return "no-token";
     }
+    let built;
+    try {
+      built = payload();
+    } catch (err) {
+      log(`::error::Could not build the findings payload, so nothing was sent: ${err.message}`);
+      return "error";
+    }
     const { status, detail } = await postFindings({
       url,
-      payload: payload(),
+      payload: built,
       token,
       fetchImpl,
       now,
@@ -213,7 +242,8 @@ export async function deliverFindings({
       attemptMs,
       log,
     });
-    const where = `${url.origin}${url.pathname}`;
+    // The origin alone: a caller may put a secret in the path.
+    const where = url.origin;
     log(
       status === "accepted"
         ? `Posted findings to ${where}: ${detail}`
@@ -222,7 +252,7 @@ export async function deliverFindings({
     return status;
   } catch (err) {
     // The review's comments do not wait on this.
-    log(`::warning::Posting findings failed: ${err.message}`);
-    return "unreachable";
+    log(`::error::Posting findings failed before an answer could come: ${err.message}`);
+    return "error";
   }
 }

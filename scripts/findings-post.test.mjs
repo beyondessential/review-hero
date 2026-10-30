@@ -223,16 +223,55 @@ test("the log says how the post went, with the status and start of the reply whe
 
   const ok = [];
   await deliver(fakeFetch([reply(200)]), { log: (l) => ok.push(l) });
-  assert.ok(ok.some((l) => /Posted findings to https:\/\/workhorse\.example\/api\/rounds: status 200/.test(l)));
+  assert.ok(ok.some((l) => /Posted findings to https:\/\/workhorse\.example: status 200/.test(l)));
 });
 
 // spec: FPOST#when-a-review-posts
-test("a post that blows up unexpectedly never throws", async () => {
+test("the log names the receiver's origin, never the URL's path", async () => {
+  const lines = [];
+  await deliver(fakeFetch([reply(200)]), { findingsUrl: "https://workhorse.example/hook/s3cret", log: (l) => lines.push(l) });
+  await deliver(fakeFetch([reply(403)]), { findingsUrl: "https://workhorse.example/hook/s3cret", log: (l) => lines.push(l) });
+  assert.ok(lines.length > 0);
+  assert.ok(lines.every((l) => !l.includes("s3cret")));
+});
+
+test("a refused reply is read only as far as the log needs", async () => {
+  let pulled = 0;
+  let cancelled = false;
+  const endless = new ReadableStream({
+    pull(controller) {
+      pulled++;
+      controller.enqueue(new TextEncoder().encode("z".repeat(64)));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const fake = fakeFetch([new Response(endless, { status: 400 })]);
+  assert.equal(await deliver(fake), "refused");
+  assert.ok(pulled < 10, `read ${pulled} chunks`);
+  assert.ok(cancelled);
+});
+
+// spec: FPOST#when-a-review-posts
+test("a payload that fails to build sends nothing and reports error, not unreachable", async () => {
   const fake = fakeFetch([]);
+  const lines = [];
   const result = await deliver(fake, {
     payload: () => {
       throw new Error("bad payload");
     },
+    log: (l) => lines.push(l),
   });
-  assert.equal(result, "unreachable");
+  assert.equal(result, "error");
+  assert.equal(fake.posts().length, 0);
+  assert.match(lines.join("\n"), /::error::.*nothing was sent: bad payload/);
+});
+
+test("a failure of the run's own after the token never throws and reports error", async () => {
+  const fake = fakeFetch([]);
+  const circular = {};
+  circular.self = circular;
+  assert.equal(await deliver(fake, { payload: () => circular }), "error");
+  assert.equal(fake.posts().length, 0);
 });

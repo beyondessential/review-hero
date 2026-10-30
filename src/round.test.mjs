@@ -7,6 +7,7 @@ import {
   buildReviewResult,
   buildRoundFindings,
   commentLines,
+  effectiveEndLine,
   FINDINGS_SCHEMA,
   FINDINGS_SCHEMA_URL,
   parseHunks,
@@ -159,6 +160,19 @@ test("a group takes its representative's location, voter count and range", () =>
   const rep = f({ line: 20, endLine: 25, supporters: 3, agent: "design" });
   const [finding] = build([{ representative: rep, members: [f({ line: 5, supporters: 9 }), rep] }]).findings;
   assert.deepEqual([finding.startLine, finding.endLine, finding.supporters, finding.agent.key], [20, 25, 3, "design"]);
+});
+
+// spec: RUN#findings
+test("one test decides a finding's range for its inline comment and its posted data alike", () => {
+  const hunks = parseHunks("--- a/a.ts\n+++ b/a.ts\n@@ -1,0 +1,30 @@\n" + "+x\n".repeat(30));
+  for (const endLine of [14, 10, 9, "14", 14.5, null, undefined]) {
+    const finding = { file: "a.ts", line: 10, endLine, severity: "nitpick", comment: "c", agent: "bugs" };
+    const end = effectiveEndLine(finding);
+    assert.equal(end, endLine === 14 ? 14 : undefined);
+    const [posted] = buildRoundFindings([group(finding)]);
+    assert.equal(posted.endLine, end ?? null);
+    assert.equal(commentLines(finding, hunks).startLine === undefined, end === undefined);
+  }
 });
 
 // spec: RUN#findings
