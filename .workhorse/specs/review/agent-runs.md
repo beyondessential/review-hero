@@ -57,7 +57,7 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] A kept finding whose group, as consensus gave it, has fewer distinct voters than the majority has no voter count, since the grouping contradicts the finding being kept.
 - [ ] With one voter per agent, each finding's voter count is 1.
 - [ ] In a review with more than one voter per agent, a finding kept because consensus could not be applied to its agent has no voter count.
-- [ ] A group of findings merged across agents takes its representative's voter count.
+- [ ] A group of findings merged across agents takes its representative's voter count, or, when its representative is a finding consensus dropped, the highest voter count among its members.
 - [ ] Posted findings carry their voter count (see `reporting/posting-findings.md`).
 - [ ] The completion block's `counts.voters` is the voter count the review ran with (see `reporting/completion-comments.md`).
 - [ ] The review summary's filtering line reports consensus only where it filtered findings: it says when consensus was not applied for some agents, "no consensus" when it was applied for none, and nothing about consensus when no agent had findings.

@@ -24,7 +24,11 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] A retry starts only with enough of the total time left (verifies spec: FPOST)
 - [x] The log announces a retry only when one runs, and says when one was skipped for time (verifies spec: FPOST)
 - [x] A retry that cannot fit costs no pause (verifies spec: FPOST)
+- [x] The token request and the post share one time budget (verifies spec: FPOST)
+- [x] A payload builder that returns nothing reports `error` and mints no token (verifies spec: FPOST)
 - [x] Log lines strip control characters and any URL's path however it is written (verifies spec: FPOST)
+- [x] A URL's userinfo never reaches the log (verifies spec: FPOST)
+- [x] A refused reply that echoes the request's path has it removed (verifies spec: FPOST)
 - [x] A 307 or 308 within the origin is followed, up to a few times, carrying the token and body (verifies spec: FPOST)
 - [x] A redirect to another origin or scheme, or any other redirect status, is refused and the token goes nowhere else (verifies spec: FPOST)
 - [x] The log gives the receiver's status and the start of its reply when refused, on one line (verifies spec: FPOST)
@@ -52,6 +56,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] Findings sharing a line whose text GitHub rewrote get no id rather than each other's (verifies spec: FPOST)
 - [x] A multi-line and a single-line comment ending on one line are kept apart, outdated comments included (verifies spec: FPOST)
 - [x] A group takes its representative's location, range and voter count (verifies spec: RUN)
+- [x] A kept group whose representative consensus dropped takes its members' highest voter count, and an unknown kept count stays unknown (verifies spec: FPOST)
 
 ## Finding ranges
 
@@ -59,7 +64,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] An inline comment spans its range when both ends are in one hunk, and sits on the start line otherwise (verifies spec: RUN)
 - [x] The inline comment and the posted data use the same test for a finding's range (verifies spec: RUN)
 - [x] The hunks of a diff are read per file on the new side, ignoring deleted files and header-like content lines (verifies spec: RUN)
-- [x] Paths git quotes and escapes are decoded to the real path (verifies spec: RUN)
+- [x] Paths git quotes and escapes are decoded to the real path, characters outside the BMP included (verifies spec: RUN)
 - [x] A finding whose line is not a whole number is dropped (verifies spec: RUN)
 
 ## Voter counts
@@ -78,6 +83,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 
 ## Needs a real run on a pull request
 
+- [ ] The fallback comment shows a multi-line finding's whole range (verifies spec: RUN)
 - [ ] A review on a pull request in the same repository with `findings-url` and `id-token: write` reports `findingsPost: accepted` against a live receiver (verifies spec: FPOST)
 - [ ] A review on a pull request from a fork reports `no-token` (verifies spec: FPOST)
 - [ ] A caller without `id-token: write` runs the review to completion and reports `no-token`, rather than failing at startup (verifies spec: FPOST)

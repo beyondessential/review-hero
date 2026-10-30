@@ -32,7 +32,8 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A review posts its findings after its inline review and before its summary comment, so each finding posted inline carries its GitHub comment and the summary's completion block can say how the post went.
 - [ ] A review with no kept findings still posts its round, with an empty list of findings.
 - [ ] A review where every agent failed posts a round with a `failed` outcome and no findings, before its completion comment.
-- [ ] A post that gets no answer, or a server error, is tried once more, and the whole post including its retry is bounded in time, a retry that cannot fit being skipped without waiting for it.
+- [ ] A post that gets no answer, or a server error, is tried once more.
+- [ ] The token request and the post, with their retries, share one bound in time, and a retry that cannot fit in what is left is skipped without waiting for it.
 - [ ] When a post is retried, the retry's result is how the post went.
 - [ ] The receiver guide says a receiver can get the same round more than once: a retry can repeat a post the receiver already took, and re-running the posting job posts the same findings again under a new run attempt, with new identifiers.
 - [ ] A 307 or 308 redirect to the findings URL's own origin is followed, up to a small number of redirects.
@@ -40,7 +41,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A post counts as accepted when the receiver answers with a 2xx status.
 - [ ] A post that is not accepted never fails the review: it is logged, the completion block says how it went (see `reporting/completion-comments.md`), and the review's GitHub comments are posted as usual.
 - [ ] The job log says how the post went, with the receiver's status and the start of its reply when it was refused.
-- [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path, and each of its lines about the post stays on one line, with no control characters and no URL's path.
+- [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path, and each of its lines about the post stays on one line, with no control characters and no URL's path or userinfo, including in the start of a reply that echoes the request.
 - [ ] A refused reply is read only as far as the start the job log shows.
 - [ ] The review looks up its inline comments' GitHub ids only when it has an `https` findings URL.
 
@@ -62,5 +63,6 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] Each finding has an identifier, unique within its run attempt, which says nothing about whether a finding in another round is the same one.
 - [ ] Each finding carries its severity, the key and display name of the agent that raised it, its file path, and its start and end line, with the end line null when the finding covers its start line alone.
 - [ ] Each finding carries its voter count, how many voters and second-look checkers support it, or null when the review cannot tell (see `review/agent-runs.md`).
+- [ ] A finding whose group's representative is one consensus dropped carries the highest voter count among the group's members, since one of them is what kept the group.
 - [ ] A finding posted inline carries the id of its GitHub review comment, and a finding not posted inline carries null.
 - [ ] Each finding carries its comment as the agent wrote it, unshortened and without the formatting the inline comment adds around it.

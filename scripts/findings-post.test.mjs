@@ -409,3 +409,52 @@ test("log lines strip control characters and any URL's path, however the URL is 
   assert.ok(!all.includes("s3cret"), all);
   assert.match(all, /https:\/\/other\.example/);
 });
+
+// spec: FPOST#when-a-review-posts
+test("a URL's userinfo never reaches the log", async () => {
+  const lines = [];
+  const leaky = new Error("connect to https://user:pa55@workhorse.example/x failed");
+  await deliver(fakeFetch([leaky, leaky]), { log: (l) => lines.push(l) });
+  const all = lines.join("\n");
+  assert.ok(!all.includes("pa55") && !all.includes("user:"), all);
+  assert.match(all, /https:\/\/workhorse\.example failed/);
+});
+
+// spec: FPOST#when-a-review-posts
+test("a refused reply that echoes the request's path has it removed", async () => {
+  const lines = [];
+  const body = "Cannot POST /hook/s3cret";
+  await deliver(fakeFetch([reply(404, { body })]), { findingsUrl: "https://workhorse.example/hook/s3cret", log: (l) => lines.push(l) });
+  const all = lines.join("\n");
+  assert.ok(!all.includes("s3cret"), all);
+  assert.match(all, /Cannot POST \/…/);
+});
+
+test("a payload builder that returns nothing reports error and mints no token", async () => {
+  const fake = fakeFetch([]);
+  assert.equal(await deliver(fake, { payload: () => undefined }), "error");
+  assert.equal(fake.calls.length, 0);
+});
+
+// spec: FPOST#when-a-review-posts
+test("the token request and the post share one time budget", async () => {
+  let clock = 0;
+  let tokenCalls = 0;
+  const posts = [];
+  const fetchImpl = async (url) => {
+    const target = new URL(url);
+    if (target.origin === "https://actions.example") {
+      tokenCalls++;
+      // The token attempt fails slowly, using nearly all of the budget.
+      clock += FINDINGS_POST_TOTAL_MS - 4_000;
+      return reply(503);
+    }
+    posts.push(target);
+    return reply(200);
+  };
+  const result = await deliverFindings({ findingsUrl: URL_OK, payload, env: ENV, fetchImpl, now: () => clock, sleep: noSleep, log: quiet });
+  // No token retry fits in what the first attempt left.
+  assert.equal(tokenCalls, 1);
+  assert.equal(result, "no-token");
+  assert.equal(posts.length, 0);
+});

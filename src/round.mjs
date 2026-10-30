@@ -28,20 +28,37 @@ export const FINDINGS_SCHEMA_URL = `https://raw.githubusercontent.com/beyondesse
  * end line has a null `endLine`, and one whose voter count the review cannot
  * tell has a null `supporters`.
  *
+ * Grouping can pick a finding consensus dropped as a kept group's
+ * representative, and a dropped finding has no voter count. Its group then
+ * takes the highest voter count among its members, which is what kept it. A
+ * kept representative whose count is unknown stays unknown.
+ *
  * @param {Array<{representative: object}>} keptGroups From `groupAllFindings`.
  * @param {Record<string, string>} [agentNames] Agent key to display name.
  */
 // spec: FPOST#findings
 export function buildRoundFindings(keptGroups, agentNames = {}) {
-  return keptGroups.map(({ representative: f }) => ({
-    severity: f.severity,
-    agent: { key: f.agent, name: agentNames[f.agent] ?? f.agent },
-    path: f.file,
-    startLine: f.line,
-    endLine: effectiveEndLine(f) ?? null,
-    supporters: Number.isInteger(f.supporters) ? f.supporters : null,
-    comment: f.comment,
-  }));
+  // A kept finding always carries `supporters`, a number or null for "cannot
+  // tell"; a dropped one carries none, so only then do the members stand in.
+  const countOf = ({ representative, members = [] }) => {
+    if (representative.supporters !== undefined) {
+      return Number.isInteger(representative.supporters) ? representative.supporters : null;
+    }
+    const counts = members.map((m) => m.supporters).filter(Number.isInteger);
+    return counts.length > 0 ? Math.max(...counts) : null;
+  };
+  return keptGroups.map((group) => {
+    const f = group.representative;
+    return {
+      severity: f.severity,
+      agent: { key: f.agent, name: agentNames[f.agent] ?? f.agent },
+      path: f.file,
+      startLine: f.line,
+      endLine: effectiveEndLine(f) ?? null,
+      supporters: countOf(group),
+      comment: f.comment,
+    };
+  });
 }
 
 /**

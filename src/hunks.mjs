@@ -20,9 +20,14 @@ const C_ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\":
 export function unquoteGitPath(quoted) {
   const bytes = [];
   const inner = quoted.slice(1, -1);
+  const encoder = new TextEncoder();
   for (let i = 0; i < inner.length; i++) {
     if (inner[i] !== "\\") {
-      bytes.push(...new TextEncoder().encode(inner[i]));
+      // A whole code point, so a character outside the BMP is not split
+      // into halves that encode as replacement characters.
+      const char = String.fromCodePoint(inner.codePointAt(i));
+      bytes.push(...encoder.encode(char));
+      i += char.length - 1;
       continue;
     }
     const octal = inner.slice(i + 1, i + 4);

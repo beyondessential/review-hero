@@ -10,7 +10,7 @@
 
 import { oneLine } from "./lib.mjs";
 
-/** The whole post, retry included, is over by this time. */
+/** Delivery, the token request and the post with their retries, is over by this time. */
 export const FINDINGS_POST_TOTAL_MS = 60_000;
 /** One attempt, cut to what is left of the total. */
 export const FINDINGS_POST_ATTEMPT_MS = 25_000;
@@ -35,7 +35,8 @@ const REPLY_EXCERPT = 200;
 function logText(text, url) {
   let line = oneLine(text)
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s/?#"'<>]+)[^\s"'<>]*/gi, "$1");
+    // Userinfo can hold a credential as well as a path a secret.
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)(?:[^\s/?#@"'<>]*@)?([^\s/?#"'<>]+)[^\s"'<>]*/gi, "$1$2");
   if (url && url.pathname.length > 1) line = line.split(url.pathname).join("/…");
   return line;
 }
@@ -47,9 +48,10 @@ function logMessage(err, url) {
 
 /**
  * The start of a reply, read only as far as the excerpt needs: the receiver is
- * whatever the caller named, and could send a body of any size.
+ * whatever the caller named, and could send a body of any size. A reply can
+ * echo the request's path, so `url`'s path is removed like any other log line.
  */
-async function replyExcerpt(response) {
+async function replyExcerpt(response, url) {
   if (!response.body) return "";
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -64,7 +66,7 @@ async function replyExcerpt(response) {
   } finally {
     await reader.cancel().catch(() => {});
   }
-  return logText(text.slice(0, REPLY_EXCERPT));
+  return logText(text.slice(0, REPLY_EXCERPT), url);
 }
 
 /**
@@ -91,6 +93,7 @@ export function findingsTarget(raw) {
  * `id-token: write`, or a pull request from a fork) or the request fails. A
  * request that gets no answer, a server error or a rate limit is tried once
  * more, so a passing hiccup at GitHub does not read as a missing permission.
+ * Both attempts keep within `deadline`.
  */
 // spec: FPOST#authentication
 export async function requestIdentityToken({
@@ -98,6 +101,8 @@ export async function requestIdentityToken({
   env = process.env,
   fetchImpl = fetch,
   timeoutMs = IDENTITY_TOKEN_TIMEOUT_MS,
+  now = Date.now,
+  deadline = Infinity,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   log = console.log,
 }) {
@@ -111,7 +116,7 @@ export async function requestIdentityToken({
       url.searchParams.set("audience", audience);
       const response = await fetchImpl(url, {
         headers: { Authorization: `Bearer ${requestToken}`, Accept: "application/json" },
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(Math.max(1, Math.min(timeoutMs, deadline - now()))),
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
@@ -129,7 +134,7 @@ export async function requestIdentityToken({
   };
 
   let result = await once();
-  if (result.retry) {
+  if (result.retry && deadline - now() - FINDINGS_POST_RETRY_DELAY_MS >= FINDINGS_POST_MIN_RETRY_MS) {
     log(`::warning::Identity token request failed (${result.why}); trying once more`);
     await sleep(FINDINGS_POST_RETRY_DELAY_MS);
     result = await once();
@@ -188,7 +193,7 @@ async function attempt({ url, token, body, fetchImpl, timeoutMs }) {
       }
       let reply = "";
       try {
-        reply = await replyExcerpt(response);
+        reply = await replyExcerpt(response, url);
       } catch {
         // The status stands without the reply.
       }
@@ -209,8 +214,8 @@ async function attempt({ url, token, body, fetchImpl, timeoutMs }) {
 
 /**
  * Post `body`, the payload as JSON, to `url` with `token` as the bearer, trying
- * once more after no answer or a server error, all within
- * `FINDINGS_POST_TOTAL_MS`. The result is the last attempt's.
+ * once more after no answer or a server error, all within `deadline`, by
+ * default `FINDINGS_POST_TOTAL_MS` from now. The result is the last attempt's.
  */
 // spec: FPOST#when-a-review-posts
 export async function postFindings({
@@ -221,10 +226,12 @@ export async function postFindings({
   now = Date.now,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   attemptMs = FINDINGS_POST_ATTEMPT_MS,
+  deadline = now() + FINDINGS_POST_TOTAL_MS,
   log = console.log,
 }) {
-  const deadline = now() + FINDINGS_POST_TOTAL_MS;
-  let result = await attempt({ url, token, body, fetchImpl, timeoutMs: attemptMs });
+  // However long the token took, the post gets at least the time a retry would.
+  const firstMs = Math.min(attemptMs, Math.max(FINDINGS_POST_MIN_RETRY_MS, deadline - now()));
+  let result = await attempt({ url, token, body, fetchImpl, timeoutMs: firstMs });
   if (result.retry) {
     // Decided before the pause, so a retry that cannot fit costs no wait.
     const left = deadline - now() - FINDINGS_POST_RETRY_DELAY_MS;
@@ -256,13 +263,14 @@ export async function deliverFindings({
   payload,
   env = process.env,
   fetchImpl = fetch,
-  now,
+  now = Date.now,
   sleep,
   attemptMs,
   log = console.log,
 }) {
   const url = findingsTarget(findingsUrl);
   if (url === undefined) return undefined;
+  const deadline = now() + FINDINGS_POST_TOTAL_MS;
   try {
     if (!url) {
       log("::warning::findings-url is not an https URL; not posting findings");
@@ -271,11 +279,12 @@ export async function deliverFindings({
     let body;
     try {
       body = JSON.stringify(payload());
+      if (typeof body !== "string") throw new Error("the payload builder returned nothing");
     } catch (err) {
       log(`::error::Could not build the findings payload, so nothing was sent: ${logMessage(err)}`);
       return "error";
     }
-    const token = await requestIdentityToken({ audience: url.origin, env, fetchImpl, sleep, log });
+    const token = await requestIdentityToken({ audience: url.origin, env, fetchImpl, now, deadline, sleep, log });
     if (!token) {
       log(
         "::warning::No identity token, so findings are not posted. The caller workflow needs `permissions: id-token: write`, and a pull request from a fork never gets one",
@@ -290,6 +299,7 @@ export async function deliverFindings({
       now,
       sleep,
       attemptMs,
+      deadline,
       log,
     });
     // The origin alone: a caller may put a secret in the path.

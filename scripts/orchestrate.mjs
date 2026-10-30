@@ -536,7 +536,7 @@ async function main() {
     } catch (err) {
       console.error(`Failed to post inline review: ${err.message}`);
       const fallbackLines = inlineComments
-        .map((c) => `**\`${c.path}:${c.startLine ?? c.line}\`**\n\n${c.body}`)
+        .map((c) => `**\`${c.path}:${c.startLine !== undefined ? `${c.startLine}-${c.line}` : c.line}\`**\n\n${c.body}`)
         .join("\n\n---\n\n");
       await postComment(
         prNumber,

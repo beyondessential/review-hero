@@ -219,6 +219,24 @@ test("a path git quotes is decoded to the path a finding names", () => {
   assert.deepEqual(commentLines({ file: "src/文.ts", line: 1, endLine: 3 }, hunks), { line: 3, startLine: 1 });
 });
 
+test("a path git quotes keeps characters outside the BMP whole", () => {
+  const diff = ['+++ "b/\\"\u{1F600}\\".ts"', "@@ -0,0 +1,2 @@", "+a", "+b", ""].join("\n");
+  assert.deepEqual([...parseHunks(diff).keys()], ['"\u{1F600}".ts']);
+});
+
+// spec: FPOST#findings
+test("a kept group whose representative consensus dropped takes its members' voter count", () => {
+  const dropped = f({ supporters: undefined });
+  delete dropped.supporters;
+  const kept = [f({ supporters: 2 }), f({ supporters: 3 })];
+  const [finding] = buildRoundFindings([{ representative: dropped, members: [dropped, ...kept] }]);
+  assert.equal(finding.supporters, 3);
+  // A kept representative whose count is unknown stays unknown.
+  const unknown = f({ supporters: null });
+  const [other] = buildRoundFindings([{ representative: unknown, members: [unknown, f({ supporters: 3 })] }]);
+  assert.equal(other.supporters, null);
+});
+
 // spec: RUN#findings
 test("an agent's end line is kept only when it is an integer past the start line", () => {
   const raw = (endLine) => ({ file: "a.ts", line: 10, severity: "suggestion", comment: "c", endLine });
