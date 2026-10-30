@@ -44,6 +44,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] The payload is a JSON object carrying a `schema` integer, the version of its shape, starting at 1.
 - [ ] Adding a field keeps the same `schema` number, and removing a field or changing what it means increments it.
 - [ ] The payload's JSON Schema is published in the repository, one file per schema version, and the receiver guide links to it.
+- [ ] The payload carries a `$schema` field holding the URL of the published JSON Schema for its version.
 - [ ] The payload names the repository and the pull request number.
 - [ ] The payload names the GitHub Actions run id and run attempt, and the Review Hero ref and commit, as the completion block does.
 - [ ] The payload carries the review's result (`outcome`, `reviewedSha`, `model` and `counts`) exactly as the completion block reports it.
