@@ -479,6 +479,9 @@ export function commentLines(
 /** Version of the posted findings payload's shape. */
 export const FINDINGS_SCHEMA: number;
 
+/** Where that version's JSON Schema is published. */
+export const FINDINGS_SCHEMA_URL: string;
+
 export interface RoundFinding {
   severity: Severity;
   agent: { key: string; name: string };
@@ -500,6 +503,8 @@ export interface PostedFinding extends RoundFinding {
 }
 
 export interface FindingsPayload extends Omit<ReviewResult, "kind"> {
+  /** The URL of the JSON Schema for this payload's `schema` version. */
+  $schema: string;
   schema: number;
   repository: string;
   prNumber: number;

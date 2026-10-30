@@ -8,6 +8,7 @@ import {
   buildRoundFindings,
   commentLines,
   FINDINGS_SCHEMA,
+  FINDINGS_SCHEMA_URL,
   parseHunks,
   validateFindings,
 } from "./index.mjs";
@@ -76,6 +77,15 @@ test("a built payload validates against the published schema", () => {
   assert.deepEqual(validate(payload, schema), []);
   assert.equal(payload.schema, FINDINGS_SCHEMA);
   assert.equal(schema.properties.schema.const, FINDINGS_SCHEMA);
+});
+
+// spec: FPOST#payload
+test("the payload links to its own schema, which names itself the same way", () => {
+  const payload = build([]);
+  assert.equal(payload.$schema, FINDINGS_SCHEMA_URL);
+  assert.equal(schema.$id, FINDINGS_SCHEMA_URL);
+  assert.equal(schema.properties.$schema.const, FINDINGS_SCHEMA_URL);
+  assert.ok(FINDINGS_SCHEMA_URL.endsWith(`/schemas/findings-round.v${FINDINGS_SCHEMA}.json`));
 });
 
 test("a round with no findings and a failed round validate too", () => {

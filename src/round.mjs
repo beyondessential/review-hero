@@ -14,6 +14,13 @@
 export const FINDINGS_SCHEMA = 1;
 
 /**
+ * Where this version's JSON Schema is published. The repository keeps one file
+ * per version, so the file for a version stays put while its compatible
+ * additions edit it in place.
+ */
+export const FINDINGS_SCHEMA_URL = `https://raw.githubusercontent.com/beyondessential/review-hero/main/schemas/findings-round.v${FINDINGS_SCHEMA}.json`;
+
+/**
  * The kept findings of a round, one per group: the group's representative with
  * its severity, agent, location, voter count and comment. A finding with no
  * end line has a null `endLine`, and one whose voter count the review cannot
@@ -56,6 +63,7 @@ export function buildRoundFindings(keptGroups, agentNames = {}) {
 export function buildFindingsPayload({ repository, prNumber, runId, runAttempt, reviewHero, result, findings, commentIds = [] }) {
   const { kind, ...round } = result;
   return {
+    $schema: FINDINGS_SCHEMA_URL,
     schema: FINDINGS_SCHEMA,
     repository,
     prNumber,

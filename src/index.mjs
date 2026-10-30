@@ -76,7 +76,7 @@ export {
 
 export { parseHunks, commentLines } from "./hunks.mjs";
 
-export { FINDINGS_SCHEMA, buildRoundFindings, buildFindingsPayload } from "./round.mjs";
+export { FINDINGS_SCHEMA, FINDINGS_SCHEMA_URL, buildRoundFindings, buildFindingsPayload } from "./round.mjs";
 
 export { createAnthropicModelCaller } from "./anthropic.mjs";
 

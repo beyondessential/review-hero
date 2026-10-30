@@ -4,7 +4,9 @@
   "description": "What a review posts to its findings URL: the round's result and every kept finding. Adding a field keeps `schema` at 1; removing a field or changing what one means increments it, and a new file is published for that version.",
   "type": "object",
   "required": ["schema", "repository", "prNumber", "runId", "runAttempt", "reviewHero", "outcome", "reviewedSha", "counts", "findings"],
+  "$id": "https://raw.githubusercontent.com/beyondessential/review-hero/main/schemas/findings-round.v1.json",
   "properties": {
+    "$schema": { "const": "https://raw.githubusercontent.com/beyondessential/review-hero/main/schemas/findings-round.v1.json", "description": "Where this schema is published." },
     "schema": { "const": 1, "description": "Version of this payload's shape." },
     "repository": { "type": "string", "description": "The repository the review ran in, as owner/name." },
     "prNumber": { "type": "integer", "minimum": 1 },
