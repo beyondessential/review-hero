@@ -154,6 +154,30 @@ test("the whole post is bounded: a retry starts only with enough of the total le
   assert.equal(fake.posts().length, 1);
 });
 
+test("the log says a retry is coming only when one runs, and says when one was skipped", async () => {
+  const run = async (spent) => {
+    let clock = 0;
+    const lines = [];
+    await postFindings({
+      url: new URL(URL_OK),
+      payload: payload(),
+      token: "t",
+      fetchImpl: fakeFetch([reply(503), reply(200)]).fetchImpl,
+      now: () => clock,
+      sleep: async () => {
+        clock += spent;
+      },
+      log: (l) => lines.push(l),
+    });
+    return lines.join("\n");
+  };
+  const retried = await run(0);
+  assert.match(retried, /trying once more/);
+  const skipped = await run(FINDINGS_POST_TOTAL_MS);
+  assert.doesNotMatch(skipped, /trying once more/);
+  assert.match(skipped, /too little time left/);
+});
+
 // spec: FPOST#when-a-review-posts
 test("an attempt that gets no answer in time is unreachable", async () => {
   const hangs = (_url, { signal }) =>

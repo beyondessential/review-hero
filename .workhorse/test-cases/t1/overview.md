@@ -19,6 +19,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] A 2xx is `accepted`, any other answer `refused`, and no answer `unreachable` (verifies spec: FPOST)
 - [x] No answer or a 5xx is tried once more, the retry's result stands, and only one retry is made (verifies spec: FPOST)
 - [x] A retry starts only with enough of the total time left (verifies spec: FPOST)
+- [x] The log announces a retry only when one runs, and says when one was skipped for time (verifies spec: FPOST)
 - [x] A 307 or 308 within the origin is followed, up to a few times, carrying the token and body (verifies spec: FPOST)
 - [x] A redirect to another origin or scheme, or any other redirect status, is refused and the token goes nowhere else (verifies spec: FPOST)
 - [x] The log gives the receiver's status and the start of its reply when refused, on one line (verifies spec: FPOST)
@@ -40,6 +41,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] Each finding carries its agent's key and name, its range with a null end line for a single line, and its voter count or null (verifies spec: FPOST)
 - [x] The comment is unshortened and without the inline formatting (verifies spec: FPOST)
 - [x] Each inline finding carries its GitHub comment id and others null, matched by place and text so two findings on one line keep their own (verifies spec: FPOST)
+- [x] Findings sharing a line whose text GitHub rewrote get no id rather than each other's (verifies spec: FPOST)
 - [x] A group takes its representative's location, range and voter count (verifies spec: RUN)
 
 ## Finding ranges

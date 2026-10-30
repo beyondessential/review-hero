@@ -228,21 +228,35 @@ async function listReviewComments(prNumber, reviewId) {
 
 /**
  * The id of the review comment each of `posted` became, or null where none can
- * be found. A listed comment stands for at most one posted one; the same text
- * at the same place wins over the same place alone, so two findings on one line
- * keep their own ids.
+ * be found. A listed comment stands for at most one posted one. Every match on
+ * place and text is made first; a comment left over is matched on place alone
+ * only when it is the one posted comment left at its place and one listed
+ * comment is left there, so findings that share a line never swap ids.
  */
 // spec: FPOST#findings
 export function matchCommentIds(posted, listed) {
   const used = new Set();
-  return posted.map((c) => {
-    const here = (l, i) => !used.has(i) && l.path === c.path && (l.line ?? l.original_line) === c.line;
-    let found = listed.findIndex((l, i) => here(l, i) && l.body === c.body);
-    if (found === -1) found = listed.findIndex(here);
-    if (found === -1) return null;
-    used.add(found);
-    return listed[found].id;
+  const placeOf = (c) => `${c.path}\0${c.line}`;
+  const listedPlace = (l) => `${l.path}\0${l.line ?? l.original_line}`;
+  const claim = (i) => {
+    used.add(i);
+    return listed[i].id;
+  };
+
+  const ids = posted.map((c) => {
+    const found = listed.findIndex((l, i) => !used.has(i) && listedPlace(l) === placeOf(c) && l.body === c.body);
+    return found === -1 ? null : claim(found);
   });
+
+  const left = new Map();
+  posted.forEach((c, i) => {
+    if (ids[i] === null) left.set(placeOf(c), [...(left.get(placeOf(c)) ?? []), i]);
+  });
+  for (const [place, indices] of left) {
+    const free = listed.flatMap((l, i) => (!used.has(i) && listedPlace(l) === place ? [i] : []));
+    if (indices.length === 1 && free.length === 1) ids[indices[0]] = claim(free[0]);
+  }
+  return ids;
 }
 
 async function countPreviousRounds(prNumber) {

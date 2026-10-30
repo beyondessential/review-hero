@@ -4,7 +4,7 @@ A Review Hero review can post each round's findings as JSON to a URL its caller 
 
 ## What arrives
 
-An HTTPS `POST` with a JSON body and `Authorization: Bearer <token>`. The body follows [`schemas/findings-round.v1.json`](../schemas/findings-round.v1.json), one file per version of its shape. Its `schema` field is that version, and its `$schema` field is the URL of that file. Adding a field keeps the number, and removing a field or changing what one means increments it, so a receiver can ignore fields it does not know and should refuse a `schema` it does not support.
+An HTTPS `POST` with a JSON body and `Authorization: Bearer <token>`. The body follows [`schemas/findings-round.v1.json`](../schemas/findings-round.v1.json), one file per version of its shape. Its `schema` field is that version, and its `$schema` field is the URL of that file. Adding a field keeps the number, and removing a field or changing what one means increments it, so a receiver can ignore fields it does not know and should refuse a `schema` it does not support. The `$schema` URL follows Review Hero's main branch, so validate against a copy of the schema you keep rather than one fetched from that URL as posts arrive.
 
 Each round posts once, after the review's inline comments and before its summary comment. A review with no kept findings still posts, with an empty `findings` list, and so does a review where every agent failed, with `outcome` `failed`.
 

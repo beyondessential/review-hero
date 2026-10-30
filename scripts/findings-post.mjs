@@ -179,11 +179,13 @@ export async function postFindings({
   const deadline = now() + FINDINGS_POST_TOTAL_MS;
   let result = await attempt({ url, token, body, fetchImpl, timeoutMs: attemptMs });
   if (result.retry) {
-    log(`::warning::Posting findings: ${result.detail}; trying once more`);
     await sleep(FINDINGS_POST_RETRY_DELAY_MS);
     const left = deadline - now();
     if (left >= FINDINGS_POST_MIN_RETRY_MS) {
+      log(`::warning::Posting findings: ${result.detail}; trying once more`);
       result = await attempt({ url, token, body, fetchImpl, timeoutMs: Math.min(attemptMs, left) });
+    } else {
+      log(`::warning::Posting findings: ${result.detail}; too little time left to try again`);
     }
   }
   return result;

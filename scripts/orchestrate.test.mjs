@@ -220,3 +220,24 @@ test("a comment GitHub did not list gets null, and a listed comment is claimed o
   assert.deepEqual(matchCommentIds([{ path: "a.ts", line: 10, body: "x" }], [{ id: 8, path: "a.ts", line: 10, body: "x\n" }]), [8]);
   assert.deepEqual(matchCommentIds([], listed), []);
 });
+
+// spec: FPOST#findings
+test("findings sharing a line never swap ids when their text was rewritten", () => {
+  const posted = [
+    { path: "a.ts", line: 10, body: "first" },
+    { path: "a.ts", line: 10, body: "second" },
+  ];
+  // Both rewritten: which is which cannot be told, so neither gets an id.
+  const rewritten = [
+    { id: 2, path: "a.ts", line: 10, body: "second\n" },
+    { id: 1, path: "a.ts", line: 10, body: "first\n" },
+  ];
+  assert.deepEqual(matchCommentIds(posted, rewritten), [null, null]);
+  // One rewritten: the other matches on its text first, and the one left over
+  // takes the one comment left at the place.
+  const one = [
+    { id: 1, path: "a.ts", line: 10, body: "first\n" },
+    { id: 2, path: "a.ts", line: 10, body: "second" },
+  ];
+  assert.deepEqual(matchCommentIds(posted, one), [1, 2]);
+});
