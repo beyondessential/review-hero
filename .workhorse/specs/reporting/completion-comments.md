@@ -36,7 +36,7 @@ Completion comments are:
 - [ ] The block does not show when the comment is rendered on GitHub.
 - [ ] No value in the JSON can end the HTML comment early: any `>` in a value is written as the JSON escape `\u003e`.
 - [ ] The JSON carries only run metadata and counts, never finding or comment text.
-- [ ] A review whose findings the receiver accepted posts no completion comment when the caller asked for the comments to be skipped on acceptance (see `reporting/posting-findings.md`), and every other run posts one.
+- [ ] A review posts its summary comment, and so its completion comment, according to the caller's `summary-comment` setting (see `reporting/posting-findings.md`), and every other run posts one.
 - [ ] A run posts at most one completion comment, so a run that concludes and then fails to report does not follow up with a second comment contradicting the first.
 - [ ] A run that cannot post its full report still posts a short one carrying the block it concluded with, rather than nothing at all.
 - [ ] The README documents every field and outcome in the block, for consumers.

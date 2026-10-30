@@ -129,13 +129,15 @@ test("the findings URL is an optional input, empty by default, and reaches only 
 });
 
 // spec: FPOST#replacing-the-comments
-test("skipping the comments is an optional boolean input, off by default, and reaches only the orchestrator", () => {
-  const input = workflow.on.workflow_call.inputs["skip-comments-if-accepted"];
-  assert.equal(input.type, "boolean");
-  assert.equal(input.default, false);
+test("the comment inputs are optional strings that default to always and reach only the orchestrator", () => {
   const orchestrate = post.steps.find((s) => s.name === "Run orchestrator");
-  assert.equal(orchestrate.env.SKIP_COMMENTS_IF_ACCEPTED, "${{ inputs.skip-comments-if-accepted }}");
-  assert.ok(!mentions(job, "skip-comments-if-accepted"));
+  for (const [input, env] of [["per-issue-comments", "PER_ISSUE_COMMENTS"], ["summary-comment", "SUMMARY_COMMENT"]]) {
+    const declared = workflow.on.workflow_call.inputs[input];
+    assert.equal(declared.type, "string");
+    assert.equal(declared.default, "always");
+    assert.equal(orchestrate.env[env], `\${{ inputs.${input} }}`);
+    assert.ok(!mentions(job, input));
+  }
 });
 
 // spec: RUN#credentials
