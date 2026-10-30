@@ -199,6 +199,15 @@ test("a contested group counts its voters the same way, an untagged finding coun
   assert.equal(contested[0].groups[0].supporters, 1);
 });
 
+test("a kept finding listed among another kept group's members does not count towards it", async () => {
+  // Five voters, so three are needed. Findings 0 and 2 are both kept, and the
+  // reply wrongly nests 2 and its own member 3 in 0's group too.
+  const many = [finding(0, 10), finding(1, 11), finding(2, 40), finding(3, 41), finding(4, 12)];
+  const reply = JSON.stringify({ keep: [0, 2], members: { 0: [0, 1, 2, 3, 4], 2: [2, 3, 4] } });
+  const { kept } = await applyConsensus(many, 5, async () => reply);
+  assert.deepEqual(kept.map((f) => f.supporters), [4, 3]);
+});
+
 test("members the model invents or leaves out do not count towards a voter count", async () => {
   const reply = JSON.stringify({ keep: [0], members: { 0: [0, 99, "x", 3] }, contested: [] });
   const { kept } = await applyConsensus(findings, 3, async () => reply);

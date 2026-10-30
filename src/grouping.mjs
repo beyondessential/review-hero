@@ -155,7 +155,9 @@ Example: {"keep": [0, 3], "members": {"0": [0, 1, 2], "3": [3, 4]}, "contested":
     const supportersOf = (i) => {
       const members = parsed.members[i];
       if (!members) return null;
-      const voters = countVoters([i, ...members].filter(validIndex).map((m) => findings[m]));
+      // Another kept finding is a group of its own, so its voters are not this one's.
+      const own = [i, ...members.filter((m) => validIndex(m) && !(m !== i && keptIndices.has(m)))];
+      const voters = countVoters(own.map((m) => findings[m]));
       // Kept with fewer than the majority behind it, the reply contradicts
       // itself, so its grouping says nothing reliable about the count.
       return voters >= threshold ? voters : null;

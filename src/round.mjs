@@ -62,6 +62,45 @@ export function buildRoundFindings(keptGroups, agentNames = {}) {
 }
 
 /**
+ * The id of the review comment each of `posted` became, or null where none can
+ * be found. A comment's place is its path and its first and last line, so a
+ * multi-line comment and a single-line one ending on the same line are apart.
+ * A listed comment stands for at most one posted one. Every match on place and
+ * text is made first; a comment left over is matched on place alone only when
+ * it is the one posted comment left at its place and one listed comment is left
+ * there, so findings that share a place never swap ids.
+ */
+// spec: FPOST#findings
+export function matchCommentIds(posted, listed) {
+  const used = new Set();
+  const placeOf = (c) => `${c.path}\0${c.startLine ?? c.line}\0${c.line}`;
+  // An outdated comment has no current lines, only the ones it was posted on.
+  const listedPlace = (l) =>
+    l.line != null
+      ? `${l.path}\0${l.start_line ?? l.line}\0${l.line}`
+      : `${l.path}\0${l.original_start_line ?? l.original_line}\0${l.original_line}`;
+  const claim = (i) => {
+    used.add(i);
+    return listed[i].id;
+  };
+
+  const ids = posted.map((c) => {
+    const found = listed.findIndex((l, i) => !used.has(i) && listedPlace(l) === placeOf(c) && l.body === c.body);
+    return found === -1 ? null : claim(found);
+  });
+
+  const left = new Map();
+  posted.forEach((c, i) => {
+    if (ids[i] === null) left.set(placeOf(c), [...(left.get(placeOf(c)) ?? []), i]);
+  });
+  for (const [place, indices] of left) {
+    const free = listed.flatMap((l, i) => (!used.has(i) && listedPlace(l) === place ? [i] : []));
+    if (indices.length === 1 && free.length === 1) ids[indices[0]] = claim(free[0]);
+  }
+  return ids;
+}
+
+/**
  * The payload for one round. `result` is the object `buildReviewResult` makes,
  * which goes in as the completion block reports it, less its `kind`. Each
  * finding gets an identifier unique within the run attempt, and the id of its

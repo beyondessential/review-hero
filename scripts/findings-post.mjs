@@ -25,20 +25,52 @@ export const IDENTITY_TOKEN_TIMEOUT_MS = 15_000;
 
 /** The reply's first characters kept for the job log. */
 const REPLY_EXCERPT = 200;
+/**
+ * How much of a reply is read before it is redacted and cut to the excerpt, so
+ * a URL or secret that runs over the excerpt's end is still seen whole.
+ */
+const REPLY_READ = REPLY_EXCERPT + 1024;
+
+/**
+ * The parts of a findings URL a caller could keep a secret in (its path, query
+ * and each query value, fragment and userinfo), each with what stands in for it
+ * in the log, longest first so no part is cut by a shorter one. Each comes as
+ * written in the URL and decoded, since a message may quote either.
+ */
+function secretParts(url) {
+  const decode = (part) => {
+    try {
+      return decodeURIComponent(part);
+    } catch {
+      return part;
+    }
+  };
+  const parts = [
+    [url.pathname.length > 1 ? url.pathname : "", "/…"],
+    [url.search, "?…"],
+    [url.hash, "#…"],
+    [url.password, "…"],
+    [url.username ? `${url.username}:` : "", "…:"],
+    [url.username ? `${url.username}@` : "", "…@"],
+    // A reply may echo a query's values without the rest of it.
+    ...[...url.searchParams.values()].flatMap((value) => [[value, "…"], [encodeURIComponent(value), "…"]]),
+  ];
+  return parts
+    .flatMap(([part, stand]) => [[part, stand], [decode(part), stand]])
+    .filter(([part]) => part.length > 1)
+    .sort(([a], [b]) => b.length - a.length);
+}
 
 /**
  * Text fit for the job log: on one line, with no control characters (a
- * receiver's reply could otherwise restyle the log), and with every URL cut to
- * its origin and `url`'s path, when given, removed, since a caller may put a
- * secret in a findings URL's path.
+ * receiver's reply could otherwise restyle the log), with every part of `url`,
+ * when given, that could hold a secret (its path, query, fragment and userinfo)
+ * removed wherever it appears, and with every other URL cut to its origin.
  */
 function logText(text, url) {
-  let line = oneLine(text)
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-    // Userinfo can hold a credential as well as a path a secret.
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)(?:[^\s/?#@"'<>]*@)?([^\s/?#"'<>]+)[^\s"'<>]*/gi, "$1$2");
-  if (url && url.pathname.length > 1) line = line.split(url.pathname).join("/…");
-  return line;
+  let line = oneLine(text).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+  if (url) for (const [part, stand] of secretParts(url)) line = line.split(part).join(stand);
+  return line.replace(/\b([a-z][a-z0-9+.-]*:\/\/)(?:[^\s/?#@"'<>]*@)?([^\s/?#"'<>]+)[^\s"'<>]*/gi, "$1$2");
 }
 
 /** An error's message, fit for the job log. */
@@ -49,7 +81,8 @@ function logMessage(err, url) {
 /**
  * The start of a reply, read only as far as the excerpt needs: the receiver is
  * whatever the caller named, and could send a body of any size. A reply can
- * echo the request's path, so `url`'s path is removed like any other log line.
+ * echo the request, so it is redacted like any other log line, before it is cut
+ * so the cut never splits something the redaction would have caught.
  */
 async function replyExcerpt(response, url) {
   if (!response.body) return "";
@@ -57,16 +90,16 @@ async function replyExcerpt(response, url) {
   const decoder = new TextDecoder();
   let text = "";
   try {
-    while (text.length < REPLY_EXCERPT) {
+    while (text.length < REPLY_READ) {
       const { done, value } = await reader.read();
       if (done) break;
       // A chunk can be any size, and a character is at most four bytes.
-      text += decoder.decode(value.subarray(0, 4 * (REPLY_EXCERPT - text.length)), { stream: true });
+      text += decoder.decode(value.subarray(0, 4 * (REPLY_READ - text.length)), { stream: true });
     }
   } finally {
     await reader.cancel().catch(() => {});
   }
-  return logText(text.slice(0, REPLY_EXCERPT), url);
+  return logText(text.slice(0, REPLY_READ), url).slice(0, REPLY_EXCERPT);
 }
 
 /**
@@ -281,7 +314,7 @@ export async function deliverFindings({
       body = JSON.stringify(payload());
       if (typeof body !== "string") throw new Error("the payload builder returned nothing");
     } catch (err) {
-      log(`::error::Could not build the findings payload, so nothing was sent: ${logMessage(err)}`);
+      log(`::error::Could not build the findings payload, so nothing was sent: ${logMessage(err, url)}`);
       return "error";
     }
     const token = await requestIdentityToken({ audience: url.origin, env, fetchImpl, now, deadline, sleep, log });

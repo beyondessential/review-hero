@@ -278,7 +278,8 @@ test("a refused reply is read only as far as the log needs", async () => {
   });
   const fake = fakeFetch([new Response(endless, { status: 400 })]);
   assert.equal(await deliver(fake), "refused");
-  assert.ok(pulled < 10, `read ${pulled} chunks`);
+  // 64-byte chunks, read only as far as the excerpt and its margin.
+  assert.ok(pulled < 30, `read ${pulled} chunks`);
   assert.ok(cancelled);
 });
 
@@ -340,8 +341,8 @@ test("a single huge chunk is decoded only as far as the excerpt", async () => {
   } finally {
     TextDecoder.prototype.decode = realDecode;
   }
-  // Four bytes a character for the excerpt, plus the token reply's few.
-  assert.ok(decoded < 1024, `decoded ${decoded} bytes`);
+  // Four bytes a character for the excerpt and its margin, plus the token reply's few.
+  assert.ok(decoded < 5_000, `decoded ${decoded} bytes`);
 });
 
 // spec: FPOST#when-a-review-posts
@@ -457,4 +458,35 @@ test("the token request and the post share one time budget", async () => {
   assert.equal(tokenCalls, 1);
   assert.equal(result, "no-token");
   assert.equal(posts.length, 0);
+});
+
+// spec: FPOST#when-a-review-posts
+test("every part of the findings URL that could hold a secret is removed, written raw or decoded", async () => {
+  const findingsUrl = "https://bob:hunter2@workhorse.example/hook/s3cret?api_key=k3y%21#frag";
+  const lines = [];
+  const bodies = [
+    "Cannot POST /hook/s3cret?api_key=k3y%21",
+    "unknown key api_key=k3y! for bob",
+    "seen #frag from bob:hunter2",
+  ];
+  for (const body of bodies) {
+    await deliver(fakeFetch([reply(400, { body })]), { findingsUrl, log: (l) => lines.push(l) });
+  }
+  await deliver(fakeFetch([]), {
+    findingsUrl,
+    payload: () => {
+      throw new Error(`cannot build for ${findingsUrl}`);
+    },
+    log: (l) => lines.push(l),
+  });
+  const all = lines.join("\n");
+  for (const secret of ["s3cret", "k3y", "hunter2", "frag"]) assert.ok(!all.includes(secret), `${secret} in ${all}`);
+});
+
+test("a URL running over the excerpt's end is redacted whole, not cut first", async () => {
+  const lines = [];
+  const body = `${"x".repeat(190)} https://user:pa55word@elsewhere.example/p`;
+  await deliver(fakeFetch([reply(400, { body })]), { log: (l) => lines.push(l) });
+  const all = lines.join("\n");
+  assert.ok(!all.includes("pa55") && !all.includes("user"), all);
 });

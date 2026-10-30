@@ -474,6 +474,12 @@ export interface Hunk {
 /** The new-side hunks of each file in a unified diff. */
 export function parseHunks(diff: string): Map<string, Hunk[]>;
 
+/** The new path a `diff --git` header names, decoding a git-quoted path; null for any other line. */
+export function diffGitPath(line: string): string | null;
+
+/** A path as git quotes it, with its C-style and octal escapes decoded. */
+export function unquoteGitPath(quoted: string): string;
+
 /**
  * Where an inline comment for a finding goes: its range when both ends lie in
  * one hunk of its file, its start line alone otherwise. `line` is the comment's
@@ -529,6 +535,25 @@ export function buildRoundFindings(
   keptGroups: FindingGroup[],
   agentNames?: Record<string, string>,
 ): RoundFinding[];
+
+/**
+ * The id of the GitHub review comment each posted inline comment became, or
+ * null where none can be told. `listed` is a review's comments as the GitHub
+ * REST API lists them. Matches on path, lines and text first, and on path and
+ * lines alone only where one posted and one listed comment are left there.
+ */
+export function matchCommentIds(
+  posted: Array<{ path: string; line: number; startLine?: number; body: string }>,
+  listed: Array<{
+    id: number;
+    path: string;
+    line?: number | null;
+    start_line?: number | null;
+    original_line?: number | null;
+    original_start_line?: number | null;
+    body: string;
+  }>,
+): Array<number | null>;
 
 /** The payload for one round: its result and findings, with run metadata and comment ids. */
 export function buildFindingsPayload(args: {

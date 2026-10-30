@@ -34,6 +34,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A review where every agent failed posts a round with a `failed` outcome and no findings, before its completion comment.
 - [ ] A post that gets no answer, or a server error, is tried once more.
 - [ ] The token request and the post, with their retries, share one bound in time, and a retry that cannot fit in what is left is skipped without waiting for it.
+- [ ] However long the token request took, the post's first attempt always gets at least as long as a retry would, so the bound can be overrun by that much.
 - [ ] When a post is retried, the retry's result is how the post went.
 - [ ] The receiver guide says a receiver can get the same round more than once: a retry can repeat a post the receiver already took, and re-running the posting job posts the same findings again under a new run attempt, with new identifiers.
 - [ ] A 307 or 308 redirect to the findings URL's own origin is followed, up to a small number of redirects.
@@ -41,7 +42,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A post counts as accepted when the receiver answers with a 2xx status.
 - [ ] A post that is not accepted never fails the review: it is logged, the completion block says how it went (see `reporting/completion-comments.md`), and the review's GitHub comments are posted as usual.
 - [ ] The job log says how the post went, with the receiver's status and the start of its reply when it was refused.
-- [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path, and each of its lines about the post stays on one line, with no control characters and no URL's path or userinfo, including in the start of a reply that echoes the request.
+- [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path, and each of its lines about the post stays on one line, with no control characters, no other URL's path or userinfo, and no part of the findings URL that could hold a secret (its path, query and query values, fragment and userinfo), however a message or a reply that echoes the request writes it.
 - [ ] A refused reply is read only as far as the start the job log shows.
 - [ ] The review looks up its inline comments' GitHub ids only when it has an `https` findings URL.
 

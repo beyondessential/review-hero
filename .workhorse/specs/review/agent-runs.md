@@ -44,6 +44,8 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] A finding names its file, its start line and, when it covers more than one line, its end line.
 - [ ] A finding with no end line, or with an end line before its start line, covers its start line alone.
 - [ ] An inline comment spans its finding's lines when the start and end line lie in the same hunk of the diff, and otherwise sits on the start line alone.
+- [ ] When GitHub refuses a review that has comments spanning several lines, the review is posted once more with every comment on its start line before falling back to an issue comment.
+- [ ] Every stage that splits a diff by file reads each file's path the same way, decoding a path git quotes.
 - [ ] A group of findings merged across agents takes its representative's location.
 
 ## Voters
@@ -53,7 +55,7 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] A diff of 100 or more changed lines runs the `voters` input's count of voters per agent.
 - [ ] The voter count never exceeds 10.
 - [ ] A finding survives consensus when a strict majority of the review's voter count reports it, with voters that contributed nothing still counting toward that number.
-- [ ] A kept finding's voter count is the number of distinct voters whose findings consensus grouped with it, a finding without a voter counting for none, counted from the group's members rather than taken from the consensus model's reply, plus any checkers that confirmed it on a second look.
+- [ ] A kept finding's voter count is the number of distinct voters whose findings consensus grouped with it, a finding without a voter and another kept finding counting for none, counted from the group's members rather than taken from the consensus model's reply, plus any checkers that confirmed it on a second look.
 - [ ] A kept finding whose group, as consensus gave it, has fewer distinct voters than the majority has no voter count, since the grouping contradicts the finding being kept.
 - [ ] With one voter per agent, each finding's voter count is 1.
 - [ ] In a review with more than one voter per agent, a finding kept because consensus could not be applied to its agent has no voter count.

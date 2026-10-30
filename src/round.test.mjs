@@ -10,6 +10,9 @@ import {
   effectiveEndLine,
   FINDINGS_SCHEMA,
   FINDINGS_SCHEMA_URL,
+  diffGitPath,
+  filterDiff,
+  matchCommentIds,
   parseHunks,
   validateFindings,
 } from "./index.mjs";
@@ -297,4 +300,94 @@ test("an inline comment spans its finding's lines only when both ends lie in one
   assert.deepEqual(at(5, 5), { line: 5 });
   assert.deepEqual(commentLines({ file: "other.ts", line: 2, endLine: 3 }, hunks), { line: 2 });
   assert.deepEqual(commentLines({ file: "src/a.ts", line: 2, endLine: 3 }, undefined), { line: 2 });
+});
+
+// spec: FPOST#findings
+test("each inline comment is matched to the review comment at its place with its text", () => {
+  const posted = [
+    { path: "a.ts", line: 10, body: "first" },
+    { path: "a.ts", line: 10, body: "second" },
+    { path: "b.ts", line: 3, body: "third" },
+  ];
+  // Listed out of order, one outdated (no `line`, only `original_line`).
+  const listed = [
+    { id: 3, path: "b.ts", line: null, original_line: 3, body: "third" },
+    { id: 2, path: "a.ts", line: 10, body: "second" },
+    { id: 1, path: "a.ts", line: 10, body: "first" },
+  ];
+  assert.deepEqual(matchCommentIds(posted, listed), [1, 2, 3]);
+});
+
+// spec: FPOST#findings
+test("a comment GitHub did not list gets null, and a listed comment is claimed once", () => {
+  const posted = [
+    { path: "a.ts", line: 10, body: "x" },
+    { path: "a.ts", line: 10, body: "x" },
+    { path: "c.ts", line: 1, body: "gone" },
+  ];
+  const listed = [{ id: 7, path: "a.ts", line: 10, body: "x" }];
+  assert.deepEqual(matchCommentIds(posted, listed), [7, null, null]);
+  // The same place stands in when GitHub changed the text.
+  assert.deepEqual(matchCommentIds([{ path: "a.ts", line: 10, body: "x" }], [{ id: 8, path: "a.ts", line: 10, body: "x\n" }]), [8]);
+  assert.deepEqual(matchCommentIds([], listed), []);
+});
+
+// spec: FPOST#findings
+test("findings sharing a line never swap ids when their text was rewritten", () => {
+  const posted = [
+    { path: "a.ts", line: 10, body: "first" },
+    { path: "a.ts", line: 10, body: "second" },
+  ];
+  // Both rewritten: which is which cannot be told, so neither gets an id.
+  const rewritten = [
+    { id: 2, path: "a.ts", line: 10, body: "second\n" },
+    { id: 1, path: "a.ts", line: 10, body: "first\n" },
+  ];
+  assert.deepEqual(matchCommentIds(posted, rewritten), [null, null]);
+  // One rewritten: the other matches on its text first, and the one left over
+  // takes the one comment left at the place.
+  const one = [
+    { id: 1, path: "a.ts", line: 10, body: "first\n" },
+    { id: 2, path: "a.ts", line: 10, body: "second" },
+  ];
+  assert.deepEqual(matchCommentIds(posted, one), [1, 2]);
+});
+
+// spec: FPOST#findings
+test("a multi-line comment and a single-line one ending on the same line are kept apart", () => {
+  const posted = [
+    { path: "a.ts", startLine: 10, line: 15, body: "span" },
+    { path: "a.ts", line: 15, body: "single" },
+  ];
+  // Both rewritten, so only the place can tell them apart.
+  const listed = [
+    { id: 2, path: "a.ts", start_line: null, line: 15, body: "single\n" },
+    { id: 1, path: "a.ts", start_line: 10, line: 15, body: "span\n" },
+  ];
+  assert.deepEqual(matchCommentIds(posted, listed), [1, 2]);
+  // An outdated comment is matched on the lines it was posted on.
+  const outdated = [{ id: 3, path: "a.ts", line: null, start_line: null, original_start_line: 10, original_line: 15, body: "span" }];
+  assert.deepEqual(matchCommentIds([posted[0]], outdated), [3]);
+});
+
+test("every stage that splits a diff by file reads a git-quoted header's path the same way", () => {
+  const diff = [
+    "diff --git a/plain.ts b/plain.ts",
+    "--- a/plain.ts",
+    "+++ b/plain.ts",
+    "@@ -1 +1,2 @@",
+    " x",
+    "+y",
+    'diff --git "a/src/\\346\\226\\207.ts" "b/src/\\346\\226\\207.ts"',
+    '--- "a/src/\\346\\226\\207.ts"',
+    '+++ "b/src/\\346\\226\\207.ts"',
+    "@@ -1 +1,2 @@",
+    " x",
+    "+y",
+  ].join("\n");
+  // Filtering out the plain file must not take the quoted one with it.
+  const { filtered, removedFiles } = filterDiff(diff, ["plain.ts"]);
+  assert.deepEqual(removedFiles, ["plain.ts"]);
+  assert.deepEqual(filtered.split("\n").map(diffGitPath).filter(Boolean), ["src/文.ts"]);
+  assert.deepEqual([...parseHunks(filtered).keys()], ["src/文.ts"]);
 });

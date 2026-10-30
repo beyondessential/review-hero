@@ -44,6 +44,19 @@ export function unquoteGitPath(quoted) {
   return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
+/**
+ * The new path a `diff --git` header names, or null when `line` is not one.
+ * Git quotes a path with a non-ASCII byte, a quote, a backslash or a control
+ * character, so a quoted path is decoded. Shared by every stage that splits a
+ * diff by file, so they all agree on which section belongs to which path.
+ */
+export function diffGitPath(line) {
+  const quoted = line.match(/^diff --git (?:"(?:[^"\\]|\\.)*"|a\/.+?) ("b\/(?:[^"\\]|\\.)*")$/);
+  if (quoted) return unquoteGitPath(quoted[1]).slice(2);
+  const plain = line.match(/^diff --git (?:a\/.+|"(?:[^"\\]|\\.)*") b\/(.+)$/);
+  return plain ? plain[1] : null;
+}
+
 /** The path a `+++` line names, or null for a deleted file. */
 function newPath(line) {
   let path = line.slice(4).replace(/\t.*$/, "").trim();

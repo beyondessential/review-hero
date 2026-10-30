@@ -8,6 +8,8 @@
 
 import { basename } from "node:path";
 
+import { diffGitPath } from "./hunks.mjs";
+
 /** Files never worth reviewing — dependency lockfiles and generated output. */
 export const DEFAULT_IGNORE_PATTERNS = [
   "package-lock.json",
@@ -58,10 +60,10 @@ export function filterDiff(rawDiff, patterns) {
   let current = null;
 
   for (const line of rawDiff.split("\n")) {
-    const fileMatch = line.match(/^diff --git a\/.+ b\/(.+)$/);
-    if (fileMatch) {
+    const file = diffGitPath(line);
+    if (file !== null) {
       if (current) sections.push(current);
-      current = { file: fileMatch[1], lines: [line] };
+      current = { file, lines: [line] };
     } else if (current) {
       current.lines.push(line);
     }

@@ -54,6 +54,7 @@ import {
   buildRoundFindings,
   buildFindingsPayload,
   commentLines,
+  matchCommentIds,
   parseHunks,
   stripCompletionBlocks,
   createAnthropicModelCaller,
@@ -224,45 +225,6 @@ async function listReviewComments(prNumber, reviewId) {
     comments.push(...batch);
     if (batch.length < 100) return comments;
   }
-}
-
-/**
- * The id of the review comment each of `posted` became, or null where none can
- * be found. A comment's place is its path and its first and last line, so a
- * multi-line comment and a single-line one ending on the same line are apart.
- * A listed comment stands for at most one posted one. Every match on place and
- * text is made first; a comment left over is matched on place alone only when
- * it is the one posted comment left at its place and one listed comment is left
- * there, so findings that share a place never swap ids.
- */
-// spec: FPOST#findings
-export function matchCommentIds(posted, listed) {
-  const used = new Set();
-  const placeOf = (c) => `${c.path}\0${c.startLine ?? c.line}\0${c.line}`;
-  // An outdated comment has no current lines, only the ones it was posted on.
-  const listedPlace = (l) =>
-    l.line != null
-      ? `${l.path}\0${l.start_line ?? l.line}\0${l.line}`
-      : `${l.path}\0${l.original_start_line ?? l.original_line}\0${l.original_line}`;
-  const claim = (i) => {
-    used.add(i);
-    return listed[i].id;
-  };
-
-  const ids = posted.map((c) => {
-    const found = listed.findIndex((l, i) => !used.has(i) && listedPlace(l) === placeOf(c) && l.body === c.body);
-    return found === -1 ? null : claim(found);
-  });
-
-  const left = new Map();
-  posted.forEach((c, i) => {
-    if (ids[i] === null) left.set(placeOf(c), [...(left.get(placeOf(c)) ?? []), i]);
-  });
-  for (const [place, indices] of left) {
-    const free = listed.flatMap((l, i) => (!used.has(i) && listedPlace(l) === place ? [i] : []));
-    if (indices.length === 1 && free.length === 1) ids[indices[0]] = claim(free[0]);
-  }
-  return ids;
 }
 
 async function countPreviousRounds(prNumber) {
@@ -520,7 +482,23 @@ async function main() {
   // comments sit on the code the agents actually saw.
   if (inlineComments.length > 0) {
     try {
-      const review = await postReview(prNumber, reviewedSha, inlineComments);
+      let review;
+      try {
+        review = await postReview(prNumber, reviewedSha, inlineComments);
+      } catch (err) {
+        // A refused range costs every comment the review, so try once more
+        // with each on its start line, the shape GitHub takes for any line
+        // in the diff, before falling back to an issue comment.
+        // spec: RUN#findings
+        if (!inlineComments.some((c) => c.startLine !== undefined)) throw err;
+        console.warn(`Inline review refused (${err.message}); trying once more with each comment on its first line`);
+        for (const c of inlineComments) {
+          if (c.startLine === undefined) continue;
+          c.line = c.startLine;
+          delete c.startLine;
+        }
+        review = await postReview(prNumber, reviewedSha, inlineComments);
+      }
       console.log(`Posted ${inlineComments.length} inline review comments`);
       // Only posted findings carry comment ids, so only then are they worth a call.
       if (findingsTarget(findingsUrl)) {

@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseAgentResult, buildSummaryHeader, consensusStat, matchCommentIds } from "./orchestrate.mjs";
+import { parseAgentResult, buildSummaryHeader, consensusStat } from "./orchestrate.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-parse-"));
 
@@ -189,72 +189,4 @@ test("the summary reports consensus only where it filtered the findings", () => 
   assert.equal(consensusStat(outcome), "consensus 3 voters");
   assert.equal(consensusStat({ ...outcome, unfiltered: ["design"] }), "consensus 3 voters, not applied for 1 agent");
   assert.equal(consensusStat({ ...outcome, unfiltered: ["bugs", "design"] }), "no consensus (3 voters)");
-});
-
-// spec: FPOST#findings
-test("each inline comment is matched to the review comment at its place with its text", () => {
-  const posted = [
-    { path: "a.ts", line: 10, body: "first" },
-    { path: "a.ts", line: 10, body: "second" },
-    { path: "b.ts", line: 3, body: "third" },
-  ];
-  // Listed out of order, one outdated (no `line`, only `original_line`).
-  const listed = [
-    { id: 3, path: "b.ts", line: null, original_line: 3, body: "third" },
-    { id: 2, path: "a.ts", line: 10, body: "second" },
-    { id: 1, path: "a.ts", line: 10, body: "first" },
-  ];
-  assert.deepEqual(matchCommentIds(posted, listed), [1, 2, 3]);
-});
-
-// spec: FPOST#findings
-test("a comment GitHub did not list gets null, and a listed comment is claimed once", () => {
-  const posted = [
-    { path: "a.ts", line: 10, body: "x" },
-    { path: "a.ts", line: 10, body: "x" },
-    { path: "c.ts", line: 1, body: "gone" },
-  ];
-  const listed = [{ id: 7, path: "a.ts", line: 10, body: "x" }];
-  assert.deepEqual(matchCommentIds(posted, listed), [7, null, null]);
-  // The same place stands in when GitHub changed the text.
-  assert.deepEqual(matchCommentIds([{ path: "a.ts", line: 10, body: "x" }], [{ id: 8, path: "a.ts", line: 10, body: "x\n" }]), [8]);
-  assert.deepEqual(matchCommentIds([], listed), []);
-});
-
-// spec: FPOST#findings
-test("findings sharing a line never swap ids when their text was rewritten", () => {
-  const posted = [
-    { path: "a.ts", line: 10, body: "first" },
-    { path: "a.ts", line: 10, body: "second" },
-  ];
-  // Both rewritten: which is which cannot be told, so neither gets an id.
-  const rewritten = [
-    { id: 2, path: "a.ts", line: 10, body: "second\n" },
-    { id: 1, path: "a.ts", line: 10, body: "first\n" },
-  ];
-  assert.deepEqual(matchCommentIds(posted, rewritten), [null, null]);
-  // One rewritten: the other matches on its text first, and the one left over
-  // takes the one comment left at the place.
-  const one = [
-    { id: 1, path: "a.ts", line: 10, body: "first\n" },
-    { id: 2, path: "a.ts", line: 10, body: "second" },
-  ];
-  assert.deepEqual(matchCommentIds(posted, one), [1, 2]);
-});
-
-// spec: FPOST#findings
-test("a multi-line comment and a single-line one ending on the same line are kept apart", () => {
-  const posted = [
-    { path: "a.ts", startLine: 10, line: 15, body: "span" },
-    { path: "a.ts", line: 15, body: "single" },
-  ];
-  // Both rewritten, so only the place can tell them apart.
-  const listed = [
-    { id: 2, path: "a.ts", start_line: null, line: 15, body: "single\n" },
-    { id: 1, path: "a.ts", start_line: 10, line: 15, body: "span\n" },
-  ];
-  assert.deepEqual(matchCommentIds(posted, listed), [1, 2]);
-  // An outdated comment is matched on the lines it was posted on.
-  const outdated = [{ id: 3, path: "a.ts", line: null, start_line: null, original_start_line: 10, original_line: 15, body: "span" }];
-  assert.deepEqual(matchCommentIds([posted[0]], outdated), [3]);
 });

@@ -350,7 +350,7 @@ Only the posting job requests a token, just before the post, with the URL's orig
 
 The post happens after the inline review and before the summary comment, so each finding carries the id of its GitHub review comment, and the completion block's `findingsPost` says how it went. A post that gets no answer or a server error is tried once more, and the token request and the post, with their retries, are bounded to about a minute together. A post that fails never fails the review: it is logged, `findingsPost` says it was not accepted, and the GitHub comments go out as usual. A 307 or 308 redirect within the URL's own origin is followed, and any other redirect is not, so the token only goes to the origin it is addressed to.
 
-The payload's JSON Schema is in [`schemas/findings-round.v1.json`](schemas/findings-round.v1.json), and [Receiving findings](docs/receiving-findings.md) tells a service how to check a post and what to expect from it. The library's `buildRoundFindings(…)` and `buildFindingsPayload(…)` build the same payload from a review pipeline's outputs.
+The payload's JSON Schema is in [`schemas/findings-round.v1.json`](schemas/findings-round.v1.json), and [Receiving findings](docs/receiving-findings.md) tells a service how to check a post and what to expect from it. The library's `buildRoundFindings(…)` and `buildFindingsPayload(…)` build the same payload from a review pipeline's outputs, and `matchCommentIds(…)` finds each inline finding's GitHub comment id in a posted review's comments.
 
 ## Completion comments
 

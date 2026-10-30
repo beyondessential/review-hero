@@ -28,6 +28,8 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] A payload builder that returns nothing reports `error` and mints no token (verifies spec: FPOST)
 - [x] Log lines strip control characters and any URL's path however it is written (verifies spec: FPOST)
 - [x] A URL's userinfo never reaches the log (verifies spec: FPOST)
+- [x] Every secret-bearing part of the findings URL is removed from every log line, raw or decoded, query values included (verifies spec: FPOST)
+- [x] A reply is redacted before it is cut, so a URL running over the excerpt's end is caught (verifies spec: FPOST)
 - [x] A refused reply that echoes the request's path has it removed (verifies spec: FPOST)
 - [x] A 307 or 308 within the origin is followed, up to a few times, carrying the token and body (verifies spec: FPOST)
 - [x] A redirect to another origin or scheme, or any other redirect status, is refused and the token goes nowhere else (verifies spec: FPOST)
@@ -65,6 +67,8 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] The inline comment and the posted data use the same test for a finding's range (verifies spec: RUN)
 - [x] The hunks of a diff are read per file on the new side, ignoring deleted files and header-like content lines (verifies spec: RUN)
 - [x] Paths git quotes and escapes are decoded to the real path, characters outside the BMP included (verifies spec: RUN)
+- [x] Scope filtering, triage and hunk parsing agree on a git-quoted header's path, so filtering one file never takes the next with it (verifies spec: RUN)
+- [x] A review GitHub refuses for a multi-line comment is posted again with each comment on its start line (end to end against a faked GitHub) (verifies spec: RUN)
 - [x] A finding whose line is not a whole number is dropped (verifies spec: RUN)
 
 ## Voter counts
@@ -75,6 +79,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] A finding a second look confirms counts its voters plus its confirming checkers (verifies spec: RUN)
 - [x] A kept finding whose group has fewer voters than the majority has no voter count (verifies spec: RUN)
 - [x] An untagged finding listed as a member counts as no voter, in kept and contested groups alike (verifies spec: RUN)
+- [x] Another kept finding listed among a kept group's members does not count towards it (verifies spec: RUN)
 
 ## Completion block
 
