@@ -348,7 +348,22 @@ Grant it on that job rather than the whole workflow, so no other job in your wor
 
 Only the posting job requests a token, just before the post, with the URL's origin as its audience. The token is the post's bearer, so the receiver needs no secret shared with you and can check who sent it with GitHub. A review with no `id-token: write` can't request one, and nor can a review on a pull request from a fork, because GitHub gives a fork's workflow none. Either reports `no-token` in the [completion block](#review) and posts nothing.
 
-The post happens after the inline review and before the summary comment, so each finding carries the id of its GitHub review comment, and the completion block's `findingsPost` says how it went. A post that gets no answer or a server error is tried once more, and the token request and the post, with their retries, are bounded to about a minute together. A post that fails never fails the review: it is logged, `findingsPost` says it was not accepted, and the GitHub comments go out as usual. A 307 or 308 redirect within the URL's own origin is followed, and any other redirect is not, so the token only goes to the origin it is addressed to.
+The post happens after the inline review and before the summary comment (unless you [skip the comments](#skipping-the-comments)), so each finding carries the id of its GitHub review comment, and the completion block's `findingsPost` says how it went. A post that gets no answer or a server error is tried once more, and the token request and the post, with their retries, are bounded to about a minute together. A post that fails never fails the review: it is logged, `findingsPost` says it was not accepted, and the GitHub comments go out as usual. A 307 or 308 redirect within the URL's own origin is followed, and any other redirect is not, so the token only goes to the origin it is addressed to.
+
+### Skipping the comments
+
+If the receiver shows the findings to people itself, set `skip-comments-if-accepted: true` and the review posts no comments to the pull request once the receiver has taken the round. The findings are then posted before any comment, and the receiver's answer decides what happens next:
+
+- A 2xx answer ends the review there: no inline review, no summary comment, and no completion comment. The Review Hero checkbox is still unticked.
+- Any other outcome (`refused`, `unreachable`, `no-token`, `invalid-url` or `error`) posts the inline review and summary as usual, and the completion block's `findingsPost` says what went wrong.
+
+This setting needs `findings-url`. With none, the review warns in its log and posts its comments as usual.
+
+Since the comments come after the post, no finding carries a `commentId`, and with the comments skipped:
+
+- [Auto-fix](#3-optional-enable-auto-fix) has nothing to work from, because it reads Review Hero's review comments.
+- The pull request has no [completion comment](#completion-comments) for the round, so a tool that tracks Review Hero from those comments sees nothing for it.
+- The round's numbering in the summary skips every round the receiver accepted, because rounds are counted from summary comments.
 
 The payload's JSON Schema is in [`schemas/findings-round.v1.json`](schemas/findings-round.v1.json), and [Receiving findings](docs/receiving-findings.md) tells a service how to check a post and what to expect from it. The library's `buildRoundFindings(…)` and `buildFindingsPayload(…)` build the same payload from a review pipeline's outputs, and `matchCommentIds(…)` finds each inline finding's GitHub comment id in a posted review's comments.
 
@@ -428,6 +443,7 @@ jobs:
       voters: 3                # Voters per agent on a typical diff (1 to disable consensus)
       concurrency: 0           # Most agent processes at once (0 = limited by memory and the provider only)
       findings-url: ''         # https URL to post each round's findings to as JSON (empty = off)
+      skip-comments-if-accepted: false  # Post no comments when findings-url accepts the findings
     secrets: inherit
 ```
 
@@ -439,6 +455,7 @@ jobs:
 | `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
 | `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits; on a runner whose memory cannot be read, it runs at most 8. |
 | `findings-url` | empty         | An `https` URL to post each round's findings to as JSON. Empty posts nothing. Needs `id-token: write` in the caller; see [Posting findings as data](#posting-findings-as-data). |
+| `skip-comments-if-accepted` | `false` | Post no comments to the pull request when the `findings-url` receiver accepts the round's findings. Any other answer posts them as usual. See [Skipping the comments](#skipping-the-comments). |
 
 > [!NOTE]
 > `ubuntu-slim` caps a job at 15 minutes, and setup and every agent run in the review job, so they have to fit within that. A review job on `ubuntu-slim` warns about this in the job log.

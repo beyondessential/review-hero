@@ -128,6 +128,16 @@ test("the findings URL is an optional input, empty by default, and reaches only 
   assert.ok(!mentions(job, "findings-url"));
 });
 
+// spec: FPOST#replacing-the-comments
+test("skipping the comments is an optional boolean input, off by default, and reaches only the orchestrator", () => {
+  const input = workflow.on.workflow_call.inputs["skip-comments-if-accepted"];
+  assert.equal(input.type, "boolean");
+  assert.equal(input.default, false);
+  const orchestrate = post.steps.find((s) => s.name === "Run orchestrator");
+  assert.equal(orchestrate.env.SKIP_COMMENTS_IF_ACCEPTED, "${{ inputs.skip-comments-if-accepted }}");
+  assert.ok(!mentions(job, "skip-comments-if-accepted"));
+});
+
 // spec: RUN#credentials
 test("only the posting job can request an identity token", () => {
   // A job that declares permissions gets exactly those, so leaving out
