@@ -141,7 +141,7 @@ jobs:
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Detect Node.js version
-        run: "[ -f .node-version ] || echo latest > .node-version"
+        run: "[ -f .node-version ] || echo 'lts/*' > .node-version"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
