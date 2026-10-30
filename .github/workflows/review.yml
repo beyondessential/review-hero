@@ -274,7 +274,10 @@ jobs:
         timeout-minutes: 5
         run: |
           before=$(node -e 'console.log(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())')
-          npm install -g --before="$before" @anthropic-ai/claude-code
+          # The postinstall fetches the native binary, and npm blocks install
+          # scripts unless the package is named.
+          npm install -g --before="$before" \
+            --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code
           claude --version
 
       # ── Install global Claude rules ──────────────────────────────────
