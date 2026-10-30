@@ -14,15 +14,16 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] `findings-url` is empty by default, and a review with no findings URL posts nothing and requests no identity token.
 - [ ] A findings URL must be an `https` URL, and a review whose findings URL is not one posts nothing, requests no identity token, and says so in the job log.
 - [ ] A review whose caller has not granted permission to request a GitHub Actions identity token reports `no-token`, since a called workflow cannot grant itself more than its caller allows.
-- [ ] The README documents `findings-url`, the permission it needs, and a caller example with both.
+- [ ] The README documents `findings-url`, the permission it needs, and a caller example with both, notes that a pull request from a fork always reports `no-token`, and links to the receiver guide.
 
 ## Authentication
 
 - [ ] Each post is authenticated by a GitHub Actions identity token, sent as its bearer token.
 - [ ] The token's audience is the origin of the findings URL, so a token minted for one receiver is refused by any other.
 - [ ] The token is requested in the posting job, just before the post.
-- [ ] The README tells receivers how to check a post: the token is issued by GitHub Actions, is addressed to the receiver's own origin, has not expired, and names Review Hero's reusable review workflow as the workflow that requested it.
-- [ ] The README tells receivers to take the repository and the run from the token rather than from the payload, since any workflow in a repository can request a token but only Review Hero's names that workflow.
+- [ ] The repository has a guide for receivers, apart from the README.
+- [ ] The receiver guide tells receivers how to check a post: the token is issued by GitHub Actions, is addressed to the receiver's own origin, has not expired, and names Review Hero's reusable review workflow as the workflow that requested it.
+- [ ] The receiver guide tells receivers to take the repository and the run from the token rather than from the payload, since any workflow in a repository can request a token but only Review Hero's names that workflow.
 
 ## When a review posts
 
@@ -31,6 +32,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A review where every agent failed posts a round with a `failed` outcome and no findings, before its completion comment.
 - [ ] A post that gets no answer, or a server error, is tried once more, and the whole post including its retry is bounded in time.
 - [ ] When a post is retried, the retry's result is how the post went.
+- [ ] The receiver guide says a receiver can get the same round more than once: a retry can repeat a post the receiver already took, and re-running the posting job posts the same findings again under a new run attempt, with new identifiers.
 - [ ] A 307 or 308 redirect to the findings URL's own origin is followed, up to a small number of redirects.
 - [ ] Any other redirect is not followed, so the identity token only ever goes to the origin it is addressed to, and the post counts as refused.
 - [ ] A post counts as accepted when the receiver answers with a 2xx status.
@@ -41,7 +43,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 
 - [ ] The payload is a JSON object carrying a `schema` integer, the version of its shape, starting at 1.
 - [ ] Adding a field keeps the same `schema` number, and removing a field or changing what it means increments it.
-- [ ] The payload's JSON Schema is published in the repository, one file per schema version, and the README links to it.
+- [ ] The payload's JSON Schema is published in the repository, one file per schema version, and the receiver guide links to it.
 - [ ] The payload names the repository and the pull request number.
 - [ ] The payload names the GitHub Actions run id and run attempt, and the Review Hero ref and commit, as the completion block does.
 - [ ] The payload carries the review's result (`outcome`, `reviewedSha`, `model` and `counts`) exactly as the completion block reports it.

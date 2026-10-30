@@ -36,5 +36,6 @@ A review can post its round's findings as JSON to a caller-named URL, authentica
 - [ ] Orchestrator: token request, post with one retry and a time bound, `findingsPost`, every-agent-failed post
 - [ ] Completion block: `runId`, `runAttempt`, `findingsPost`
 - [ ] `review.yml`: `findings-url` input, passed to orchestrator; review job permissions without `id-token`
-- [ ] README: input, permission, caller example, receiver verification, schema link, block fields
+- [ ] README: input, permission, caller example, fork PRs report `no-token`, block fields, link to receiver guide
+- [ ] Receiver guide (e.g. `docs/receiving-findings.md`): token checks, take repo and run from the token, schema link, repeat deliveries
 - [ ] `ai-review.yml` dogfood
