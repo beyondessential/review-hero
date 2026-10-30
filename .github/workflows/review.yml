@@ -31,6 +31,10 @@ on:
         description: "https URL to post each round's findings to as JSON, authenticated by a GitHub Actions identity token (the caller needs `id-token: write`). Empty posts nothing"
         type: string
         default: ""
+      skip-comments-if-accepted:
+        description: "Post no comments to the pull request when the findings-url receiver accepts the round's findings (a 2xx). Any other answer posts the comments as usual. Needs findings-url"
+        type: boolean
+        default: false
     secrets:
       ANTHROPIC_API_KEY:
         description: "Anthropic API key"
@@ -576,6 +580,8 @@ jobs:
           # Posted to after the inline review, with an identity token this job
           # requests only when the URL is set and the caller granted `id-token: write`.
           FINDINGS_URL: ${{ inputs.findings-url }}
+          # Posts the findings before any comment, and none at all when they are accepted.
+          SKIP_COMMENTS_IF_ACCEPTED: ${{ inputs.skip-comments-if-accepted }}
           SUPPRESSIONS_PATH: ${{ runner.temp }}/suppressions.yml
           GLOBAL_SUPPRESSIONS_PATH: .review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}

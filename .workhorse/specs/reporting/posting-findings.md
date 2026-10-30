@@ -29,7 +29,7 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 
 ## When a review posts
 
-- [ ] A review posts its findings after its inline review and before its summary comment, so each finding posted inline carries its GitHub comment and the summary's completion block can say how the post went.
+- [ ] A review posts its findings after its inline review and before its summary comment, so each finding posted inline carries its GitHub comment and the summary's completion block can say how the post went, except where the caller has asked for the comments to be skipped on acceptance (see Replacing the comments).
 - [ ] A review with no kept findings still posts its round, with an empty list of findings.
 - [ ] A review where every agent failed posts a round with a `failed` outcome and no findings, before its completion comment.
 - [ ] A post that gets no answer, or a server error, is tried once more.
@@ -44,7 +44,23 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] The job log says how the post went, with the receiver's status and the start of its reply when it was refused.
 - [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path, and each of its lines about the post stays on one line, with no control characters, no other URL's path or userinfo, and no part of the findings URL that could hold a secret (its path, query and query values, fragment and userinfo), however a message or a reply that echoes the request writes it.
 - [ ] A refused reply is read only as far as the start the job log shows.
-- [ ] The review looks up its inline comments' GitHub ids only when it has an `https` findings URL.
+- [ ] The review looks up its inline comments' GitHub ids only when it has an `https` findings URL and posts its findings after its comments.
+
+## Replacing the comments
+
+A caller whose receiver shows the findings to people can have the review post no comments to the pull request once the receiver has taken them.
+
+- [ ] The workflow's `skip-comments-if-accepted` input is a boolean, `false` by default.
+- [ ] A review with `skip-comments-if-accepted` set and a findings URL posts its findings before any comment, so the receiver's answer decides whether the comments are posted.
+- [ ] When the receiver accepts the post, the review posts no inline review and no summary comment, and says so in the job log.
+- [ ] When the receiver accepts the post, a review where every agent failed posts no comment either.
+- [ ] When the post is not accepted, whatever the reason, the review posts its inline review and summary as it would without the setting, and the completion block's `findingsPost` says how the post went.
+- [ ] A review that posts its findings before its comments does not look up its inline comments' GitHub ids, so every finding it posts carries a null comment id.
+- [ ] A review that skips its comments still unticks the Review Hero checkbox on the pull request, so editing the pull request does not trigger another review.
+- [ ] A review with `skip-comments-if-accepted` set and no findings URL posts its comments as usual and warns in the job log that the setting needs a findings URL.
+- [ ] A review with `skip-comments-if-accepted` set and a findings URL that is not an `https` URL posts its comments as usual.
+- [ ] The README documents `skip-comments-if-accepted`, and says that a review that skips its comments leaves auto-fix nothing to work from, since auto-fix reads the review's comments, and leaves the pull request without a completion comment.
+- [ ] The receiver guide says that a receiver of a review with this setting gets every `commentId` null, and that the round it accepts is the only record of the review on the pull request.
 
 ## Payload
 

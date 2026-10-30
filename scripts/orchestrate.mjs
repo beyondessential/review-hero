@@ -24,6 +24,8 @@
  *   DIFF_PATH           — The diff the agents reviewed, for the hunks an inline comment may
  *                         span (optional; without it comments sit on a finding's first line)
  *   FINDINGS_URL        — URL to post the round's findings to as JSON (optional; empty posts nothing)
+ *   SKIP_COMMENTS_IF_ACCEPTED — 'true' to post the findings before any comment, and no comment
+ *                         at all when the receiver accepts them (optional; needs FINDINGS_URL)
  *   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT — The Actions run, named in completion blocks and posted findings
  *   ACTIONS_ID_TOKEN_REQUEST_URL, ACTIONS_ID_TOKEN_REQUEST_TOKEN — Where GitHub Actions
  *                         issues the identity token the findings post carries; set only when the
@@ -287,6 +289,14 @@ async function main() {
   const completion = createCompletionReporter({ repo, prNumber });
   const reviewedLink = completion.link(reviewedSha);
   const findingsUrl = process.env.FINDINGS_URL || "";
+  // With a usable findings URL, the findings go first and the receiver's answer
+  // decides whether any comment is posted. Without one there is nothing to wait for.
+  // spec: FPOST#replacing-the-comments
+  const skipIfAccepted = process.env.SKIP_COMMENTS_IF_ACCEPTED === "true";
+  const postsFirst = skipIfAccepted && Boolean(findingsTarget(findingsUrl));
+  if (skipIfAccepted && findingsTarget(findingsUrl) === undefined) {
+    console.log("::warning::skip-comments-if-accepted needs findings-url, so comments are posted as usual");
+  }
 
   // Posts the round's findings as data when the caller named a URL, and says
   // how that went for the completion block. Never throws.
@@ -383,6 +393,10 @@ async function main() {
     });
     // spec: FPOST#when-a-review-posts
     const findingsPost = await deliver(failed, [], []);
+    if (postsFirst && findingsPost === "accepted") {
+      console.log("The receiver accepted the findings, so no comment is posted");
+      return;
+    }
     const block = completion.block({ ...failed, findingsPost });
     await postComment(
       prNumber,
@@ -477,6 +491,21 @@ async function main() {
   // The GitHub comment each kept group was posted as, null for one not posted inline.
   const commentIds = keptGroups.map(() => null);
 
+  // The receiver's answer decides whether there are comments to post, so the
+  // findings go before them, and none carries a comment id. A post that is not
+  // accepted is not posted again once the comments are up.
+  // spec: FPOST#replacing-the-comments
+  let findingsPost;
+  if (postsFirst) {
+    findingsPost = await deliver(result, keptGroups, commentIds);
+    if (findingsPost === "accepted") {
+      console.log("The receiver accepted the findings, so no comments are posted");
+      // The checkbox is the PR's own state, not a comment: left ticked, the next edit would review again.
+      await uncheckReviewHero(prNumber);
+      return;
+    }
+  }
+
   // Post inline review comments
   // Anchored to the reviewed commit even if the PR has moved on since, so the
   // comments sit on the code the agents actually saw.
@@ -501,7 +530,7 @@ async function main() {
       }
       console.log(`Posted ${inlineComments.length} inline review comments`);
       // Only posted findings carry comment ids, so only then are they worth a call.
-      if (findingsTarget(findingsUrl)) {
+      if (!postsFirst && findingsTarget(findingsUrl)) {
         try {
           const ids = matchCommentIds(inlineComments, await listReviewComments(prNumber, review.id));
           inlineComments.forEach((c, i) => {
@@ -526,7 +555,7 @@ async function main() {
   // After the inline review, so each finding posted inline names its comment,
   // and before the summary, whose completion block says how this went.
   // spec: FPOST#when-a-review-posts
-  const findingsPost = await deliver(result, keptGroups, commentIds);
+  if (!postsFirst) findingsPost = await deliver(result, keptGroups, commentIds);
 
   // Build and post summary
   let round = null;
