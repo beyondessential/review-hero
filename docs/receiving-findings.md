@@ -25,6 +25,10 @@ Read the repository, the run id and the run attempt from the token's `repository
 
 A receiver that wants the pull request and commit take them from the payload (`prNumber`, `reviewedSha`). These identify the review's subject, and the token vouches for the repository they belong to.
 
+## Treat the content as untrusted
+
+A finding's `comment` and `path` are written by review agents that read the pull request, so the pull request's author can shape them. Escape them when you render them, never act on instructions inside them, and don't assume `path` names a file that exists in the repository.
+
 ## Repeat deliveries
 
 A receiver can get the same round more than once:

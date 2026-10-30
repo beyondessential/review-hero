@@ -13,6 +13,8 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] The token's audience is the findings URL's origin and it is sent as the bearer (verifies spec: FPOST)
 - [x] The token is masked in the job log (verifies spec: FPOST)
 - [x] Only the posting job can request an identity token: the review job names its permissions without `id-token`, and the posting job declares none (verifies spec: RUN)
+- [x] This repo's own caller grants `id-token: write` to the calling job alone (verifies spec: FPOST)
+- [x] A payload that fails to build requests no identity token (verifies spec: FPOST)
 
 ## When a review posts
 
@@ -24,6 +26,8 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] A redirect to another origin or scheme, or any other redirect status, is refused and the token goes nowhere else (verifies spec: FPOST)
 - [x] The log gives the receiver's status and the start of its reply when refused, on one line (verifies spec: FPOST)
 - [x] The log names the receiver's origin and never the URL's path (verifies spec: FPOST)
+- [x] Error messages in the log stay on one line and name the findings URL by its origin (verifies spec: FPOST)
+- [x] A single huge reply chunk is decoded only as far as the excerpt (verifies spec: FPOST)
 - [x] A refused reply of any size is read only as far as the excerpt, and its stream cancelled (verifies spec: FPOST)
 - [x] A payload that fails to build sends nothing and reports `error`, not `unreachable` (verifies spec: CMPL)
 - [x] A review with no findings URL makes no call to list its review's comments (end to end against a faked GitHub) (verifies spec: FPOST)
@@ -36,6 +40,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 
 - [x] A built payload validates against the published JSON Schema, including empty and failed rounds (verifies spec: FPOST)
 - [x] The schema refuses a payload missing a required field (verifies spec: FPOST)
+- [x] The schema requires `$schema`, and its test fails on a keyword it does not check (verifies spec: FPOST)
 - [x] The payload's result is the completion block's, less `kind`, and its findings' severities add up to its counts (verifies spec: FPOST)
 - [x] Finding ids are unique within the run attempt (verifies spec: FPOST)
 - [x] Each finding carries its agent's key and name, its range with a null end line for a single line, and its voter count or null (verifies spec: FPOST)
@@ -58,6 +63,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] Findings kept because consensus was not applied have no voter count with several voters, and 1 with one (verifies spec: RUN)
 - [x] A finding a second look confirms counts its voters plus its confirming checkers (verifies spec: RUN)
 - [x] A kept finding whose group has fewer voters than the majority has no voter count (verifies spec: RUN)
+- [x] An untagged finding listed as a member counts as no voter (verifies spec: RUN)
 
 ## Completion block
 

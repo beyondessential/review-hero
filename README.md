@@ -329,21 +329,22 @@ To reject a Review Hero finding: add a 👎 reaction to the comment. Optionally 
 
 Alongside the comments it posts for people, a review can send each round's findings as JSON to a URL you name, so a service gets every finding whole, with its severity, location and origin as fields, rather than parsing them back out of comment text. It is off by default.
 
-To turn it on, set the `findings-url` input to an `https` URL and let the workflow request a GitHub Actions identity token with `id-token: write`:
+To turn it on, set the `findings-url` input to an `https` URL and grant `id-token: write` to the job that calls the review, so it can request a GitHub Actions identity token:
 
 ```yaml
-permissions:
-  contents: read
-  pull-requests: write
-  id-token: write
-
 jobs:
   review:
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
     uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
       findings-url: https://findings.example.com/api/rounds
     secrets: inherit
 ```
+
+Grant it on that job rather than the whole workflow, so no other job in your workflow can request a token addressed to your receiver.
 
 Only the posting job requests a token, just before the post, with the URL's origin as its audience. The token is the post's bearer, so the receiver needs no secret shared with you and can check who sent it with GitHub. A review with no `id-token: write` can't request one, and nor can a review on a pull request from a fork, because GitHub gives a fork's workflow none. Either reports `no-token` in the [completion block](#review) and posts nothing.
 

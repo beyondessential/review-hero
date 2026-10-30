@@ -185,6 +185,13 @@ test("a kept finding whose group falls short of the majority has no voter count"
   }
 });
 
+test("an untagged finding listed as a member does not count as a voter", async () => {
+  const untagged = [...findings, { ...finding(9, 11), voter: undefined }];
+  const reply = JSON.stringify({ keep: [0], members: { 0: [0, 1, 5] } });
+  const { kept } = await applyConsensus(untagged, 3, async () => reply);
+  assert.equal(kept[0].supporters, 2);
+});
+
 test("members the model invents or leaves out do not count towards a voter count", async () => {
   const reply = JSON.stringify({ keep: [0], members: { 0: [0, 99, "x", 3] }, contested: [] });
   const { kept } = await applyConsensus(findings, 3, async () => reply);

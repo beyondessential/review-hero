@@ -140,7 +140,7 @@ test("the whole post is bounded: a retry starts only with enough of the total le
   const fake = fakeFetch([reply(503), reply(200)]);
   const result = await postFindings({
     url: new URL(URL_OK),
-    payload: payload(),
+    body: JSON.stringify(payload()),
     token: "t",
     fetchImpl: fake.fetchImpl,
     now: () => clock,
@@ -160,7 +160,7 @@ test("the log says a retry is coming only when one runs, and says when one was s
     const lines = [];
     await postFindings({
       url: new URL(URL_OK),
-      payload: payload(),
+      body: JSON.stringify(payload()),
       token: "t",
       fetchImpl: fakeFetch([reply(503), reply(200)]).fetchImpl,
       now: () => clock,
@@ -187,7 +187,7 @@ test("an attempt that gets no answer in time is unreachable", async () => {
     fake.calls++;
     return hangs(...args);
   };
-  const result = await postFindings({ url: new URL(URL_OK), payload: payload(), token: "t", fetchImpl: counting, attemptMs: 20, sleep: noSleep, log: quiet });
+  const result = await postFindings({ url: new URL(URL_OK), body: JSON.stringify(payload()), token: "t", fetchImpl: counting, attemptMs: 20, sleep: noSleep, log: quiet });
   assert.equal(result.status, "unreachable");
   assert.match(result.detail, /timed out/);
   assert.equal(fake.calls, 2, "no answer is retried once");
@@ -292,10 +292,49 @@ test("a payload that fails to build sends nothing and reports error, not unreach
   assert.match(lines.join("\n"), /::error::.*nothing was sent: bad payload/);
 });
 
-test("a failure of the run's own after the token never throws and reports error", async () => {
+test("a payload that cannot be serialised reports error, on one log line, and mints no token", async () => {
   const fake = fakeFetch([]);
   const circular = {};
   circular.self = circular;
-  assert.equal(await deliver(fake, { payload: () => circular }), "error");
-  assert.equal(fake.posts().length, 0);
+  const lines = [];
+  assert.equal(await deliver(fake, { payload: () => circular, log: (l) => lines.push(l) }), "error");
+  assert.equal(fake.calls.length, 0, "no token request and no post");
+  assert.ok(lines.every((l) => !l.includes("\n")));
+});
+
+test("a failed payload build requests no identity token", async () => {
+  const fake = fakeFetch([]);
+  const result = await deliver(fake, {
+    payload: () => {
+      throw new Error("no run id");
+    },
+  });
+  assert.equal(result, "error");
+  assert.equal(fake.calls.length, 0);
+});
+
+test("a network error in the log stays on one line and names the findings URL by its origin", async () => {
+  const lines = [];
+  const leaky = new Error("connect failed for https://workhorse.example/hook/s3cret\nat socket");
+  await deliver(fakeFetch([leaky, leaky]), { findingsUrl: "https://workhorse.example/hook/s3cret", log: (l) => lines.push(l) });
+  assert.ok(lines.length > 0);
+  assert.ok(lines.every((l) => !l.includes("\n") && !l.includes("s3cret")), lines.join("\n"));
+  assert.match(lines.join("\n"), /connect failed for https:\/\/workhorse\.example at socket/);
+});
+
+test("a single huge chunk is decoded only as far as the excerpt", async () => {
+  let decoded = 0;
+  const realDecode = TextDecoder.prototype.decode;
+  TextDecoder.prototype.decode = function (input, options) {
+    decoded += input?.byteLength ?? 0;
+    return realDecode.call(this, input, options);
+  };
+  try {
+    const fake = fakeFetch([new Response(new Uint8Array(5_000_000).fill(97), { status: 400 })]);
+    assert.equal(await deliver(fake), "refused");
+  } finally {
+    TextDecoder.prototype.decode = realDecode;
+  }
+  // Four bytes a character for the excerpt, plus the token reply's few.
+  assert.ok(decoded < 1024, `decoded ${decoded} bytes`);
 });

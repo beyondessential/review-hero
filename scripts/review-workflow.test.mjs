@@ -157,3 +157,11 @@ test("the orchestrator is given the diff the agents reviewed, from the uploaded 
   const triage = job.steps.find((s) => s.id === "triage");
   assert.equal(orchestrate.env.DIFF_PATH, triage.env.FILTERED_DIFF_PATH);
 });
+
+// spec: FPOST#turning-it-on
+test("this repo's own caller grants the identity-token permission to the calling job alone", () => {
+  const caller = parse(readFileSync(new URL("../.github/workflows/ai-review.yml", import.meta.url), "utf-8"));
+  assert.equal(caller.permissions, undefined);
+  assert.equal(caller.jobs.review.permissions["id-token"], "write");
+  assert.ok(caller.jobs.review.with["findings-url"].startsWith("https://"));
+});

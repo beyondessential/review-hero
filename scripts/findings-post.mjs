@@ -27,6 +27,16 @@ export const IDENTITY_TOKEN_TIMEOUT_MS = 15_000;
 const REPLY_EXCERPT = 200;
 
 /**
+ * An error message fit for the job log: on one line, and naming `url`, when
+ * given, by its origin alone, since a caller may put a secret in its path.
+ */
+function logMessage(err, url) {
+  let message = oneLine(err?.message ?? err);
+  if (url) message = message.split(url.href).join(url.origin);
+  return message;
+}
+
+/**
  * The start of a reply, read only as far as the excerpt needs: the receiver is
  * whatever the caller named, and could send a body of any size.
  */
@@ -39,7 +49,8 @@ async function replyExcerpt(response) {
     while (text.length < REPLY_EXCERPT) {
       const { done, value } = await reader.read();
       if (done) break;
-      text += decoder.decode(value, { stream: true });
+      // A chunk can be any size, and a character is at most four bytes.
+      text += decoder.decode(value.subarray(0, 4 * (REPLY_EXCERPT - text.length)), { stream: true });
     }
   } finally {
     await reader.cancel().catch(() => {});
@@ -94,7 +105,7 @@ export async function requestIdentityToken({
     log(`::add-mask::${value}`);
     return value;
   } catch (err) {
-    log(`::warning::Identity token request failed: ${err.message}`);
+    log(`::warning::Identity token request failed: ${logMessage(err)}`);
     return null;
   }
 }
@@ -155,19 +166,23 @@ async function attempt({ url, token, body, fetchImpl, timeoutMs }) {
       };
     }
   } catch (err) {
-    return { status: "unreachable", retry: true, detail: err.name === "TimeoutError" ? "timed out" : err.message };
+    return {
+      status: "unreachable",
+      retry: true,
+      detail: err.name === "TimeoutError" ? "timed out" : logMessage(err, target),
+    };
   }
 }
 
 /**
- * Post `payload` to `url` with `token` as the bearer, trying once more after no
- * answer or a server error, all within `FINDINGS_POST_TOTAL_MS`. The result is
- * the last attempt's.
+ * Post `body`, the payload as JSON, to `url` with `token` as the bearer, trying
+ * once more after no answer or a server error, all within
+ * `FINDINGS_POST_TOTAL_MS`. The result is the last attempt's.
  */
 // spec: FPOST#when-a-review-posts
 export async function postFindings({
   url,
-  payload,
+  body,
   token,
   fetchImpl = fetch,
   now = Date.now,
@@ -175,7 +190,6 @@ export async function postFindings({
   attemptMs = FINDINGS_POST_ATTEMPT_MS,
   log = console.log,
 }) {
-  const body = JSON.stringify(payload);
   const deadline = now() + FINDINGS_POST_TOTAL_MS;
   let result = await attempt({ url, token, body, fetchImpl, timeoutMs: attemptMs });
   if (result.retry) {
@@ -198,8 +212,9 @@ export async function postFindings({
  * own, such as the payload failing to build, is `error`, so `unreachable`
  * only ever means the receiver gave no answer.
  *
- * The identity token is requested only once the URL has passed, and `payload`
- * is a function so a review that posts nothing builds nothing.
+ * The payload is built before the identity token is requested, so a run that
+ * cannot build one mints no token, and `payload` is a function so a review with
+ * no usable URL builds nothing.
  */
 // spec: FPOST
 export async function deliverFindings({
@@ -220,6 +235,13 @@ export async function deliverFindings({
       log("::warning::findings-url is not an https URL; not posting findings");
       return "invalid-url";
     }
+    let body;
+    try {
+      body = JSON.stringify(payload());
+    } catch (err) {
+      log(`::error::Could not build the findings payload, so nothing was sent: ${logMessage(err)}`);
+      return "error";
+    }
     const token = await requestIdentityToken({ audience: url.origin, env, fetchImpl, log });
     if (!token) {
       log(
@@ -227,16 +249,9 @@ export async function deliverFindings({
       );
       return "no-token";
     }
-    let built;
-    try {
-      built = payload();
-    } catch (err) {
-      log(`::error::Could not build the findings payload, so nothing was sent: ${err.message}`);
-      return "error";
-    }
     const { status, detail } = await postFindings({
       url,
-      payload: built,
+      body,
       token,
       fetchImpl,
       now,
@@ -254,7 +269,7 @@ export async function deliverFindings({
     return status;
   } catch (err) {
     // The review's comments do not wait on this.
-    log(`::error::Posting findings failed before an answer could come: ${err.message}`);
+    log(`::error::Posting findings failed before an answer could come: ${logMessage(err, parseFindingsUrl(raw))}`);
     return "error";
   }
 }

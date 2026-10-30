@@ -33,7 +33,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { deliverFindings } from "./findings-post.mjs";
+import { deliverFindings, parseFindingsUrl } from "./findings-post.mjs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 import {
   findRejectedFindings,
@@ -517,7 +517,7 @@ async function main() {
       const review = await postReview(prNumber, reviewedSha, inlineComments);
       console.log(`Posted ${inlineComments.length} inline review comments`);
       // Only posted findings carry comment ids, so only then are they worth a call.
-      if (findingsUrl.trim()) {
+      if (parseFindingsUrl(findingsUrl.trim())) {
         try {
           const ids = matchCommentIds(inlineComments, await listReviewComments(prNumber, review.id));
           inlineComments.forEach((c, i) => {

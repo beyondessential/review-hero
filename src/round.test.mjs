@@ -16,8 +16,20 @@ import {
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/findings-round.v1.json", import.meta.url), "utf-8"));
 
-/** The subset of JSON Schema the published schema uses, so the repo needs no validator dependency. */
+/** The keywords `validate` checks, or carries as annotation only. */
+const KNOWN_KEYWORDS = new Set([
+  "$schema", "$id", "title", "description",
+  "type", "const", "enum", "minimum", "minLength", "pattern", "items", "required", "properties",
+]);
+
+/**
+ * The subset of JSON Schema the published schema uses, so the repo needs no
+ * validator dependency. A keyword it does not check fails outright, so the
+ * schema cannot gain a constraint this test silently ignores.
+ */
 function validate(value, node, path = "$") {
+  const unknown = Object.keys(node).filter((k) => !KNOWN_KEYWORDS.has(k));
+  if (unknown.length > 0) throw new Error(`${path}: the schema test does not check ${unknown.join(", ")}`);
   const errors = [];
   const types = node.type === undefined ? null : [].concat(node.type);
   const typeOf = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : Number.isInteger(v) ? "integer" : typeof v);
@@ -89,6 +101,10 @@ test("the payload links to its own schema, which names itself the same way", () 
   assert.ok(FINDINGS_SCHEMA_URL.endsWith(`/schemas/findings-round.v${FINDINGS_SCHEMA}.json`));
 });
 
+test("the schema test refuses a keyword it does not check", () => {
+  assert.throws(() => validate({}, { type: "object", additionalProperties: false }), /does not check additionalProperties/);
+});
+
 test("a round with no findings and a failed round validate too", () => {
   assert.deepEqual(validate(build([]), schema), []);
   const failed = build([], { agentsCompleted: 0, agentsFailed: 3 });
@@ -101,6 +117,8 @@ test("the schema refuses a payload missing a required field or with a bad value"
   const payload = build([group(f())]);
   const { runId, ...withoutRun } = payload;
   assert.notDeepEqual(validate(withoutRun, schema), []);
+  const { $schema, ...withoutLink } = payload;
+  assert.notDeepEqual(validate(withoutLink, schema), []);
   assert.notDeepEqual(validate({ ...payload, outcome: "done" }, schema), []);
   assert.notDeepEqual(validate({ ...payload, findings: [{ ...payload.findings[0], severity: "blocker" }] }, schema), []);
 });

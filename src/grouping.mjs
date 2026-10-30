@@ -147,15 +147,17 @@ Example: {"keep": [0, 3], "members": {"0": [0, 1, 2], "3": [3, 4]}, "contested":
     const supportersOf = (i) => {
       const members = parsed.members[i];
       if (!members) return null;
-      const voters = new Set([findings[i].voter]);
-      for (const m of members) if (validIndex(m)) voters.add(findings[m].voter);
+      // An untagged finding is no voter's, so it cannot count as one.
+      const voters = new Set();
+      for (const m of [i, ...members]) if (validIndex(m) && findings[m].voter !== undefined) voters.add(findings[m].voter);
       // Kept with fewer than the majority behind it, the reply contradicts
       // itself, so its grouping says nothing reliable about the count.
       return voters.size >= threshold ? voters.size : null;
     };
-    const kept = findings
-      .map(({ voter, ...rest }, i) => ({ ...rest, supporters: supportersOf(i) }))
-      .filter((_, i) => keptIndices.has(i));
+    const kept = [];
+    findings.forEach(({ voter, ...rest }, i) => {
+      if (keptIndices.has(i)) kept.push({ ...rest, supporters: supportersOf(i) });
+    });
     const droppedFindings = [];
     const droppedAt = new Map(); // input index → index in droppedFindings
     findings.forEach(({ voter, ...rest }, i) => {

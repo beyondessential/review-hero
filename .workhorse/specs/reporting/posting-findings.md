@@ -14,16 +14,17 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] `findings-url` is empty by default, and a review with no findings URL posts nothing and requests no identity token.
 - [ ] A findings URL must be an `https` URL, and a review whose findings URL is not one posts nothing, requests no identity token, and says so in the job log.
 - [ ] A review whose caller has not granted permission to request a GitHub Actions identity token reports `no-token`, since a called workflow cannot grant itself more than its caller allows.
-- [ ] The README documents `findings-url`, the permission it needs, and a caller example with both, notes that a pull request from a fork always reports `no-token`, and links to the receiver guide.
+- [ ] The README documents `findings-url`, the permission it needs, and a caller example with both that grants the permission to the calling job alone, notes that a pull request from a fork always reports `no-token`, and links to the receiver guide.
 
 ## Authentication
 
 - [ ] Each post is authenticated by a GitHub Actions identity token, sent as its bearer token.
 - [ ] The token's audience is the origin of the findings URL, so a token minted for one receiver is refused by any other.
-- [ ] The token is requested in the posting job, just before the post.
+- [ ] The token is requested in the posting job, just before the post and after the payload is built, so a run that cannot build its payload requests none.
 - [ ] The repository has a guide for receivers, apart from the README.
 - [ ] The receiver guide tells receivers how to check a post: the token is issued by GitHub Actions, is addressed to the receiver's own origin, has not expired, and names Review Hero's reusable review workflow as the workflow that requested it.
 - [ ] The receiver guide tells receivers to take the repository and the run from the token rather than from the payload, since any workflow in a repository can request a token but only Review Hero's names that workflow.
+- [ ] The receiver guide tells receivers to treat a finding's comment and path as untrusted, since the pull request's author can shape them.
 
 ## When a review posts
 
@@ -38,9 +39,9 @@ Any service can be a receiver: the post is authenticated by GitHub, so a receive
 - [ ] A post counts as accepted when the receiver answers with a 2xx status.
 - [ ] A post that is not accepted never fails the review: it is logged, the completion block says how it went (see `reporting/completion-comments.md`), and the review's GitHub comments are posted as usual.
 - [ ] The job log says how the post went, with the receiver's status and the start of its reply when it was refused.
-- [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path.
+- [ ] The job log names the receiver by the findings URL's origin alone, since a caller may put a secret in its path, and each of its lines about the post stays on one line.
 - [ ] A refused reply is read only as far as the start the job log shows.
-- [ ] The review looks up its inline comments' GitHub ids only when it has a findings URL.
+- [ ] The review looks up its inline comments' GitHub ids only when it has an `https` findings URL.
 
 ## Payload
 
