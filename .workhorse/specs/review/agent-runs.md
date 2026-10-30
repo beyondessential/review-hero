@@ -55,7 +55,7 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] A finding survives consensus when a strict majority of the review's voter count reports it, with voters that contributed nothing still counting toward that number.
 - [ ] A kept finding's voter count is the number of distinct voters whose findings consensus grouped with it, counted from the group's members rather than taken from the consensus model's reply, plus any checkers that confirmed it on a second look.
 - [ ] With one voter per agent, each finding's voter count is 1.
-- [ ] A finding kept because consensus was not applied to its agent has no voter count.
+- [ ] In a review with more than one voter per agent, a finding kept because consensus could not be applied to its agent has no voter count.
 - [ ] A group of findings merged across agents takes its representative's voter count.
 - [ ] Posted findings carry their voter count (see `reporting/posting-findings.md`).
 - [ ] The completion block's `counts.voters` is the voter count the review ran with (see `reporting/completion-comments.md`).
@@ -101,7 +101,7 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] Consensus runs as its own step after the agents finish, before the GitHub App token is created.
 - [ ] While grouping an agent's findings, the consensus model names its contested areas: parts of the code where findings below the majority suggest a real problem worth a second look.
 - [ ] An agent has at most three contested areas.
-- [ ] A consensus reply that cannot be read whole still filters findings when its list of kept findings is complete, names no contested areas, and says so in the job log.
+- [ ] A consensus reply that cannot be read whole still filters findings when its list of kept findings is complete, names no contested areas, leaves its kept findings without a voter count, and says so in the job log.
 - [ ] Every finding in a contested area belongs to a group below the majority.
 - [ ] A review that runs one voter per agent has no consensus, so no second look.
 - [ ] Each contested area gets as many checkers as a finding from a single voter needs to reach the majority.
