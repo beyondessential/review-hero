@@ -247,7 +247,8 @@ jobs:
           if [ -f .caller-base/.node-version ]; then
             version=$(tr -d '[:space:]' < .caller-base/.node-version)
           fi
-          echo "version=${version:-latest}" >> "$GITHUB_OUTPUT"
+          # lts/*, not latest: latest resolves to prereleases.
+          echo "version=${version:-lts/*}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         if: steps.check.outputs.should_run == 'true'
@@ -494,7 +495,8 @@ jobs:
           if [ -f .caller-base/.node-version ]; then
             version=$(tr -d '[:space:]' < .caller-base/.node-version)
           fi
-          echo "version=${version:-latest}" >> "$GITHUB_OUTPUT"
+          # lts/*, not latest: latest resolves to prereleases.
+          echo "version=${version:-lts/*}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         timeout-minutes: 2
