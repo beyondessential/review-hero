@@ -182,5 +182,6 @@ test("this repo's own caller grants the identity-token permission to the calling
   const caller = parse(readFileSync(new URL("../.github/workflows/ai-review.yml", import.meta.url), "utf-8"));
   assert.equal(caller.permissions, undefined);
   assert.equal(caller.jobs.review.permissions["id-token"], "write");
-  assert.ok(caller.jobs.review.with["findings-url"].startsWith("https://"));
+  assert.equal(caller.jobs.review.with["per-issue-comments"], "standalone");
+  assert.equal(caller.jobs.review.with["summary-comment"], "always");
 });
