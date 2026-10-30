@@ -24,6 +24,9 @@
  *   DIFF_PATH           — The diff the agents reviewed, for the hunks an inline comment may
  *                         span (optional; without it comments sit on a finding's first line)
  *   FINDINGS_URL        — URL to post the round's findings to as JSON (optional; empty posts nothing)
+ *   PER_ISSUE_COMMENTS, SUMMARY_COMMENT — Whether to post the inline review and the summary
+ *                         comment: always (default), standalone (unless FINDINGS_URL's receiver
+ *                         accepted the findings) or never
  *   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT — The Actions run, named in completion blocks and posted findings
  *   ACTIONS_ID_TOKEN_REQUEST_URL, ACTIONS_ID_TOKEN_REQUEST_TOKEN — Where GitHub Actions
  *                         issues the identity token the findings post carries; set only when the
@@ -287,6 +290,19 @@ async function main() {
   const completion = createCompletionReporter({ repo, prNumber });
   const reviewedLink = completion.link(reviewedSha);
   const findingsUrl = process.env.FINDINGS_URL || "";
+  // spec: FPOST#replacing-the-comments
+  const perIssuePolicy = commentPolicy("per-issue-comments", process.env.PER_ISSUE_COMMENTS);
+  const summaryPolicy = commentPolicy("summary-comment", process.env.SUMMARY_COMMENT);
+  // The inline review waits on the receiver's answer, so the findings go before it.
+  const postsFirst = perIssuePolicy === "standalone" && Boolean(findingsTarget(findingsUrl));
+  if (findingsTarget(findingsUrl) === undefined) {
+    for (const [name, policy, what] of [
+      ["per-issue-comments", perIssuePolicy, "the review's findings"],
+      ["summary-comment", summaryPolicy, "the review's summary and completion block"],
+    ]) {
+      if (policy === "never") console.log(`::warning::${name} is never and there is no findings-url, so ${what} go nowhere`);
+    }
+  }
 
   // Posts the round's findings as data when the caller named a URL, and says
   // how that went for the completion block. Never throws.
@@ -383,11 +399,13 @@ async function main() {
     });
     // spec: FPOST#when-a-review-posts
     const findingsPost = await deliver(failed, [], []);
-    const block = completion.block({ ...failed, findingsPost });
-    await postComment(
-      prNumber,
-      `🦸 **Review Hero** was requested${reviewedLink ? ` for ${reviewedLink}` : ""} but could not complete — all agents failed. Check the workflow logs for details.\n\n${block}`,
-    );
+    if (shouldPost("summary-comment", summaryPolicy, findingsPost)) {
+      const block = completion.block({ ...failed, findingsPost });
+      await postComment(
+        prNumber,
+        `🦸 **Review Hero** was requested${reviewedLink ? ` for ${reviewedLink}` : ""} but could not complete — all agents failed. Check the workflow logs for details.\n\n${block}`,
+      );
+    }
     return;
   }
 
@@ -477,10 +495,18 @@ async function main() {
   // The GitHub comment each kept group was posted as, null for one not posted inline.
   const commentIds = keptGroups.map(() => null);
 
+  // The receiver's answer decides whether the inline review is posted, so the
+  // findings go before it, and none carries a comment id. A post that is not
+  // accepted is not posted again once the comments are up.
+  // spec: FPOST#replacing-the-comments
+  let findingsPost;
+  if (postsFirst) findingsPost = await deliver(result, keptGroups, commentIds);
+  const postInline = inlineComments.length > 0 && shouldPost("per-issue-comments", perIssuePolicy, findingsPost);
+
   // Post inline review comments
   // Anchored to the reviewed commit even if the PR has moved on since, so the
   // comments sit on the code the agents actually saw.
-  if (inlineComments.length > 0) {
+  if (postInline) {
     try {
       let review;
       try {
@@ -501,7 +527,7 @@ async function main() {
       }
       console.log(`Posted ${inlineComments.length} inline review comments`);
       // Only posted findings carry comment ids, so only then are they worth a call.
-      if (findingsTarget(findingsUrl)) {
+      if (!postsFirst && findingsTarget(findingsUrl)) {
         try {
           const ids = matchCommentIds(inlineComments, await listReviewComments(prNumber, review.id));
           inlineComments.forEach((c, i) => {
@@ -526,14 +552,17 @@ async function main() {
   // After the inline review, so each finding posted inline names its comment,
   // and before the summary, whose completion block says how this went.
   // spec: FPOST#when-a-review-posts
-  const findingsPost = await deliver(result, keptGroups, commentIds);
+  if (!postsFirst) findingsPost = await deliver(result, keptGroups, commentIds);
 
   // Build and post summary
+  const postSummary = shouldPost("summary-comment", summaryPolicy, findingsPost);
   let round = null;
-  try {
-    round = (await countPreviousRounds(prNumber)) + 1;
-  } catch (err) {
-    console.warn(`Failed to count previous rounds: ${err.message}`);
+  if (postSummary) {
+    try {
+      round = (await countPreviousRounds(prNumber)) + 1;
+    } catch (err) {
+      console.warn(`Failed to count previous rounds: ${err.message}`);
+    }
   }
 
   const summaryParts = [
@@ -620,11 +649,43 @@ async function main() {
   const body = stripCompletionBlocks(summaryParts.join("")) +
     `\n\n${completion.block({ ...result, findingsPost })}`;
 
-  await postComment(prNumber, body);
-  console.log("Posted summary comment");
+  if (postSummary) {
+    await postComment(prNumber, body);
+    console.log("Posted summary comment");
+  }
 
   // Uncheck the Review Hero checkbox so subsequent edits don't re-trigger
   await uncheckReviewHero(prNumber);
+}
+
+const COMMENT_POLICIES = ["always", "standalone", "never"];
+
+/**
+ * A comment input's value: `always` when it is unset, and also, with a warning,
+ * when it is not one of the three values, so a mistake never silences a review.
+ */
+// spec: FPOST#replacing-the-comments
+function commentPolicy(name, value) {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return "always";
+  if (COMMENT_POLICIES.includes(trimmed)) return trimmed;
+  console.log(`::warning::${name} is not one of ${COMMENT_POLICIES.join(", ")}, so it is treated as always`);
+  return "always";
+}
+
+/**
+ * Whether a comment is posted under `policy`, given how the findings post went
+ * (`findingsPost` is a completion block value, undefined when nothing was posted).
+ * Says in the log when it is not.
+ */
+// spec: FPOST#replacing-the-comments
+function shouldPost(name, policy, findingsPost) {
+  const post = policy === "always" || (policy === "standalone" && findingsPost !== "accepted");
+  if (!post) {
+    const why = policy === "standalone" ? `, findings post ${findingsPost}` : "";
+    console.log(`Not posting the ${name === "summary-comment" ? "summary comment" : "inline review"}: ${name} is ${policy}${why}`);
+  }
+  return post;
 }
 
 // Only orchestrate when run directly, so the parsing helpers can be imported
@@ -653,4 +714,4 @@ function consensusStat({ voters, unfiltered = [], kept, dropped }) {
   return `consensus ${voters} voters, not applied for ${unfiltered.length} agent${unfiltered.length === 1 ? "" : "s"}`;
 }
 
-export { parseAgentResult, extractJsonArray, buildSummaryHeader, consensusStat };
+export { parseAgentResult, extractJsonArray, buildSummaryHeader, consensusStat, commentPolicy, shouldPost };

@@ -348,7 +348,34 @@ Grant it on that job rather than the whole workflow, so no other job in your wor
 
 Only the posting job requests a token, just before the post, with the URL's origin as its audience. The token is the post's bearer, so the receiver needs no secret shared with you and can check who sent it with GitHub. A review with no `id-token: write` can't request one, and nor can a review on a pull request from a fork, because GitHub gives a fork's workflow none. Either reports `no-token` in the [completion block](#review) and posts nothing.
 
-The post happens after the inline review and before the summary comment, so each finding carries the id of its GitHub review comment, and the completion block's `findingsPost` says how it went. A post that gets no answer or a server error is tried once more, and the token request and the post, with their retries, are bounded to about a minute together. A post that fails never fails the review: it is logged, `findingsPost` says it was not accepted, and the GitHub comments go out as usual. A 307 or 308 redirect within the URL's own origin is followed, and any other redirect is not, so the token only goes to the origin it is addressed to.
+The post happens after the inline review and before the summary comment (unless you [leave the comments off](#leaving-the-comments-off)), so each finding carries the id of its GitHub review comment, and the completion block's `findingsPost` says how it went. A post that gets no answer or a server error is tried once more, and the token request and the post, with their retries, are bounded to about a minute together. A post that fails never fails the review: it is logged, `findingsPost` says it was not accepted, and the GitHub comments go out as usual. A 307 or 308 redirect within the URL's own origin is followed, and any other redirect is not, so the token only goes to the origin it is addressed to.
+
+### Leaving the comments off
+
+If the receiver shows the findings to people itself, the comments Review Hero posts to the pull request can be left off. Two inputs set this, `per-issue-comments` for the inline review and `summary-comment` for the summary comment (which carries the [completion block](#completion-comments), and holds the nitpicks), each with the same values:
+
+| Value | The comment is posted |
+|-------|-----------------------|
+| `always` (default) | Whatever happened to the findings post. |
+| `standalone` | Unless the receiver accepted the findings (a 2xx). A post that was refused, got no answer, had no token, had an invalid URL or errored, or no `findings-url` at all, leaves the comment to stand alone, so it is posted. |
+| `never` | Not at all. With no `findings-url` what the comment would have said goes nowhere, and the review warns in its log. |
+
+```yaml
+    with:
+      findings-url: https://findings.example.com/api/rounds
+      per-issue-comments: standalone   # inline review only when the findings were not accepted
+      summary-comment: always          # summary and completion block every round
+```
+
+A value that is not one of the three is warned about in the log and treated as `always`. A review that leaves a comment off says so in its log, and still unticks the Review Hero checkbox.
+
+With `per-issue-comments: standalone` the findings are posted before the inline review, so the receiver's answer can decide whether it goes up, and no finding carries a `commentId`. Any other value posts the findings in the order described above, and only `never` leaves them without comment ids.
+
+Leaving comments off costs:
+
+- [Auto-fix](#3-optional-enable-auto-fix) reads Review Hero's review comments, so it has nothing to work from when the inline review is left off.
+- With the summary left off, the pull request has no [completion comment](#completion-comments) for the round, so a tool that tracks Review Hero from those comments sees nothing for it.
+- The summary's round number is counted from summary comments, so it skips rounds whose summary was not posted.
 
 The payload's JSON Schema is in [`schemas/findings-round.v1.json`](schemas/findings-round.v1.json), and [Receiving findings](docs/receiving-findings.md) tells a service how to check a post and what to expect from it. The library's `buildRoundFindings(…)` and `buildFindingsPayload(…)` build the same payload from a review pipeline's outputs, and `matchCommentIds(…)` finds each inline finding's GitHub comment id in a posted review's comments.
 
@@ -428,6 +455,8 @@ jobs:
       voters: 3                # Voters per agent on a typical diff (1 to disable consensus)
       concurrency: 0           # Most agent processes at once (0 = limited by memory and the provider only)
       findings-url: ''         # https URL to post each round's findings to as JSON (empty = off)
+      per-issue-comments: always  # always, standalone (unless findings-url accepts) or never
+      summary-comment: always     # likewise, for the summary comment
     secrets: inherit
 ```
 
@@ -439,6 +468,8 @@ jobs:
 | `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
 | `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits; on a runner whose memory cannot be read, it runs at most 8. |
 | `findings-url` | empty         | An `https` URL to post each round's findings to as JSON. Empty posts nothing. Needs `id-token: write` in the caller; see [Posting findings as data](#posting-findings-as-data). |
+| `per-issue-comments` | `always` | Whether to post the inline review: `always`, `standalone` (unless the `findings-url` receiver accepted the findings) or `never`. See [Leaving the comments off](#leaving-the-comments-off). |
+| `summary-comment` | `always` | Whether to post the summary comment, with its completion block: `always`, `standalone` or `never`. See [Leaving the comments off](#leaving-the-comments-off). |
 
 > [!NOTE]
 > `ubuntu-slim` caps a job at 15 minutes, and setup and every agent run in the review job, so they have to fit within that. A review job on `ubuntu-slim` warns about this in the job log.

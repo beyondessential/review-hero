@@ -31,6 +31,14 @@ on:
         description: "https URL to post each round's findings to as JSON, authenticated by a GitHub Actions identity token (the caller needs `id-token: write`). Empty posts nothing"
         type: string
         default: ""
+      per-issue-comments:
+        description: "Whether to post the inline review: `always`, `standalone` (unless the findings-url receiver accepted the round's findings) or `never`"
+        type: string
+        default: always
+      summary-comment:
+        description: "Whether to post the summary comment, which carries the completion block: `always`, `standalone` (unless the findings-url receiver accepted the round's findings) or `never`"
+        type: string
+        default: always
     secrets:
       ANTHROPIC_API_KEY:
         description: "Anthropic API key"
@@ -573,9 +581,12 @@ jobs:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           # The diff the agents reviewed, for the hunks an inline comment may span.
           DIFF_PATH: ${{ runner.temp }}/review/pr-filtered.diff
-          # Posted to after the inline review, with an identity token this job
+          # Posted to after the inline review (before it for `per-issue-comments: standalone`), with an identity token this job
           # requests only when the URL is set and the caller granted `id-token: write`.
           FINDINGS_URL: ${{ inputs.findings-url }}
+          # Which comments to post, given how the findings post went.
+          PER_ISSUE_COMMENTS: ${{ inputs.per-issue-comments }}
+          SUMMARY_COMMENT: ${{ inputs.summary-comment }}
           SUPPRESSIONS_PATH: ${{ runner.temp }}/suppressions.yml
           GLOBAL_SUPPRESSIONS_PATH: .review-hero/suppressions.yml
           ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}

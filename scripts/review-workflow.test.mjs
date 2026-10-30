@@ -112,8 +112,15 @@ test("the review job's working files that posting reads sit under the uploaded d
 
 test("the Claude CLI installed is the newest release at least a week old", () => {
   const install = job.steps.find((s) => s.name === "Install Claude CLI");
-  assert.match(install.run, /npm install -g --before="\$before" @anthropic-ai\/claude-code/);
+  assert.match(install.run, /npm install -g --before="\$before"/);
+  assert.match(install.run, /@anthropic-ai\/claude-code\s*$/m);
   assert.match(install.run, /Date\.now\(\) - 7 \* 24 \* 60 \* 60 \* 1000/);
+});
+
+test("only the Claude CLI may run its install script", () => {
+  // npm blocks install scripts unless a package is named, and the CLI's fetches its native binary.
+  const install = job.steps.find((s) => s.name === "Install Claude CLI");
+  assert.deepEqual(install.run.match(/--allow-scripts=\S+/g), ["--allow-scripts=@anthropic-ai/claude-code"]);
 });
 
 // ── Posting findings ─────────────────────────────────────────────────────────
@@ -126,6 +133,18 @@ test("the findings URL is an optional input, empty by default, and reaches only 
   const orchestrate = post.steps.find((s) => s.name === "Run orchestrator");
   assert.equal(orchestrate.env.FINDINGS_URL, "${{ inputs.findings-url }}");
   assert.ok(!mentions(job, "findings-url"));
+});
+
+// spec: FPOST#replacing-the-comments
+test("the comment inputs are optional strings that default to always and reach only the orchestrator", () => {
+  const orchestrate = post.steps.find((s) => s.name === "Run orchestrator");
+  for (const [input, env] of [["per-issue-comments", "PER_ISSUE_COMMENTS"], ["summary-comment", "SUMMARY_COMMENT"]]) {
+    const declared = workflow.on.workflow_call.inputs[input];
+    assert.equal(declared.type, "string");
+    assert.equal(declared.default, "always");
+    assert.equal(orchestrate.env[env], `\${{ inputs.${input} }}`);
+    assert.ok(!mentions(job, input));
+  }
 });
 
 // spec: RUN#credentials
@@ -163,5 +182,6 @@ test("this repo's own caller grants the identity-token permission to the calling
   const caller = parse(readFileSync(new URL("../.github/workflows/ai-review.yml", import.meta.url), "utf-8"));
   assert.equal(caller.permissions, undefined);
   assert.equal(caller.jobs.review.permissions["id-token"], "write");
-  assert.ok(caller.jobs.review.with["findings-url"].startsWith("https://"));
+  assert.equal(caller.jobs.review.with["per-issue-comments"], "standalone");
+  assert.equal(caller.jobs.review.with["summary-comment"], "always");
 });

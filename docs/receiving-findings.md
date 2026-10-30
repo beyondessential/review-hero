@@ -8,6 +8,8 @@ An HTTPS `POST` with a JSON body and `Authorization: Bearer <token>`. The body f
 
 Each round posts once, after the review's inline comments and before its summary comment. A review with no kept findings still posts, with an empty `findings` list, and so does a review where every agent failed, with `outcome` `failed`.
 
+A caller can leave Review Hero's comments off the pull request (`per-issue-comments` and `summary-comment`, each `always`, `standalone` or `never`; see the [README](../README.md#leaving-the-comments-off)). With `standalone`, a comment is posted only if you did not accept the round, so a 2xx can mean the round you accepted is the only record of that review on the pull request. A caller who sets `per-issue-comments` to `standalone` or `never` sends every `commentId` null.
+
 Answer with a 2xx once you have taken the round. Review Hero counts any 2xx as accepted and anything else as refused, and logs your status and the start of your reply. A `5xx`, or no answer, is tried once more.
 
 ## Checking a post

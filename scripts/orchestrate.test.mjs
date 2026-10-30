@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseAgentResult, buildSummaryHeader, consensusStat } from "./orchestrate.mjs";
+import { parseAgentResult, buildSummaryHeader, consensusStat, commentPolicy, shouldPost } from "./orchestrate.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-parse-"));
 
@@ -189,4 +189,44 @@ test("the summary reports consensus only where it filtered the findings", () => 
   assert.equal(consensusStat(outcome), "consensus 3 voters");
   assert.equal(consensusStat({ ...outcome, unfiltered: ["design"] }), "consensus 3 voters, not applied for 1 agent");
   assert.equal(consensusStat({ ...outcome, unfiltered: ["bugs", "design"] }), "no consensus (3 voters)");
+});
+
+// spec: FPOST#replacing-the-comments
+test("a comment input is always unless it names another of the three values", () => {
+  const quietly = (fn) => {
+    const log = console.log;
+    const lines = [];
+    console.log = (line) => lines.push(line);
+    try {
+      return [fn(), lines];
+    } finally {
+      console.log = log;
+    }
+  };
+  for (const value of ["always", "standalone", "never"]) {
+    assert.deepEqual(quietly(() => commentPolicy("summary-comment", value)), [value, []]);
+  }
+  assert.deepEqual(quietly(() => commentPolicy("summary-comment", " never ")), ["never", []]);
+  for (const value of [undefined, "", "  "]) {
+    assert.deepEqual(quietly(() => commentPolicy("summary-comment", value)), ["always", []]);
+  }
+  const [policy, lines] = quietly(() => commentPolicy("summary-comment", "sometimes"));
+  assert.equal(policy, "always");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^::warning::summary-comment is not one of always, standalone, never/);
+});
+
+// spec: FPOST#replacing-the-comments
+test("a standalone comment is posted unless the receiver accepted the findings", () => {
+  const log = console.log;
+  console.log = () => {};
+  try {
+    for (const post of ["accepted", "refused", "unreachable", "no-token", "invalid-url", "error", undefined]) {
+      assert.equal(shouldPost("summary-comment", "always", post), true);
+      assert.equal(shouldPost("summary-comment", "never", post), false);
+      assert.equal(shouldPost("summary-comment", "standalone", post), post !== "accepted");
+    }
+  } finally {
+    console.log = log;
+  }
 });

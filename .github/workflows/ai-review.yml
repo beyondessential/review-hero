@@ -14,5 +14,9 @@ jobs:
     uses: ./.github/workflows/review.yml
     with:
       ref: ${{ github.event.pull_request.head.ref }}
-      findings-url: https://workhorse.bes.au/api/review-hero/rounds
+      # Not set until the receiver exists. Until then, `standalone` has nothing
+      # accepting the findings, so the inline review is posted as usual.
+      # findings-url: https://workhorse.bes.au/api/review-hero/rounds
+      per-issue-comments: standalone
+      summary-comment: always
     secrets: inherit
