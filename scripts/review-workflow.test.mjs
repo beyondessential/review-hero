@@ -112,8 +112,15 @@ test("the review job's working files that posting reads sit under the uploaded d
 
 test("the Claude CLI installed is the newest release at least a week old", () => {
   const install = job.steps.find((s) => s.name === "Install Claude CLI");
-  assert.match(install.run, /npm install -g --before="\$before" @anthropic-ai\/claude-code/);
+  assert.match(install.run, /npm install -g --before="\$before"/);
+  assert.match(install.run, /@anthropic-ai\/claude-code\s*$/m);
   assert.match(install.run, /Date\.now\(\) - 7 \* 24 \* 60 \* 60 \* 1000/);
+});
+
+test("only the Claude CLI may run its install script", () => {
+  // npm blocks install scripts unless a package is named, and the CLI's fetches its native binary.
+  const install = job.steps.find((s) => s.name === "Install Claude CLI");
+  assert.deepEqual(install.run.match(/--allow-scripts=\S+/g), ["--allow-scripts=@anthropic-ai/claude-code"]);
 });
 
 // ── Posting findings ─────────────────────────────────────────────────────────
