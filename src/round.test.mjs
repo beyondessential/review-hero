@@ -193,6 +193,32 @@ test("one test decides a finding's range for its inline comment and its posted d
   }
 });
 
+test("a finding whose line is not a whole number is dropped, as the payload needs one", () => {
+  const raw = (line) => ({ file: "a.ts", line, severity: "suggestion", comment: "c" });
+  assert.deepEqual(validateFindings([raw(12), raw(12.5), raw("12"), raw(0)], "bugs").map((f) => f.line), [12]);
+});
+
+test("a path git quotes is decoded to the path a finding names", () => {
+  const diff = [
+    'diff --git "a/src/\\346\\226\\207.ts" "b/src/\\346\\226\\207.ts"',
+    '--- "a/src/\\346\\226\\207.ts"',
+    '+++ "b/src/\\346\\226\\207.ts"',
+    "@@ -1 +1,3 @@",
+    " x",
+    "+y",
+    "+z",
+    '--- "a/say \\"hi\\".ts"',
+    '+++ "b/say \\"hi\\".ts"',
+    "@@ -1 +1,2 @@",
+    " x",
+    "+y",
+    "",
+  ].join("\n");
+  const hunks = parseHunks(diff);
+  assert.deepEqual([...hunks.keys()], ["src/文.ts", 'say "hi".ts']);
+  assert.deepEqual(commentLines({ file: "src/文.ts", line: 1, endLine: 3 }, hunks), { line: 3, startLine: 1 });
+});
+
 // spec: RUN#findings
 test("an agent's end line is kept only when it is an integer past the start line", () => {
   const raw = (endLine) => ({ file: "a.ts", line: 10, severity: "suggestion", comment: "c", endLine });

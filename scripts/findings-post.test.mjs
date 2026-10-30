@@ -5,7 +5,7 @@ import {
   deliverFindings,
   FINDINGS_POST_MAX_REDIRECTS,
   FINDINGS_POST_TOTAL_MS,
-  parseFindingsUrl,
+  findingsTarget,
   postFindings,
   requestIdentityToken,
 } from "./findings-post.mjs";
@@ -42,11 +42,13 @@ const deliver = (fake, over = {}) =>
   deliverFindings({ findingsUrl: URL_OK, payload, env: ENV, fetchImpl: fake.fetchImpl, sleep: noSleep, log: quiet, ...over });
 
 // spec: FPOST#turning-it-on
-test("a findings URL must be https", () => {
-  assert.equal(parseFindingsUrl(URL_OK).origin, "https://workhorse.example");
+test("a findings URL must be https, and an empty one means no post", () => {
+  assert.equal(findingsTarget(URL_OK).origin, "https://workhorse.example");
+  assert.equal(findingsTarget(`  ${URL_OK}\n`).origin, "https://workhorse.example");
   for (const bad of ["http://workhorse.example/x", "ftp://x/y", "workhorse.example/x", "not a url", "javascript:alert(1)"]) {
-    assert.equal(parseFindingsUrl(bad), null, bad);
+    assert.equal(findingsTarget(bad), null, bad);
   }
+  for (const none of [undefined, null, "", "  "]) assert.equal(findingsTarget(none), undefined);
 });
 
 // spec: FPOST#turning-it-on
@@ -142,12 +144,13 @@ test("the whole post is bounded: a retry starts only with enough of the total le
     url: new URL(URL_OK),
     body: JSON.stringify(payload()),
     token: "t",
-    fetchImpl: fake.fetchImpl,
-    now: () => clock,
-    // The first attempt and the pause between them used up the budget.
-    sleep: async () => {
+    // The first attempt used up the budget.
+    fetchImpl: async (...args) => {
       clock += FINDINGS_POST_TOTAL_MS;
+      return fake.fetchImpl(...args);
     },
+    now: () => clock,
+    sleep: noSleep,
     log: quiet,
   });
   assert.equal(result.status, "refused");
@@ -158,15 +161,17 @@ test("the log says a retry is coming only when one runs, and says when one was s
   const run = async (spent) => {
     let clock = 0;
     const lines = [];
+    const fake = fakeFetch([reply(503), reply(200)]);
     await postFindings({
       url: new URL(URL_OK),
       body: JSON.stringify(payload()),
       token: "t",
-      fetchImpl: fakeFetch([reply(503), reply(200)]).fetchImpl,
-      now: () => clock,
-      sleep: async () => {
+      fetchImpl: async (...args) => {
         clock += spent;
+        return fake.fetchImpl(...args);
       },
+      now: () => clock,
+      sleep: noSleep,
       log: (l) => lines.push(l),
     });
     return lines.join("\n");
@@ -337,4 +342,70 @@ test("a single huge chunk is decoded only as far as the excerpt", async () => {
   }
   // Four bytes a character for the excerpt, plus the token reply's few.
   assert.ok(decoded < 1024, `decoded ${decoded} bytes`);
+});
+
+// spec: FPOST#when-a-review-posts
+test("a retry that cannot fit in the time left costs no pause", async () => {
+  let clock = 0;
+  let slept = 0;
+  const lines = [];
+  const fake = fakeFetch([reply(503), reply(200)]);
+  const first = fake.fetchImpl;
+  const result = await postFindings({
+    url: new URL(URL_OK),
+    body: "{}",
+    token: "t",
+    // The first attempt used nearly the whole budget.
+    fetchImpl: async (...args) => {
+      clock += FINDINGS_POST_TOTAL_MS - 1000;
+      return first(...args);
+    },
+    now: () => clock,
+    sleep: async (ms) => {
+      slept += ms;
+    },
+    log: (l) => lines.push(l),
+  });
+  assert.equal(result.status, "refused");
+  assert.equal(slept, 0);
+  assert.match(lines.join("\n"), /too little time left/);
+});
+
+// spec: FPOST#authentication
+test("a transient failure to get a token is tried once more, and a refusal is not", async () => {
+  const run = async (answers) => {
+    const queue = [...answers];
+    let calls = 0;
+    const token = await requestIdentityToken({
+      audience: "https://x",
+      env: ENV,
+      fetchImpl: async () => {
+        calls++;
+        const next = queue.shift();
+        if (next instanceof Error) throw next;
+        return next;
+      },
+      sleep: noSleep,
+      log: quiet,
+    });
+    return { token, calls };
+  };
+  assert.deepEqual(await run([reply(503), Response.json({ value: "jwt" })]), { token: "jwt", calls: 2 });
+  assert.deepEqual(await run([new Error("reset"), Response.json({ value: "jwt" })]), { token: "jwt", calls: 2 });
+  assert.deepEqual(await run([reply(429), reply(500)]), { token: null, calls: 2 });
+  assert.deepEqual(await run([reply(403), Response.json({ value: "jwt" })]), { token: null, calls: 1 });
+});
+
+// spec: FPOST#when-a-review-posts
+test("log lines strip control characters and any URL's path, however the URL is written", async () => {
+  const lines = [];
+  const body = "bad \u001b[31mred\u001b[0m see https://other.example/private/thing";
+  await deliver(fakeFetch([reply(400, { body })]), { log: (l) => lines.push(l) });
+  const leaky = new Error("connect to HTTPS://Workhorse.Example:443/hook/s3cret failed; path /hook/s3cret");
+  await deliver(fakeFetch([leaky, leaky]), { findingsUrl: "https://workhorse.example/hook/s3cret", log: (l) => lines.push(l) });
+  const all = lines.join("\n");
+  assert.ok(!all.includes("\u001b"));
+  assert.ok(!all.includes("private/thing"));
+  assert.ok(!all.includes("s3cret"), all);
+  assert.match(all, /https:\/\/other\.example/);
 });

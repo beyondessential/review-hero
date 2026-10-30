@@ -241,3 +241,20 @@ test("findings sharing a line never swap ids when their text was rewritten", () 
   ];
   assert.deepEqual(matchCommentIds(posted, one), [1, 2]);
 });
+
+// spec: FPOST#findings
+test("a multi-line comment and a single-line one ending on the same line are kept apart", () => {
+  const posted = [
+    { path: "a.ts", startLine: 10, line: 15, body: "span" },
+    { path: "a.ts", line: 15, body: "single" },
+  ];
+  // Both rewritten, so only the place can tell them apart.
+  const listed = [
+    { id: 2, path: "a.ts", start_line: null, line: 15, body: "single\n" },
+    { id: 1, path: "a.ts", start_line: 10, line: 15, body: "span\n" },
+  ];
+  assert.deepEqual(matchCommentIds(posted, listed), [1, 2]);
+  // An outdated comment is matched on the lines it was posted on.
+  const outdated = [{ id: 3, path: "a.ts", line: null, start_line: null, original_start_line: 10, original_line: 15, body: "span" }];
+  assert.deepEqual(matchCommentIds([posted[0]], outdated), [3]);
+});

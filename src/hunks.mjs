@@ -10,11 +10,40 @@ import { effectiveEndLine } from "./findings.mjs";
 
 const HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
+const C_ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+
+/**
+ * A path as git quotes it (any path with a non-ASCII byte, a quote, a backslash
+ * or a control character): its C-style escapes decoded, octal escapes being the
+ * bytes of the path's UTF-8.
+ */
+export function unquoteGitPath(quoted) {
+  const bytes = [];
+  const inner = quoted.slice(1, -1);
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] !== "\\") {
+      bytes.push(...new TextEncoder().encode(inner[i]));
+      continue;
+    }
+    const octal = inner.slice(i + 1, i + 4);
+    if (/^[0-7]{3}$/.test(octal)) {
+      bytes.push(parseInt(octal, 8));
+      i += 3;
+    } else if (inner[i + 1] in C_ESCAPES) {
+      bytes.push(C_ESCAPES[inner[i + 1]]);
+      i += 1;
+    } else {
+      bytes.push(92);
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
 /** The path a `+++` line names, or null for a deleted file. */
 function newPath(line) {
-  let path = line.slice(4).split("\t")[0].trim();
+  let path = line.slice(4).replace(/\t.*$/, "").trim();
   if (path === "/dev/null") return null;
-  if (path.startsWith('"') && path.endsWith('"')) path = path.slice(1, -1);
+  if (path.length > 1 && path.startsWith('"') && path.endsWith('"')) path = unquoteGitPath(path);
   return path.replace(/^b\//, "");
 }
 

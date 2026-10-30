@@ -27,13 +27,22 @@ export const IDENTITY_TOKEN_TIMEOUT_MS = 15_000;
 const REPLY_EXCERPT = 200;
 
 /**
- * An error message fit for the job log: on one line, and naming `url`, when
- * given, by its origin alone, since a caller may put a secret in its path.
+ * Text fit for the job log: on one line, with no control characters (a
+ * receiver's reply could otherwise restyle the log), and with every URL cut to
+ * its origin and `url`'s path, when given, removed, since a caller may put a
+ * secret in a findings URL's path.
  */
+function logText(text, url) {
+  let line = oneLine(text)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s/?#"'<>]+)[^\s"'<>]*/gi, "$1");
+  if (url && url.pathname.length > 1) line = line.split(url.pathname).join("/…");
+  return line;
+}
+
+/** An error's message, fit for the job log. */
 function logMessage(err, url) {
-  let message = oneLine(err?.message ?? err);
-  if (url) message = message.split(url.href).join(url.origin);
-  return message;
+  return logText(err?.message ?? err, url);
 }
 
 /**
@@ -55,14 +64,21 @@ async function replyExcerpt(response) {
   } finally {
     await reader.cancel().catch(() => {});
   }
-  return oneLine(text.slice(0, REPLY_EXCERPT));
+  return logText(text.slice(0, REPLY_EXCERPT));
 }
 
-/** The findings URL as a URL, or null unless it is an `https` URL. */
+/**
+ * Where a review posts its findings: undefined when `raw` is empty, so the
+ * review posts nothing; null when it is not an `https` URL; the URL otherwise.
+ * The one test of a findings URL, so whatever the review does only for a post
+ * (looking up comment ids) follows the post itself.
+ */
 // spec: FPOST#turning-it-on
-export function parseFindingsUrl(raw) {
+export function findingsTarget(raw) {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return undefined;
   try {
-    const url = new URL(raw);
+    const url = new URL(trimmed);
     return url.protocol === "https:" ? url : null;
   } catch {
     return null;
@@ -72,7 +88,9 @@ export function parseFindingsUrl(raw) {
 /**
  * Ask GitHub Actions for an identity token addressed to `audience`. Null when
  * the job was not granted permission to request one (a caller without
- * `id-token: write`, or a pull request from a fork) or the request fails.
+ * `id-token: write`, or a pull request from a fork) or the request fails. A
+ * request that gets no answer, a server error or a rate limit is tried once
+ * more, so a passing hiccup at GitHub does not read as a missing permission.
  */
 // spec: FPOST#authentication
 export async function requestIdentityToken({
@@ -80,34 +98,49 @@ export async function requestIdentityToken({
   env = process.env,
   fetchImpl = fetch,
   timeoutMs = IDENTITY_TOKEN_TIMEOUT_MS,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   log = console.log,
 }) {
   const requestUrl = env.ACTIONS_ID_TOKEN_REQUEST_URL;
   const requestToken = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   if (!requestUrl || !requestToken) return null;
-  try {
-    const url = new URL(requestUrl);
-    url.searchParams.set("audience", audience);
-    const response = await fetchImpl(url, {
-      headers: { Authorization: `Bearer ${requestToken}`, Accept: "application/json" },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) {
-      log(`::warning::Identity token request failed with status ${response.status}`);
-      return null;
+
+  const once = async () => {
+    try {
+      const url = new URL(requestUrl);
+      url.searchParams.set("audience", audience);
+      const response = await fetchImpl(url, {
+        headers: { Authorization: `Bearer ${requestToken}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        return {
+          retry: response.status >= 500 || response.status === 429,
+          why: `status ${response.status}`,
+        };
+      }
+      const { value } = await response.json();
+      if (typeof value !== "string" || !value) return { retry: false, why: "no token in the reply" };
+      return { value };
+    } catch (err) {
+      return { retry: true, why: err.name === "TimeoutError" ? "timed out" : logMessage(err) };
     }
-    const { value } = await response.json();
-    if (typeof value !== "string" || !value) {
-      log("::warning::Identity token request returned no token");
-      return null;
-    }
-    // Anything that later prints the token prints it masked.
-    log(`::add-mask::${value}`);
-    return value;
-  } catch (err) {
-    log(`::warning::Identity token request failed: ${logMessage(err)}`);
+  };
+
+  let result = await once();
+  if (result.retry) {
+    log(`::warning::Identity token request failed (${result.why}); trying once more`);
+    await sleep(FINDINGS_POST_RETRY_DELAY_MS);
+    result = await once();
+  }
+  if (!result.value) {
+    log(`::warning::Identity token request failed: ${result.why}`);
     return null;
   }
+  // Anything that later prints the token prints it masked.
+  log(`::add-mask::${result.value}`);
+  return result.value;
 }
 
 /**
@@ -169,7 +202,7 @@ async function attempt({ url, token, body, fetchImpl, timeoutMs }) {
     return {
       status: "unreachable",
       retry: true,
-      detail: err.name === "TimeoutError" ? "timed out" : logMessage(err, target),
+      detail: err.name === "TimeoutError" ? "timed out" : logMessage(err, url),
     };
   }
 }
@@ -193,11 +226,12 @@ export async function postFindings({
   const deadline = now() + FINDINGS_POST_TOTAL_MS;
   let result = await attempt({ url, token, body, fetchImpl, timeoutMs: attemptMs });
   if (result.retry) {
-    await sleep(FINDINGS_POST_RETRY_DELAY_MS);
-    const left = deadline - now();
+    // Decided before the pause, so a retry that cannot fit costs no wait.
+    const left = deadline - now() - FINDINGS_POST_RETRY_DELAY_MS;
     if (left >= FINDINGS_POST_MIN_RETRY_MS) {
       log(`::warning::Posting findings: ${result.detail}; trying once more`);
-      result = await attempt({ url, token, body, fetchImpl, timeoutMs: Math.min(attemptMs, left) });
+      await sleep(FINDINGS_POST_RETRY_DELAY_MS);
+      result = await attempt({ url, token, body, fetchImpl, timeoutMs: Math.min(attemptMs, deadline - now()) });
     } else {
       log(`::warning::Posting findings: ${result.detail}; too little time left to try again`);
     }
@@ -227,10 +261,9 @@ export async function deliverFindings({
   attemptMs,
   log = console.log,
 }) {
-  const raw = (findingsUrl ?? "").trim();
-  if (!raw) return undefined;
+  const url = findingsTarget(findingsUrl);
+  if (url === undefined) return undefined;
   try {
-    const url = parseFindingsUrl(raw);
     if (!url) {
       log("::warning::findings-url is not an https URL; not posting findings");
       return "invalid-url";
@@ -242,7 +275,7 @@ export async function deliverFindings({
       log(`::error::Could not build the findings payload, so nothing was sent: ${logMessage(err)}`);
       return "error";
     }
-    const token = await requestIdentityToken({ audience: url.origin, env, fetchImpl, log });
+    const token = await requestIdentityToken({ audience: url.origin, env, fetchImpl, sleep, log });
     if (!token) {
       log(
         "::warning::No identity token, so findings are not posted. The caller workflow needs `permissions: id-token: write`, and a pull request from a fork never gets one",
@@ -269,7 +302,7 @@ export async function deliverFindings({
     return status;
   } catch (err) {
     // The review's comments do not wait on this.
-    log(`::error::Posting findings failed before an answer could come: ${logMessage(err, parseFindingsUrl(raw))}`);
+    log(`::error::Posting findings failed before an answer could come: ${logMessage(err, url)}`);
     return "error";
   }
 }

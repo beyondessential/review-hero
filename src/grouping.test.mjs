@@ -192,6 +192,13 @@ test("an untagged finding listed as a member does not count as a voter", async (
   assert.equal(kept[0].supporters, 2);
 });
 
+test("a contested group counts its voters the same way, an untagged finding counting for none", async () => {
+  const untagged = [...findings, { ...finding(9, 41), voter: undefined }];
+  const reply = JSON.stringify({ keep: [0], contested: [{ area: "retry", groups: [[2, 5]] }] });
+  const { contested } = await applyConsensus(untagged, 5, async () => reply);
+  assert.equal(contested[0].groups[0].supporters, 1);
+});
+
 test("members the model invents or leaves out do not count towards a voter count", async () => {
   const reply = JSON.stringify({ keep: [0], members: { 0: [0, 99, "x", 3] }, contested: [] });
   const { kept } = await applyConsensus(findings, 3, async () => reply);

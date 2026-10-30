@@ -49,7 +49,7 @@ Each entry in `findings` carries:
 | `agent` | `key` and display `name` of the agent that raised it. |
 | `path`, `startLine`, `endLine` | Where it is. `endLine` is null when it covers its start line alone. |
 | `supporters` | How many voters and second-look checkers support it, or null when the review could not tell. |
-| `commentId` | The id of the GitHub review comment it was posted as, or null when it was not posted inline (nitpicks, or a review comment GitHub refused). |
+| `commentId` | The id of the GitHub review comment it was posted as, or null when it was not posted inline (a nitpick, or a finding in a review whose inline comments GitHub would not take). |
 | `comment` | The comment as the agent wrote it, unshortened and without the formatting the inline comment adds. |
 
 The findings are the round's kept findings, one per group, so their severities add up to `counts`. Findings below the consensus threshold and suppressed findings are not included.

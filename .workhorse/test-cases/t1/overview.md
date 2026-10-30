@@ -12,6 +12,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 
 - [x] The token's audience is the findings URL's origin and it is sent as the bearer (verifies spec: FPOST)
 - [x] The token is masked in the job log (verifies spec: FPOST)
+- [x] A transient token-request failure is tried once more, and a refusal is not (verifies spec: FPOST)
 - [x] Only the posting job can request an identity token: the review job names its permissions without `id-token`, and the posting job declares none (verifies spec: RUN)
 - [x] This repo's own caller grants `id-token: write` to the calling job alone (verifies spec: FPOST)
 - [x] A payload that fails to build requests no identity token (verifies spec: FPOST)
@@ -22,6 +23,8 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] No answer or a 5xx is tried once more, the retry's result stands, and only one retry is made (verifies spec: FPOST)
 - [x] A retry starts only with enough of the total time left (verifies spec: FPOST)
 - [x] The log announces a retry only when one runs, and says when one was skipped for time (verifies spec: FPOST)
+- [x] A retry that cannot fit costs no pause (verifies spec: FPOST)
+- [x] Log lines strip control characters and any URL's path however it is written (verifies spec: FPOST)
 - [x] A 307 or 308 within the origin is followed, up to a few times, carrying the token and body (verifies spec: FPOST)
 - [x] A redirect to another origin or scheme, or any other redirect status, is refused and the token goes nowhere else (verifies spec: FPOST)
 - [x] The log gives the receiver's status and the start of its reply when refused, on one line (verifies spec: FPOST)
@@ -47,6 +50,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] The comment is unshortened and without the inline formatting (verifies spec: FPOST)
 - [x] Each inline finding carries its GitHub comment id and others null, matched by place and text so two findings on one line keep their own (verifies spec: FPOST)
 - [x] Findings sharing a line whose text GitHub rewrote get no id rather than each other's (verifies spec: FPOST)
+- [x] A multi-line and a single-line comment ending on one line are kept apart, outdated comments included (verifies spec: FPOST)
 - [x] A group takes its representative's location, range and voter count (verifies spec: RUN)
 
 ## Finding ranges
@@ -55,6 +59,8 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] An inline comment spans its range when both ends are in one hunk, and sits on the start line otherwise (verifies spec: RUN)
 - [x] The inline comment and the posted data use the same test for a finding's range (verifies spec: RUN)
 - [x] The hunks of a diff are read per file on the new side, ignoring deleted files and header-like content lines (verifies spec: RUN)
+- [x] Paths git quotes and escapes are decoded to the real path (verifies spec: RUN)
+- [x] A finding whose line is not a whole number is dropped (verifies spec: RUN)
 
 ## Voter counts
 
@@ -63,7 +69,7 @@ Scenarios for posting a round's findings to a findings URL. The post, payload, s
 - [x] Findings kept because consensus was not applied have no voter count with several voters, and 1 with one (verifies spec: RUN)
 - [x] A finding a second look confirms counts its voters plus its confirming checkers (verifies spec: RUN)
 - [x] A kept finding whose group has fewer voters than the majority has no voter count (verifies spec: RUN)
-- [x] An untagged finding listed as a member counts as no voter (verifies spec: RUN)
+- [x] An untagged finding listed as a member counts as no voter, in kept and contested groups alike (verifies spec: RUN)
 
 ## Completion block
 

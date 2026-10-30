@@ -13,6 +13,14 @@
 import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
 
 /**
+ * The distinct voters behind `findings`. An untagged finding is no voter's, so
+ * it counts for none.
+ */
+export function countVoters(findings) {
+  return new Set(findings.map((f) => f.voter).filter((v) => v !== undefined)).size;
+}
+
+/**
  * Every finding kept as it stands, without voter tags. With one voter per agent
  * each finding is that voter's alone; with more, no vote happened, so none has
  * a voter count.
@@ -147,12 +155,10 @@ Example: {"keep": [0, 3], "members": {"0": [0, 1, 2], "3": [3, 4]}, "contested":
     const supportersOf = (i) => {
       const members = parsed.members[i];
       if (!members) return null;
-      // An untagged finding is no voter's, so it cannot count as one.
-      const voters = new Set();
-      for (const m of [i, ...members]) if (validIndex(m) && findings[m].voter !== undefined) voters.add(findings[m].voter);
+      const voters = countVoters([i, ...members].filter(validIndex).map((m) => findings[m]));
       // Kept with fewer than the majority behind it, the reply contradicts
       // itself, so its grouping says nothing reliable about the count.
-      return voters.size >= threshold ? voters.size : null;
+      return voters >= threshold ? voters : null;
     };
     const kept = [];
     findings.forEach(({ voter, ...rest }, i) => {
@@ -179,7 +185,7 @@ Example: {"keep": [0, 3], "members": {"0": [0, 1, 2], "3": [3, 4]}, "contested":
         );
         if (members.length === 0) continue;
         const memberFindings = members.map((i) => findings[i]);
-        const supporters = new Set(memberFindings.map((f) => f.voter)).size;
+        const supporters = countVoters(memberFindings);
         if (supporters >= threshold) continue;
         for (const i of members) claimed.add(i);
         const { voter, ...representative } = memberFindings[0];

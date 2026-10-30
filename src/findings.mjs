@@ -42,7 +42,7 @@ export function validateFindings(findings, agentKey, voter) {
         VALID_SEVERITIES.has(f.severity) &&
         typeof f.comment === "string" &&
         f.comment &&
-        typeof f.line === "number" &&
+        Number.isInteger(f.line) &&
         f.line > 0,
     )
     .map((f) => ({
