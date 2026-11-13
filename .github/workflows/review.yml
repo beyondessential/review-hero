@@ -7,10 +7,6 @@ on:
         description: "'checkbox' = only on PR body edit with checkbox checked, 'always' = every PR event"
         type: string
         default: checkbox
-      model:
-        description: "Claude model for review agents when a PR ticks the Claude checkbox, or when REVIEW_HERO_OPENROUTER_API_KEY is not set"
-        type: string
-        default: claude-sonnet-5
       runner:
         description: "GitHub Actions runner for the review job"
         type: string
@@ -40,21 +36,9 @@ on:
         type: string
         default: always
     secrets:
-      ANTHROPIC_API_KEY:
-        description: "Anthropic API key"
-        required: false
-      REVIEW_HERO_ANTHROPIC_API_KEY:
-        description: "Anthropic API key (preferred over ANTHROPIC_API_KEY if both are set)"
-        required: false
-      ANTHROPIC_BASE_URL:
-        description: "Custom base URL for the Anthropic API (e.g. for proxies)"
-        required: false
-      REVIEW_HERO_ANTHROPIC_BASE_URL:
-        description: "Custom base URL for the Anthropic API (preferred over ANTHROPIC_BASE_URL if both are set)"
-        required: false
       REVIEW_HERO_OPENROUTER_API_KEY:
-        description: "OpenRouter API key, needed only when a PR description picks an OpenRouter model (an id containing '/')"
-        required: false
+        description: "OpenRouter API key, for every model call the review makes"
+        required: true
       REVIEW_HERO_APP_ID:
         description: "Review Hero GitHub App ID — typically provided as an org-level secret"
         required: true
@@ -148,7 +132,7 @@ jobs:
             }
             const body = context.payload.pull_request?.body ?? '';
             // One or two spaces after the box, as the job's `if:` looks for.
-            core.setOutput('should_run', /\[x\] {1,2}\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(-claude)? -->/.test(body));
+            core.setOutput('should_run', /\[x\] {1,2}\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review -->/.test(body));
 
       # spec: RUN#the-review-job
       # Callers that set ubuntu-slim before the review became one job would
@@ -362,14 +346,11 @@ jobs:
         env:
           DIFF_PATH: ${{ runner.temp }}/pr.diff
           FILTERED_DIFF_PATH: ${{ runner.temp }}/review/pr-filtered.diff
-          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY }}
           REVIEW_HERO_DIR: .review-hero
           CALLER_REPO_DIR: .caller-base
           VOTERS: ${{ inputs.voters }}
-          DEFAULT_MODEL: ${{ inputs.model }}
           PR_BODY: ${{ github.event.pull_request.body }}
-          HAS_OPENROUTER_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY != '' }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/review"
@@ -404,7 +385,6 @@ jobs:
           VOTERS: ${{ steps.triage.outputs.voters }}
           MAX_TURNS: ${{ steps.triage.outputs.max_turns }}
           AGENT_MODEL: ${{ steps.triage.outputs.agent_model }}
-          AGENT_PROVIDER: ${{ steps.triage.outputs.agent_provider }}
           CONCURRENCY: ${{ inputs.concurrency }}
           RESULTS_DIR: ${{ runner.temp }}/review/results
           LOGS_DIR: ${{ runner.temp }}/review/logs
@@ -415,13 +395,13 @@ jobs:
           AI_RULES_PATH: ${{ runner.temp }}/ai-rules.md
           PROJECT_CONTEXT: ${{ steps.config.outputs.project_context }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          ANTHROPIC_API_KEY: ${{ steps.triage.outputs.agent_provider != 'openrouter' && (secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY) || '' }}
-          ANTHROPIC_BASE_URL: ${{ steps.triage.outputs.agent_provider == 'openrouter' && 'https://openrouter.ai/api' || secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ steps.triage.outputs.agent_provider == 'openrouter' && secrets.REVIEW_HERO_OPENROUTER_API_KEY || '' }}
+          # The CLI reaches OpenRouter through its Anthropic-compatible endpoint.
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY }}
           # OpenRouter requests occasionally stall; failing one fast lets the CLI retry it.
-          API_TIMEOUT_MS: ${{ steps.triage.outputs.agent_provider == 'openrouter' && '180000' || '600000' }}
+          API_TIMEOUT_MS: "180000"
           # Some CLI versions cap a model ID they do not know below its real window and refuse the prompt unsent.
-          CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${{ steps.triage.outputs.agent_provider == 'openrouter' && '1000000' || '' }}
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1000000"
         # A minute inside the step's 40, so results land before it is killed.
         run: TIME_BUDGET_MS=2340000 node .review-hero/scripts/run-agents.mjs
 
@@ -441,8 +421,7 @@ jobs:
           ARTIFACTS_DIR: ${{ runner.temp }}/review/results
           VOTERS: ${{ steps.triage.outputs.voters }}
           CONSENSUS_PATH: ${{ runner.temp }}/review/consensus.json
-          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY }}
         run: node .review-hero/scripts/consensus.mjs
 
       # ── Second look ──────────────────────────────────────────────────
@@ -589,8 +568,7 @@ jobs:
           SUMMARY_COMMENT: ${{ inputs.summary-comment }}
           SUPPRESSIONS_PATH: ${{ runner.temp }}/suppressions.yml
           GLOBAL_SUPPRESSIONS_PATH: .review-hero/suppressions.yml
-          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
           set +e

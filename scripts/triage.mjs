@@ -4,20 +4,18 @@
  * 1. Reads the PR diff and strips ignored file patterns
  * 2. Discovers base agents (from review-hero prompts/) and custom agents
  *    (from the caller repo's .github/review-hero/)
- * 3. Calls Claude Haiku to select which agents are relevant
- * 4. Calculates max-turns based on filtered diff size
+ * 3. Asks the filter model which agents are relevant
+ * 4. Picks the agents' model from the PR description
  * 5. Sets the voter count every agent runs, scaled to the diff
  * 6. Outputs agents, voters, max_turns, and agent_names for later steps
  *
  * Environment variables:
  *   DIFF_PATH           — Path to the raw PR diff file
- *   ANTHROPIC_API_KEY   — API key for Claude
- *   ANTHROPIC_BASE_URL  — Optional custom base URL for the Anthropic API
+ *   OPENROUTER_API_KEY  — OpenRouter API key
  *   REVIEW_HERO_DIR     — Path to the review-hero checkout (prompts/, scripts/)
  *   CALLER_REPO_DIR     — Path to the caller repo checkout at the trusted ref
  *   FILTERED_DIFF_PATH  — Where to write the filtered diff for agents to consume
- *   PR_BODY             — PR description, read for the model checkbox and marker
- *   HAS_OPENROUTER_KEY  — "true" when REVIEW_HERO_OPENROUTER_API_KEY is set
+ *   PR_BODY             — PR description, read for the model marker
  *   VOTERS              — Requested voters per agent, before scaling to the diff
  */
 
@@ -31,6 +29,11 @@ import {
   discoverBaseAgents,
   discoverCustomAgents,
 } from "../src/index.mjs";
+import {
+  FILTER_MODEL,
+  OPENROUTER_BASE_URL,
+  openRouterHeaders,
+} from "../src/openrouter.mjs";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,8 +50,7 @@ function envOrDie(name) {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 const diffPath = envOrDie("DIFF_PATH");
-const apiKey = envOrDie("ANTHROPIC_API_KEY");
-const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+const apiKey = envOrDie("OPENROUTER_API_KEY");
 const reviewHeroDir = envOrDie("REVIEW_HERO_DIR");
 const callerDir = envOrDie("CALLER_REPO_DIR");
 const filteredDiffPath = envOrDie("FILTERED_DIFF_PATH");
@@ -84,41 +86,18 @@ const diffLines = filteredDiff
   .split("\n")
   .filter((l) => l.startsWith("+") || l.startsWith("-")).length;
 
-// Choose model based on diff size — Opus for large PRs where deeper
-// reasoning pays off, Sonnet for everything else.
-const defaultModel = (process.env.DEFAULT_MODEL || "claude-sonnet-5").replace(
-  /[\r\n]/g,
-  "",
-);
-const OPUS_THRESHOLD = 500;
-const GLM_MAX_TURNS = 20;
-const sizeModel = diffLines >= OPUS_THRESHOLD ? "claude-opus-5" : defaultModel;
-const {
-  model: agentModel,
-  provider: agentProvider,
-  warning: modelWarning,
-} = chooseAgentModel({
+const maxTurns = 20;
+const { model: agentModel, warning: modelWarning } = chooseAgentModel({
   body: process.env.PR_BODY,
-  claudeModel: sizeModel,
-  hasOpenRouterKey: process.env.HAS_OPENROUTER_KEY === "true",
 });
 if (modelWarning) console.log(`::warning::${modelWarning}`);
-
-// An agent cut off mid-exploration produces no output, wasting its whole run.
-function claudeMaxTurns(lines) {
-  if (lines < 100) return 8;
-  if (lines < OPUS_THRESHOLD) return 15;
-  return 20;
-}
-
-const maxTurns = agentProvider === "openrouter" ? GLM_MAX_TURNS : claudeMaxTurns(diffLines);
 
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);
 const customAgents = discoverCustomAgents(callerDir, config);
 const allAgents = [...baseAgents, ...customAgents];
 
-// Ask Haiku which agents are relevant
+// Ask the filter model which agents are relevant
 const agentKeys = allAgents.map((a) => a.key);
 const agentList = allAgents
   .map((a) => `- ${a.key}: ${a.description}`)
@@ -151,15 +130,11 @@ const selectAgentsTool = {
 
 let selectedKeys;
 try {
-  const response = await fetch(`${baseUrl}/v1/messages`, {
+  const response = await fetch(`${OPENROUTER_BASE_URL}/v1/messages`, {
     method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: openRouterHeaders(apiKey),
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: FILTER_MODEL,
       max_tokens: 200,
       messages: [{ role: "user", content: triagePrompt }],
       tools: [selectAgentsTool],
@@ -217,13 +192,7 @@ console.log(
   `Agents: ${selectedAgents.map((a) => a.key).join(", ")} (${selectedAgents.length}/${allAgents.length})`,
 );
 console.log(`Max turns: ${maxTurns}`);
-const modelNote =
-  agentModel !== sizeModel
-    ? ` (via ${agentProvider})`
-    : sizeModel !== defaultModel
-      ? " (upgraded for large PR)"
-      : "";
-console.log(`Model: ${agentModel}${modelNote}`);
+console.log(`Model: ${agentModel}`);
 console.log(
   `Voters: ${voters} per agent (${agents.length * voters} agent runs)`,
 );
@@ -235,6 +204,5 @@ if (outputFile) {
   appendFileSync(outputFile, `voters=${voters}\n`);
   appendFileSync(outputFile, `max_turns=${maxTurns}\n`);
   appendFileSync(outputFile, `agent_model=${agentModel}\n`);
-  appendFileSync(outputFile, `agent_provider=${agentProvider}\n`);
   appendFileSync(outputFile, `agent_names=${JSON.stringify(agentNames)}\n`);
 }

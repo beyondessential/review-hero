@@ -5,6 +5,13 @@
  * suppression entries from the developer feedback.
  */
 
+import {
+  FILTER_MODEL,
+  OPENROUTER_BASE_URL,
+  openRouterHeaders,
+  responseText,
+} from "../src/openrouter.mjs";
+
 /**
  * Find Review Hero threads that received thumbs-down reactions.
  *
@@ -105,10 +112,10 @@ function escapeXml(str) {
 }
 
 /**
- * Generate suppression entries from rejected findings using Haiku.
+ * Generate suppression entries from rejected findings.
  *
  * @param {Array} rejectedThreads - Output from findRejectedFindings
- * @param {{ apiKey: string, baseUrl: string }} options
+ * @param {{ apiKey: string, baseUrl?: string }} options
  * @returns {Array<{ pattern, context, reason }>}
  */
 const SUPPRESSION_BATCH_SIZE = 20;
@@ -134,13 +141,9 @@ async function generateSuppressionsForBatch(batch, { apiKey, baseUrl, signal }) 
   const response = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
     signal,
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: openRouterHeaders(apiKey),
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: FILTER_MODEL,
       max_tokens: 2000,
       messages: [
         {
@@ -170,7 +173,7 @@ Only output the JSON array.`,
   }
 
   const result = await response.json();
-  const text = result.content?.[0]?.text ?? "";
+  const text = responseText(result);
 
   const lastOpen = text.lastIndexOf("[");
   const lastClose = text.lastIndexOf("]");
@@ -180,7 +183,7 @@ Only output the JSON array.`,
   try {
     parsed = JSON.parse(text.slice(lastOpen, lastClose + 1));
   } catch {
-    console.warn("Failed to parse suppression JSON from Haiku response");
+    console.warn("Failed to parse suppression JSON from the model response");
     return [];
   }
   if (!Array.isArray(parsed)) return [];
@@ -205,7 +208,7 @@ const SUPPRESSION_DEADLINE_MS = 90_000;
 
 export async function generateSuppressions(
   rejectedThreads,
-  { apiKey, baseUrl },
+  { apiKey, baseUrl = OPENROUTER_BASE_URL },
 ) {
   if (rejectedThreads.length === 0) return [];
 

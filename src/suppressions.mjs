@@ -5,7 +5,7 @@
  * false-positive patterns. The match judgement is delegated to a model, but
  * the call is injected: `callModel({ model, maxTokens, messages }) =>
  * Promise<string>` returns the model's text. This repo passes an
- * Anthropic-backed implementation; other consumers pass their own.
+ * OpenRouter-backed implementation; other consumers pass their own.
  *
  * Suppressions file format (.github/review-hero/suppressions.yml):
  *
@@ -17,6 +17,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
+import { FILTER_MODEL } from "./openrouter.mjs";
 
 /**
  * Load suppressions from a YAML file.
@@ -49,7 +50,7 @@ export function sanitizeSuppressionField(str) {
  * Filter a single batch of findings against the suppression list.
  * Returns { kept: Finding[], suppressed: Finding[] }.
  */
-export async function callHaikuForBatch(batch, suppressionList, callModel) {
+export async function callModelForBatch(batch, suppressionList, callModel) {
   const findingsList = batch
     .map(
       (f, i) =>
@@ -59,7 +60,7 @@ export async function callHaikuForBatch(batch, suppressionList, callModel) {
 
   try {
     const text = await callModel({
-      model: "claude-haiku-4-5-20251001",
+      model: FILTER_MODEL,
       maxTokens: 1000,
       messages: [
         {
@@ -139,7 +140,7 @@ export async function filterWithSuppressions(findings, suppressions, callModel) 
   }
 
   const batchResults = await Promise.all(
-    chunks.map((batch) => callHaikuForBatch(batch, suppressionList, callModel)),
+    chunks.map((batch) => callModelForBatch(batch, suppressionList, callModel)),
   );
 
   const allKept = batchResults.flatMap((r) => r.kept);

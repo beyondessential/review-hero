@@ -175,7 +175,7 @@ export function filterWithSuppressions(
   callModel?: CallModel | null,
 ): Promise<SuppressionResult>;
 
-export function callHaikuForBatch(
+export function callModelForBatch(
   batch: Finding[],
   suppressionList: string,
   callModel: CallModel,
@@ -441,9 +441,15 @@ export function parseCompletionBlock(
  */
 export function stripCompletionBlocks(text: string | null | undefined): string;
 
-// ── Anthropic-backed model caller ────────────────────────────────────────────
+// ── OpenRouter-backed model caller ───────────────────────────────────────────
 
-export function createAnthropicModelCaller(opts: {
+/** Model triage and suppression matching run on. */
+export const FILTER_MODEL: string;
+
+/** Model consensus and grouping run on. */
+export const GROUPING_MODEL: string;
+
+export function createOpenRouterModelCaller(opts: {
   apiKey: string;
   baseUrl?: string;
 }): CallModel;

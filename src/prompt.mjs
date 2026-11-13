@@ -97,7 +97,7 @@ function assemblePrompt({ projectContext, instructions, aiRules, task, turnBudge
  * share one cached prompt prefix. Nothing here may vary between voters (no
  * timestamps, no per-run detail), or each voter pays for its own cache write.
  */
-// spec: RUN#prompt-cache-priming
+// spec: RUN#prompts
 export function buildReviewAgentPrompt({
   projectContext = "",
   basePrompt,

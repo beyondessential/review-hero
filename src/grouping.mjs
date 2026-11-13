@@ -5,12 +5,13 @@
  * agents. Both stages delegate the semantic judgement to a model, but the call
  * itself is injected: `callModel({ model, maxTokens, messages, thinking }) =>
  * Promise<string>` returns the model's text. This repo passes an
- * Anthropic-backed implementation; other consumers pass their own. Passing a
+ * OpenRouter-backed implementation; other consumers pass their own. Passing a
  * falsy `callModel` keeps every finding, matching the "no model available"
  * fallback.
  */
 
 import { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";
+import { GROUPING_MODEL } from "./openrouter.mjs";
 
 /**
  * The distinct voters behind `findings`. An untagged finding is no voter's, so
@@ -100,7 +101,7 @@ export async function applyConsensus(findings, voterCount, callModel) {
 
   try {
     const text = await callModel({
-      model: "claude-sonnet-5",
+      model: GROUPING_MODEL,
       maxTokens: indexReplyMaxTokens(findings.length, 3000),
       // Mechanical grouping — no reasoning needed, and thinking would eat
       // into the token budget the JSON output needs.
@@ -314,7 +315,7 @@ export async function groupAllFindings(kept, dropped, callModel) {
 
   try {
     const text = await callModel({
-      model: "claude-sonnet-5",
+      model: GROUPING_MODEL,
       maxTokens: indexReplyMaxTokens(all.length, 2000),
       // Mechanical grouping — no reasoning needed, and thinking would eat
       // into the token budget the JSON output needs.

@@ -44,40 +44,21 @@ export function votersFromEnv(raw = process.env.VOTERS) {
   return Math.max(1, Math.min(parseInt(raw || "1") || 1, MAX_VOTERS));
 }
 
-/** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
+/** OpenRouter models a PR can pick for its review agents. */
 export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:nitro"];
 
 export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:nitro";
-const CLAUDE_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-claude -->/;
 const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
 
 /**
- * Picks the review agents' model from the PR body: `claudeModel` when the
- * Claude checkbox is ticked, else an allowed model named by a
- * `<!-- review-hero: model=<id> -->` marker, else `DEFAULT_MODEL`. An
- * OpenRouter model without its key falls back to `claudeModel`.
+ * Picks the review agents' model from the PR body: an allowed model named by a
+ * `<!-- review-hero: model=<id> -->` marker, else `DEFAULT_MODEL`.
  */
-export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
-  const claude = { model: claudeModel, provider: "anthropic", warning: null };
-  const text = String(body ?? "");
-  if (CLAUDE_CHECKBOX.test(text)) return claude;
-
-  let id = DEFAULT_MODEL;
-  let warning = null;
-  const marked = text.match(MODEL_MARKER)?.[1];
-  if (marked && ALLOWED_MODELS.includes(marked)) id = marked;
-  else if (marked) warning = `Ignoring model not in ALLOWED_MODELS; using ${id}`;
-
-  if (!id.includes("/")) return { model: id, provider: "anthropic", warning };
-  if (!hasOpenRouterKey) {
-    return {
-      ...claude,
-      warning: [warning, `Model ${id} needs REVIEW_HERO_OPENROUTER_API_KEY, which is not set; using ${claudeModel}`]
-        .filter(Boolean)
-        .join(". "),
-    };
-  }
-  return { model: id, provider: "openrouter", warning };
+export function chooseAgentModel({ body }) {
+  const marked = String(body ?? "").match(MODEL_MARKER)?.[1];
+  if (!marked) return { model: DEFAULT_MODEL, warning: null };
+  if (ALLOWED_MODELS.includes(marked)) return { model: marked, warning: null };
+  return { model: DEFAULT_MODEL, warning: `Ignoring model not in ALLOWED_MODELS; using ${DEFAULT_MODEL}` };
 }
 
 // ── Job log ─────────────────────────────────────────────────────────────────
@@ -350,7 +331,7 @@ export function restoreReviewHero() {
 // ── Claude execution ─────────────────────────────────────────────────────────
 
 export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
-  if (!/^[a-z0-9.-]+$/.test(model)) {
+  if (!/^[a-z0-9.-]+\/[a-z0-9.-]+(:[a-z0-9-]+)?$/.test(model)) {
     throw new Error(`Invalid model name: ${model}`);
   }
 

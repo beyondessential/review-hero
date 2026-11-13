@@ -37,15 +37,6 @@ const CAPPED = {
   stderr: "",
 };
 const TIMED_OUT = { code: 143, timedOut: true, stdout: "", stderr: "" };
-const PRIMED = {
-  code: 1,
-  timedOut: false,
-  stdout: envelope(undefined, {
-    subtype: "error_max_turns",
-    usage: { cache_creation_input_tokens: 5000 },
-  }),
-  stderr: "",
-};
 
 /**
  * A stand-in for `spawnClaude`. Prompts are the agent keys, so each call knows
@@ -62,7 +53,7 @@ function fakeClaude(respond = () => USABLE) {
     const resume = args.includes("--resume");
     const call = {
       agent: resume ? null : input,
-      kind: resume ? "resume" : maxTurns === "1" ? "primer" : "voter",
+      kind: resume ? "resume" : "voter",
       env,
       args,
       timeoutMs,
@@ -100,13 +91,12 @@ function review(fake, overrides = {}) {
       prompts: Object.fromEntries(agents.map((a) => [a.key, a.key])),
       voters: 3,
       maxTurns: 20,
-      model: "claude-sonnet-5",
-      provider: "anthropic",
+      model: "z-ai/glm-5.3-flash:nitro",
       concurrency: 8,
       memory: null,
       resultsDir,
       logsDir,
-      env: { ANTHROPIC_API_KEY: "key" },
+      env: { ANTHROPIC_AUTH_TOKEN: "key" },
       runClaude: fake.runClaude,
       out: (text) => output.push(text),
       ...overrides,
@@ -120,47 +110,8 @@ test("at most the concurrency cap of agent processes run at once", async () => {
   const fake = fakeClaude();
   const agents = ["bugs", "design", "security"].map((key) => ({ key, source: "base" }));
   await review(fake, { agents, concurrency: 2 }).rows;
-  assert.equal(fake.calls.length, 3 + 9);
+  assert.equal(fake.calls.length, 9);
   assert.equal(fake.peak(), 2);
-});
-
-// ── Priming ──────────────────────────────────────────────────────────────────
-
-test("every primer starts before any voter, and an agent's voters wait for its primer", async () => {
-  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
-  const agents = ["bugs", "design"].map((key) => ({ key, source: "base" }));
-  await review(fake, { agents, concurrency: 2 }).rows;
-
-  const primers = fake.calls.filter((c) => c.kind === "primer");
-  const voters = fake.calls.filter((c) => c.kind === "voter");
-  assert.equal(primers.length, 2);
-  assert.ok(Math.max(...primers.map((c) => c.start)) < Math.min(...voters.map((c) => c.start)));
-  for (const primer of primers) {
-    for (const voter of voters.filter((c) => c.agent === primer.agent)) {
-      assert.ok(voter.start > primer.end, `${primer.agent} voter started before its primer ended`);
-    }
-  }
-});
-
-test("a primer that fails still releases its voters", async () => {
-  const fake = fakeClaude((call) => (call.kind === "primer" ? CRASH : USABLE));
-  const { output, rows } = review(fake);
-  const result = await rows;
-  assert.equal(fake.calls.filter((c) => c.kind === "voter").length, 3);
-  assert.ok(result.every((row) => row.run === "primer" || row.outcome === "usable"));
-  assert.ok(output.some((line) => line.includes("wrote no cache tokens")));
-});
-
-test("a single voter runs without a primer", async () => {
-  const fake = fakeClaude();
-  await review(fake, { voters: 1 }).rows;
-  assert.deepEqual(fake.calls.map((c) => c.kind), ["voter"]);
-});
-
-test("voters on OpenRouter run without a primer", async () => {
-  const fake = fakeClaude();
-  await review(fake, { provider: "openrouter" }).rows;
-  assert.deepEqual(fake.calls.map((c) => c.kind), ["voter", "voter", "voter"]);
 });
 
 // ── Wrap-up ──────────────────────────────────────────────────────────────────
@@ -231,7 +182,7 @@ test("a timed-out voter is not retried and gets no wrap-up", async () => {
 // ── Results ──────────────────────────────────────────────────────────────────
 
 test("every voter slot writes a result the orchestrator recognises", async () => {
-  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
+  const fake = fakeClaude();
   const agents = ["bugs", "my-rules"].map((key) => ({ key, source: "base" }));
   const { resultsDir, rows } = review(fake, { agents });
   await rows;
@@ -257,11 +208,10 @@ test("result file names round-trip through the orchestrator's pattern", () => {
 });
 
 test("the job summary has a row per process", async () => {
-  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
+  const fake = fakeClaude();
   const rows = await review(fake).rows;
   const table = rows.map(summaryRow).join("");
-  assert.equal(table.split("\n").filter((line) => line.startsWith("| bugs |")).length, 4);
-  assert.match(table, /\| bugs \| primer \|  \| \d+s \| \d+s \|  \| 0 \| 4 \| 0% \| primed \|/);
+  assert.equal(table.split("\n").filter((line) => line.startsWith("| bugs |")).length, 3);
   assert.match(table, /\| bugs \| voter 0 \| 1 \| \d+s \| \d+s \|  \| 0 \| 4 \| 90% \| usable \|/);
 });
 
@@ -321,22 +271,17 @@ test("a wrap-up gets the short wrap-up limit, not the voter's full one", async (
   assert.ok(WRAP_UP_TIMEOUT_MS < voter.timeoutMs);
 });
 
-test("a primer gets the short primer time limit, and voters the full one", async () => {
-  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
-  await review(fake, { timeoutMs: 1000, primerTimeoutMs: 10 }).rows;
-  assert.ok(fake.calls.filter((c) => c.kind === "primer").every((c) => c.timeoutMs === 10));
-  assert.ok(fake.calls.filter((c) => c.kind === "voter").every((c) => c.timeoutMs === 1000));
-});
-
 test("an unexpected error in one voter costs only that voter", async () => {
-  const fake = fakeClaude((call, calls) => {
-    if (call.agent === "bugs" && calls.filter((c) => c.agent === "bugs").length === 1) {
+  const fake = fakeClaude();
+  let thrown = false;
+  const onRow = (row) => {
+    if (row.agent === "bugs" && !thrown) {
+      thrown = true;
       throw new Error("disk full");
     }
-    return call.kind === "primer" ? PRIMED : USABLE;
-  });
+  };
   const agents = ["bugs", "design"].map((key) => ({ key, source: "base" }));
-  const { output, rows } = review(fake, { agents });
+  const { output, rows } = review(fake, { agents, onRow });
   const result = await rows;
   assert.ok(output.some((line) => line.includes("failed unexpectedly")));
   assert.equal(result.filter((r) => r.agent === "design" && r.outcome === "usable").length, 3);
@@ -354,7 +299,7 @@ test("each process logs when it starts, and its row says how long it waited", as
 
 test("every row is handed over as it settles", async () => {
   const seen = [];
-  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
+  const fake = fakeClaude();
   const rows = await review(fake, { onRow: (row) => seen.push(row) }).rows;
   assert.deepEqual(seen, rows);
 });
@@ -451,9 +396,9 @@ test("a voter that fails unexpectedly writes a result marked failed", async () =
 // ── Environment ──────────────────────────────────────────────────────────────
 
 test("the review passes its environment to every process unchanged", async () => {
-  const fake = fakeClaude((call) => (call.kind === "primer" ? PRIMED : USABLE));
+  const fake = fakeClaude();
   await review(fake).rows;
-  assert.ok(fake.calls.every((c) => c.env.ANTHROPIC_API_KEY === "key" && !("GITHUB_TOKEN" in c.env)));
+  assert.ok(fake.calls.every((c) => c.env.ANTHROPIC_AUTH_TOKEN === "key" && !("GITHUB_TOKEN" in c.env)));
 });
 
 // ── Prompts ──────────────────────────────────────────────────────────────────

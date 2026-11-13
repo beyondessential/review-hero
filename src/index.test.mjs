@@ -16,7 +16,8 @@ import {
   loadCallerConfig,
   discoverBaseAgents,
   filterDiff,
-  createAnthropicModelCaller,
+  createOpenRouterModelCaller,
+  FILTER_MODEL,
   isValidAgentKey,
 } from "./index.mjs";
 
@@ -49,7 +50,7 @@ test("filterWithSuppressions routes calls through the caller-supplied model func
   );
 
   assert.equal(calls.length, 1, "the injected caller performed the model call");
-  assert.equal(calls[0].model, "claude-haiku-4-5-20251001");
+  assert.equal(calls[0].model, FILTER_MODEL);
   assert.equal(suppressed.length, 1);
   assert.equal(suppressed[0].file, "a.ts");
   assert.equal(kept.length, 1);
@@ -100,28 +101,32 @@ test("groupAllFindings with no caller falls back to one group per finding", asyn
   assert.equal(keptGroups[0].representative.file, "a.ts");
 });
 
-// ── Anthropic-backed caller ──────────────────────────────────────────────────
+// ── OpenRouter-backed caller ─────────────────────────────────────────────────
 
-test("createAnthropicModelCaller returns the assistant text", async () => {
+test("createOpenRouterModelCaller sends a bearer-authenticated request to OpenRouter and returns the assistant text", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: true,
-    json: async () => ({ content: [{ type: "text", text: "hello" }] }),
-  });
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ content: [{ type: "text", text: "hello" }] }) };
+  };
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     const text = await callModel({ model: "m", maxTokens: 10, messages: [] });
     assert.equal(text, "hello");
+    assert.equal(requests[0].url, "https://openrouter.ai/api/v1/messages");
+    assert.equal(requests[0].init.headers.authorization, "Bearer k");
+    assert.ok(!("x-api-key" in requests[0].init.headers));
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("createAnthropicModelCaller throws on a non-2xx response", async () => {
+test("createOpenRouterModelCaller throws on a non-2xx response", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     await assert.rejects(() => callModel({ model: "m", maxTokens: 10, messages: [] }), /API 500/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -283,9 +288,9 @@ test("consensus and grouping render each finding on a single line too", async ()
   }
 });
 
-// ── Anthropic caller text extraction ─────────────────────────────────────────
+// ── OpenRouter caller text extraction ────────────────────────────────────────
 
-test("createAnthropicModelCaller joins all text blocks and skips a thinking block", async () => {
+test("createOpenRouterModelCaller joins all text blocks and skips a thinking block", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
     ok: true,
@@ -298,18 +303,18 @@ test("createAnthropicModelCaller joins all text blocks and skips a thinking bloc
     }),
   });
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     assert.equal(await callModel({ model: "m", maxTokens: 10, messages: [] }), "[0,1]");
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("createAnthropicModelCaller returns \"\" when a response carries no text block", async () => {
+test("createOpenRouterModelCaller returns \"\" when a response carries no text block", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     assert.equal(await callModel({ model: "m", maxTokens: 10, messages: [] }), "");
   } finally {
     globalThis.fetch = originalFetch;

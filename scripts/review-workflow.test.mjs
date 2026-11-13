@@ -28,10 +28,9 @@ const box = (mark, spacing, label = "Run Review Hero", marker = "<!-- #ai-review
   `## Review\n\n- [${mark}]${spacing}**${label}** ${marker}\n`;
 
 const bodies = {
-  "unticked template": box(" ", " ") + box(" ", " ", "Run Review Hero on Claude (before merge)", "<!-- #ai-review-claude -->"),
+  "unticked template": box(" ", " "),
   "ticked, one space": box("x", " "),
   "ticked, two spaces": box("x", "  "),
-  "ticked Claude box": box("x", " ", "Run Review Hero on Claude (before merge)", "<!-- #ai-review-claude -->"),
   "ticked, three spaces": box("x", "   "),
   "ticked, a tab": box("x", "\t"),
   "ticked with a capital X": box("X", " "),
@@ -56,7 +55,7 @@ test("the job's gate starts no runner for an unticked template or a description 
 });
 
 test("both agree on how much space may follow the box", () => {
-  for (const name of ["ticked, one space", "ticked, two spaces", "ticked Claude box"]) {
+  for (const name of ["ticked, one space", "ticked, two spaces"]) {
     assert.ok(gate(bodies[name]) && check.test(bodies[name]), name);
   }
   for (const name of ["ticked, three spaces", "ticked, a tab"]) {

@@ -11,8 +11,7 @@
  *   ARTIFACTS_DIR       — Directory containing agent result files (scanned recursively)
  *   VOTERS              — Voters each agent ran, as triage set them (default: 1)
  *   CONSENSUS_PATH      — Where to write the consensus outcome
- *   ANTHROPIC_API_KEY   — API key for the consensus model (optional)
- *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
+ *   OPENROUTER_API_KEY  — API key for the consensus model (optional)
  *   GITHUB_OUTPUT       — Receives `second_look=true` when there are contested areas
  */
 
@@ -22,7 +21,7 @@ import { join } from "node:path";
 import { mapWithConcurrency, oneLine, RESULT_FILE_PATTERN, votersFromEnv } from "./lib.mjs";
 import {
   applyConsensus,
-  createAnthropicModelCaller,
+  createOpenRouterModelCaller,
   parseAgentResult,
   isValidAgentKey,
   keepWithoutConsensus,
@@ -172,13 +171,8 @@ async function main() {
     throw new Error("Missing ARTIFACTS_DIR or CONSENSUS_PATH");
   }
   const voters = votersFromEnv();
-  const apiKey = process.env.ANTHROPIC_API_KEY || "";
-  const callModel = apiKey
-    ? createAnthropicModelCaller({
-        apiKey,
-        baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com",
-      })
-    : null;
+  const apiKey = process.env.OPENROUTER_API_KEY || "";
+  const callModel = apiKey ? createOpenRouterModelCaller({ apiKey }) : null;
 
   const { findings, agentsCompleted, agentsFailed } = collectFindings(scanForResults(artifactsDir));
   if (voters > 1) console.log(`Voter consensus enabled: ${voters} voters per agent`);

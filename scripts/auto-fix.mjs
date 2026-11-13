@@ -8,10 +8,11 @@
  *   GITHUB_TOKEN        — GitHub token (with contents:write, pull-requests:write, actions:read)
  *   GITHUB_REPOSITORY   — owner/repo
  *   PR_NUMBER           — Pull request number
- *   ANTHROPIC_API_KEY   — API key for Claude CLI
+ *   OPENROUTER_API_KEY  — OpenRouter API key, for saving suppressions
+ *   ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN — Point the Claude CLI at OpenRouter
  *   REVIEW_HERO_APP_ID  — App ID for git commit identity
  *   APP_SLUG            — GitHub App slug (for git commit identity, default: review-hero)
- *   MODEL               — Model to use (default: claude-sonnet-5)
+ *   MODEL               — OpenRouter model to use (default: z-ai/glm-5.3:nitro)
  *   FIX_REVIEWS         — 'true' to fix unresolved review comments
  *   FIX_CI              — 'true' to fix CI failures
  *   SAVE_SUPPRESSIONS   — 'true' to save suppressions from thumbs-down feedback
@@ -62,7 +63,7 @@ if (!/^\d+$/.test(prNumber)) {
 
 const appId = process.env.REVIEW_HERO_APP_ID ?? "";
 const appSlug = process.env.APP_SLUG || "review-hero";
-const model = process.env.MODEL ?? "claude-sonnet-5";
+const model = process.env.MODEL || "z-ai/glm-5.3:nitro";
 const fixReviews = process.env.FIX_REVIEWS === "true";
 const fixCI = process.env.FIX_CI === "true";
 const saveSuppressions = process.env.SAVE_SUPPRESSIONS === "true";
@@ -403,17 +404,15 @@ async function uncheckCheckboxes() {
 
 // ── Save suppressions ────────────────────────────────────────────────────────
 // Detect thumbs-down reactions on Review Hero findings, generate suppression
-// rules with Haiku, and commit them to .github/review-hero/suppressions.yml.
+// rules with the filter model, and commit them to .github/review-hero/suppressions.yml.
 // Returns the number of suppressions written (0 if none / disabled).
 
 async function runSaveSuppressions() {
-  const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
-  const anthropicBaseUrl =
-    process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+  const apiKey = process.env.OPENROUTER_API_KEY ?? "";
   const botLogin = `${appSlug}[bot]`;
 
   if (!apiKey) {
-    console.warn("Save suppressions: no Anthropic API key — skipping");
+    console.warn("Save suppressions: no OpenRouter API key — skipping");
     return 0;
   }
 
@@ -428,10 +427,7 @@ async function runSaveSuppressions() {
   );
   if (rejected.length === 0) return 0;
 
-  const newSuppressions = await generateSuppressions(rejected, {
-    apiKey,
-    baseUrl: anthropicBaseUrl,
-  });
+  const newSuppressions = await generateSuppressions(rejected, { apiKey });
 
   if (newSuppressions.length > 0) {
     const suppressionsPath = ".github/review-hero/suppressions.yml";
