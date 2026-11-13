@@ -350,7 +350,7 @@ export function restoreReviewHero() {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
-const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|_KEY)$|^GIT_CONFIG_/;
+const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|CREDENTIALS?|_KEY)$|^GIT_CONFIG_/i;
 
 /**
  * The environment the fixing agent runs with: everything but secrets, since a
