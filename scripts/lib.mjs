@@ -331,8 +331,8 @@ export function restoreReviewHero() {
 // ── Claude execution ─────────────────────────────────────────────────────────
 
 export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
-  if (!/^[a-z0-9.-]+\/[a-z0-9.-]+(:[a-z0-9-]+)?$/.test(model)) {
-    throw new Error(`Invalid model name: ${model}`);
+  if (!/^[a-z0-9][a-z0-9.-]*\/[a-z0-9][a-z0-9.-]*(:[a-z0-9-]+)?$/.test(model)) {
+    throw new Error(`Invalid model name: ${model} (expected an OpenRouter id such as z-ai/glm-5.3:nitro)`);
   }
 
   const tmpPath = `/tmp/review-hero-prompt-${prNumber}-${Date.now()}.md`;

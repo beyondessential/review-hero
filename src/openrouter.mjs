@@ -55,11 +55,11 @@ export function responseText(result) {
 }
 
 /**
- * Build a `callModel` bound to an API key and base URL.
+ * Build a `callModel` bound to an API key.
  */
-export function createOpenRouterModelCaller({ apiKey, baseUrl = OPENROUTER_BASE_URL }) {
+export function createOpenRouterModelCaller({ apiKey }) {
   return async function callModel({ model, maxTokens, messages }) {
-    const response = await fetch(`${baseUrl}/v1/messages`, {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/v1/messages`, {
       method: "POST",
       headers: openRouterHeaders(apiKey),
       body: JSON.stringify({ model, max_tokens: maxTokens + REASONING_ALLOWANCE, messages }),

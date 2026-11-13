@@ -19,6 +19,7 @@ import {
   logGroup,
   oneLine,
   MAX_VOTERS,
+  runClaude,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -253,4 +254,10 @@ test("each log group stops commands under its own token, and an empty body has n
 test("model text for a single log line is kept to one line", () => {
   assert.equal(oneLine("area\n::error::forged\r\nmore"), "area ::error::forged more");
   assert.equal(oneLine(undefined), "");
+});
+
+test("runClaude refuses a model that is not an OpenRouter id before starting the CLI", () => {
+  for (const model of ["claude-sonnet-5", "--dangerously-skip-permissions/x", "z-ai/-x", "Z-AI/GLM"]) {
+    assert.throws(() => runClaude({ prompt: "", model, tools: "Read", prNumber: 1 }), /Invalid model name/, model);
+  }
 });

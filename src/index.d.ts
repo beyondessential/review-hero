@@ -447,10 +447,7 @@ export const FILTER_MODEL: string;
 /** Model consensus and grouping run on. */
 export const GROUPING_MODEL: string;
 
-export function createOpenRouterModelCaller(opts: {
-  apiKey: string;
-  baseUrl?: string;
-}): CallModel;
+export function createOpenRouterModelCaller(opts: { apiKey: string }): CallModel;
 
 // ── Prompt-safe rendering ────────────────────────────────────────────────────
 
