@@ -12,7 +12,6 @@
  *   CONSENSUS_PATH      — Consensus outcome, read and rewritten
  *   AGENTS              — JSON array of { key, source } from triage
  *   AGENT_MODEL         — Model the checkers run on
- *   AGENT_PROVIDER      — "anthropic" or "openrouter"
  *   CONCURRENCY         — Most checker processes running at once (0 or unset: no ceiling)
  *   LOGS_DIR            — Where per-checker output goes
  *   REVIEW_HERO_DIR     — review-hero checkout (checker and base prompts)
@@ -37,8 +36,6 @@ import {
   agentPromptPath,
   cacheReadShare,
   createProcessRunner,
-  primeRun,
-  PRIMER_TIMEOUT_MS,
   runOutput,
   runWithWrapUp,
   WRAP_UP_TIMEOUT_MS,
@@ -140,7 +137,6 @@ export async function runSecondLook({
   consensus,
   prompts,
   model,
-  provider = "anthropic",
   maxTurns,
   concurrency = Infinity,
   memory = linuxMemoryProbe(),
@@ -168,47 +164,9 @@ export async function runSecondLook({
     rows.push(row);
     onRow(row);
   };
-  // Every checker of an area sends the same prompt, so with more than one an
-  // area primes the cache first, as an agent's voters do.
-  const priming = count > 1 && provider !== "openrouter";
-
-  // spec: RUN#prompt-cache-priming
-  async function prime(area, i) {
-    const label = `${area.agent} area ${i} (primer)`;
-    try {
-      const { result, envelope, outcome, waitedMs, ranMs, peakBytes, retries } = await primeRun({
-        timed,
-        label,
-        prompt: prompts[i],
-        model,
-        timeoutMs: Math.min(PRIMER_TIMEOUT_MS, timeoutMs),
-        logPath: join(logsDir, `${area.agent}-area-${i}-primer.json`),
-        out,
-      });
-      out(logGroup(`${label}: ${outcome}`, result.stderr));
-      record({
-        agent: area.agent,
-        run: `area ${i} primer`,
-        waitedMs,
-        ranMs,
-        peakBytes,
-        retries,
-        turns: envelope?.num_turns,
-        cacheRead: cacheReadShare(envelope?.usage),
-        outcome,
-      });
-    } catch (err) {
-      // A primer that fails still releases its area's checkers.
-      out(`::warning::${label} failed unexpectedly: ${err.message}\n`);
-    }
-  }
-
   const confirmationsByArea = await Promise.all(
     consensus.contested.map(async (area, i) => {
       if (!prompts[i]) return area.groups.map(() => 0);
-      // Queued before any checker, since every area reaches this point
-      // before the first await.
-      if (priming) await prime(area, i);
       const answers = await Promise.all(
         Array.from({ length: count }, async (_, checker) => {
           const label = `${area.agent} area ${i} checker ${checker}`;

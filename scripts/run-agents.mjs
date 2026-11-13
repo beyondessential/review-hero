@@ -8,13 +8,10 @@
  *
  * 1. Admission by the runner's free memory and the provider's rate limits,
  *    with the `concurrency` input as an optional ceiling (see scheduler.mjs)
- * 2. Prompt cache priming: with several voters on Anthropic, each agent first
- *    makes a single-turn run that writes the shared prompt prefix, and its
- *    voters start once it returns
- * 3. A wrap-up resume for a voter that hits its turn cap or answers without a
+ * 2. A wrap-up resume for a voter that hits its turn cap or answers without a
  *    findings array
- * 4. One fresh run for a voter slot that crashed or came back empty
- * 5. Results written as each voter settles, under the names the orchestrator
+ * 3. One fresh run for a voter slot that crashed or came back empty
+ * 4. Results written as each voter settles, under the names the orchestrator
  *    scans for, plus a log group per process and a job summary table
  *
  * Environment variables:
@@ -22,10 +19,9 @@
  *   VOTERS              — Voters per agent, from triage
  *   MAX_TURNS           — Turn cap per voter run, from triage
  *   AGENT_MODEL         — Model the agents run on
- *   AGENT_PROVIDER      — "anthropic" or "openrouter"
  *   CONCURRENCY         — Most agent processes running at once (0 or unset: no ceiling)
  *   RESULTS_DIR         — Where voter results go, for the orchestrator
- *   LOGS_DIR            — Where primer output and per-process logs go
+ *   LOGS_DIR            — Where per-process logs go
  *   REVIEW_HERO_DIR     — review-hero checkout (base prompts)
  *   CALLER_BASE_DIR     — Caller checkout at the trusted ref (custom prompts)
  *   DIFF_PATH           — Filtered PR diff
@@ -54,8 +50,6 @@ import {
   agentPromptPath,
   cacheReadShare,
   createProcessRunner,
-  primeRun,
-  PRIMER_TIMEOUT_MS,
   runWithWrapUp,
   spawnClaude,
   startDriver,
@@ -119,7 +113,7 @@ export function failedEnvelope(subtype) {
 // ── The review ───────────────────────────────────────────────────────────────
 
 /**
- * Run every agent's primer and voters. Resolves with one summary row per
+ * Run every agent's voters. Resolves with one summary row per
  * process once all of them have settled.
  */
 export async function runAgents({
@@ -128,14 +122,12 @@ export async function runAgents({
   voters,
   maxTurns,
   model,
-  provider,
   concurrency = Infinity,
   memory = linuxMemoryProbe(),
   resultsDir,
   logsDir,
   env,
   timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS,
-  primerTimeoutMs = PRIMER_TIMEOUT_MS,
   runClaude = spawnClaude,
   out = (text) => process.stdout.write(text),
   onRow = () => {},
@@ -154,32 +146,6 @@ export async function runAgents({
     onRow(row);
   };
   const { timed, timeLeft } = createProcessRunner({ scheduler, env, runClaude, timeoutMs, deadline, now, out });
-
-  // spec: RUN#prompt-cache-priming
-  async function prime(agent) {
-    const label = `${agent.key} (primer)`;
-    const { result, envelope, outcome, waitedMs, ranMs, peakBytes, retries } = await primeRun({
-      timed,
-      label,
-      prompt: prompts[agent.key],
-      model,
-      timeoutMs: primerTimeoutMs,
-      logPath: join(logsDir, `${agent.key}-primer.json`),
-      out,
-    });
-    logRun(out, { label, outcome, envelope, stderr: result.stderr });
-    record({
-      agent: agent.key,
-      run: "primer",
-      waitedMs,
-      ranMs,
-      peakBytes,
-      retries,
-      turns: envelope?.num_turns,
-      cacheRead: cacheReadShare(envelope?.usage),
-      outcome,
-    });
-  }
 
   // One attempt at a voter slot: the run itself, then its wrap-up resume when
   // it needs one. The slot is held across both, so a resume does not queue
@@ -296,25 +262,10 @@ export async function runAgents({
     }
   }
 
-  const priming = voters > 1 && provider !== "openrouter";
-
-  // Every primer is queued before any voter, so primers take the first slots.
-  const primed = new Map(
-    priming ? agents.map((agent) => [agent.key, prime(agent)]) : [],
-  );
-
   await Promise.all(
-    agents.map(async (agent) => {
-      // A primer that fails still releases its voters.
-      try {
-        await primed.get(agent.key);
-      } catch (err) {
-        out(`::warning::${agent.key} (primer) failed unexpectedly: ${err.message}\n`);
-      }
-      await Promise.all(
-        Array.from({ length: voters }, (_, voter) => voterSlot(agent, voter)),
-      );
-    }),
+    agents.flatMap((agent) =>
+      Array.from({ length: voters }, (_, voter) => voterSlot(agent, voter)),
+    ),
   );
 
   return rows;

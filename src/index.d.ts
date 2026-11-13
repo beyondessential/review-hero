@@ -59,8 +59,6 @@ export interface ModelRequest {
   model: string;
   maxTokens: number;
   messages: ModelMessage[];
-  /** Passed through to the underlying API when supported (e.g. `{ type: "disabled" }`). */
-  thinking?: unknown;
 }
 
 /**
@@ -175,7 +173,7 @@ export function filterWithSuppressions(
   callModel?: CallModel | null,
 ): Promise<SuppressionResult>;
 
-export function callHaikuForBatch(
+export function callModelForBatch(
   batch: Finding[],
   suppressionList: string,
   callModel: CallModel,
@@ -441,12 +439,15 @@ export function parseCompletionBlock(
  */
 export function stripCompletionBlocks(text: string | null | undefined): string;
 
-// ── Anthropic-backed model caller ────────────────────────────────────────────
+// ── OpenRouter-backed model caller ───────────────────────────────────────────
 
-export function createAnthropicModelCaller(opts: {
-  apiKey: string;
-  baseUrl?: string;
-}): CallModel;
+/** Model triage and suppression matching run on. */
+export const FILTER_MODEL: string;
+
+/** Model consensus and grouping run on. */
+export const GROUPING_MODEL: string;
+
+export function createOpenRouterModelCaller(opts: { apiKey: string }): CallModel;
 
 // ── Prompt-safe rendering ────────────────────────────────────────────────────
 
@@ -473,6 +474,9 @@ export interface Hunk {
 
 /** The new-side hunks of each file in a unified diff. */
 export function parseHunks(diff: string): Map<string, Hunk[]>;
+
+/** The line of `file`'s diff nearest to `line`, or undefined when the diff does not touch the file. */
+export function nearestDiffLine(file: string, line: number, hunks?: Map<string, Hunk[]>): number | undefined;
 
 /** The new path a `diff --git` header names, decoding a git-quoted path; null for any other line. */
 export function diffGitPath(line: string): string | null;

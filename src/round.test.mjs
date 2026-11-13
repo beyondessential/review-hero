@@ -68,7 +68,7 @@ const build = (groups, over = {}) => {
     agentsCompleted: 2,
     agentsFailed: 0,
     voters: 3,
-    model: "claude-sonnet-5",
+    model: "z-ai/glm-5.3-flash:nitro",
     keptGroups: groups,
     ...over,
   });

@@ -108,19 +108,14 @@ This requires repo admin.
 |--------|----------|-------------|
 | `REVIEW_HERO_APP_ID` | Yes | GitHub App ID |
 | `REVIEW_HERO_PRIVATE_KEY` | Yes | GitHub App private key (`.pem` contents) |
-| `ANTHROPIC_API_KEY` | Yes* | Anthropic API key |
-| `REVIEW_HERO_ANTHROPIC_API_KEY` | Yes* | Anthropic API key (takes priority over `ANTHROPIC_API_KEY`) |
-| `ANTHROPIC_BASE_URL` | No | Custom Anthropic API base URL |
-| `REVIEW_HERO_ANTHROPIC_BASE_URL` | No | Custom Anthropic API base URL (takes priority over `ANTHROPIC_BASE_URL`) |
-
-\* At least one of `ANTHROPIC_API_KEY` or `REVIEW_HERO_ANTHROPIC_API_KEY` must be set.
+| `REVIEW_HERO_OPENROUTER_API_KEY` | Yes | OpenRouter API key, for every model call |
 
 ### Key environment variables passed to scripts
 
 | Variable | Used by | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | triage, run-agents, auto-fix | Resolved from the `REVIEW_HERO_` variant or the plain variant |
-| `ANTHROPIC_BASE_URL` | triage, run-agents, auto-fix | Custom API base URL (optional) |
+| `OPENROUTER_API_KEY` | triage, consensus, orchestrate, auto-fix | The OpenRouter key, for direct model calls |
+| `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` | run-agents, run-checkers, auto-fix | Point the CLI at OpenRouter's Anthropic-compatible endpoint, with the OpenRouter key |
 | `CONCURRENCY` | run-agents, run-checkers | The `concurrency` input: most agent or checker processes running at once, 0 for no ceiling |
 | `VOTERS` | triage, run-agents, consensus | The `voters` input into triage; the scaled count triage sets, into run-agents and consensus |
 | `CONSENSUS_PATH` | consensus, run-checkers, orchestrate | The consensus outcome: written by consensus, updated by the second look, and read by the orchestrator in the posting job from the review job's artifact |
@@ -137,4 +132,4 @@ This repo is public, so external users can reference our reusable workflows dire
 - **Review-hero checkout** uses `repository: beyondessential/review-hero` with no token (public repo, read-only).
 - **App token generation** uses `owner: ${{ github.repository_owner }}` — this scopes to the *caller's* org, where their own GitHub App is installed.
 - **`APP_SLUG`** is detected at runtime via `gh api /app`, so it works regardless of what the user named their app.
-- Users bring their own GitHub App and their own Anthropic key. We host nothing but this repo.
+- Users bring their own GitHub App and their own OpenRouter key. We host nothing but this repo.

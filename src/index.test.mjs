@@ -16,7 +16,9 @@ import {
   loadCallerConfig,
   discoverBaseAgents,
   filterDiff,
-  createAnthropicModelCaller,
+  createOpenRouterModelCaller,
+  FILTER_MODEL,
+  nearestDiffLine,
   isValidAgentKey,
 } from "./index.mjs";
 
@@ -49,7 +51,7 @@ test("filterWithSuppressions routes calls through the caller-supplied model func
   );
 
   assert.equal(calls.length, 1, "the injected caller performed the model call");
-  assert.equal(calls[0].model, "claude-haiku-4-5-20251001");
+  assert.equal(calls[0].model, FILTER_MODEL);
   assert.equal(suppressed.length, 1);
   assert.equal(suppressed[0].file, "a.ts");
   assert.equal(kept.length, 1);
@@ -100,28 +102,34 @@ test("groupAllFindings with no caller falls back to one group per finding", asyn
   assert.equal(keptGroups[0].representative.file, "a.ts");
 });
 
-// ── Anthropic-backed caller ──────────────────────────────────────────────────
+// ── OpenRouter-backed caller ─────────────────────────────────────────────────
 
-test("createAnthropicModelCaller returns the assistant text", async () => {
+test("createOpenRouterModelCaller sends a bearer-authenticated request to OpenRouter and returns the assistant text", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: true,
-    json: async () => ({ content: [{ type: "text", text: "hello" }] }),
-  });
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ content: [{ type: "text", text: "hello" }] }) };
+  };
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     const text = await callModel({ model: "m", maxTokens: 10, messages: [] });
     assert.equal(text, "hello");
+    assert.equal(requests[0].url, "https://openrouter.ai/api/v1/messages");
+    assert.equal(requests[0].init.headers.authorization, "Bearer k");
+    assert.ok(!("x-api-key" in requests[0].init.headers));
+    assert.ok(JSON.parse(requests[0].init.body).max_tokens > 10, "reasoning gets room beyond the answer's budget");
+    assert.ok(requests[0].init.signal, "the request is bounded in time");
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("createAnthropicModelCaller throws on a non-2xx response", async () => {
+test("createOpenRouterModelCaller throws on a non-2xx response", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     await assert.rejects(() => callModel({ model: "m", maxTokens: 10, messages: [] }), /API 500/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -283,9 +291,9 @@ test("consensus and grouping render each finding on a single line too", async ()
   }
 });
 
-// ── Anthropic caller text extraction ─────────────────────────────────────────
+// ── OpenRouter caller text extraction ────────────────────────────────────────
 
-test("createAnthropicModelCaller joins all text blocks and skips a thinking block", async () => {
+test("createOpenRouterModelCaller joins all text blocks and skips a thinking block", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
     ok: true,
@@ -298,18 +306,18 @@ test("createAnthropicModelCaller joins all text blocks and skips a thinking bloc
     }),
   });
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     assert.equal(await callModel({ model: "m", maxTokens: 10, messages: [] }), "[0,1]");
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("createAnthropicModelCaller returns \"\" when a response carries no text block", async () => {
+test("createOpenRouterModelCaller returns \"\" when a response carries no text block", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
   try {
-    const callModel = createAnthropicModelCaller({ apiKey: "k" });
+    const callModel = createOpenRouterModelCaller({ apiKey: "k" });
     assert.equal(await callModel({ model: "m", maxTokens: 10, messages: [] }), "");
   } finally {
     globalThis.fetch = originalFetch;
@@ -322,4 +330,14 @@ test("an agent key cannot end in the voter suffix result files use", () => {
   assert.ok(isValidAgentKey("perf-voter"));
   assert.ok(!isValidAgentKey("perf-voter-1"));
   assert.ok(!isValidAgentKey("Perf"));
+});
+
+test("a line outside the diff maps to the nearest line inside it", () => {
+  const hunks = new Map([["a.js", [{ start: 10, end: 20 }, { start: 100, end: 110 }]]]);
+  assert.equal(nearestDiffLine("a.js", 15, hunks), 15);
+  assert.equal(nearestDiffLine("a.js", 5, hunks), 10);
+  assert.equal(nearestDiffLine("a.js", 70, hunks), 100);
+  assert.equal(nearestDiffLine("a.js", 500, hunks), 110);
+  assert.equal(nearestDiffLine("b.js", 5, hunks), undefined);
+  assert.equal(nearestDiffLine("a.js", 5, undefined), undefined);
 });

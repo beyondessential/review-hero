@@ -4,7 +4,7 @@
  * Common helpers used by auto-fix and other action scripts.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -44,40 +44,21 @@ export function votersFromEnv(raw = process.env.VOTERS) {
   return Math.max(1, Math.min(parseInt(raw || "1") || 1, MAX_VOTERS));
 }
 
-/** Models a PR can pick for its review agents. Ids containing `/` are OpenRouter ids and need its key. */
+/** OpenRouter models a PR can pick for its review agents. */
 export const ALLOWED_MODELS = ["z-ai/glm-5.3-flash:nitro"];
 
 export const DEFAULT_MODEL = "z-ai/glm-5.3-flash:nitro";
-const CLAUDE_CHECKBOX = /\[x\][^\r\n]*<!-- #ai-review-claude -->/;
 const MODEL_MARKER = /<!--\s*review-hero:\s*model=([^\r\n]*?)\s*-->/;
 
 /**
- * Picks the review agents' model from the PR body: `claudeModel` when the
- * Claude checkbox is ticked, else an allowed model named by a
- * `<!-- review-hero: model=<id> -->` marker, else `DEFAULT_MODEL`. An
- * OpenRouter model without its key falls back to `claudeModel`.
+ * Picks the review agents' model from the PR body: an allowed model named by a
+ * `<!-- review-hero: model=<id> -->` marker, else `DEFAULT_MODEL`.
  */
-export function chooseAgentModel({ body, claudeModel, hasOpenRouterKey }) {
-  const claude = { model: claudeModel, provider: "anthropic", warning: null };
-  const text = String(body ?? "");
-  if (CLAUDE_CHECKBOX.test(text)) return claude;
-
-  let id = DEFAULT_MODEL;
-  let warning = null;
-  const marked = text.match(MODEL_MARKER)?.[1];
-  if (marked && ALLOWED_MODELS.includes(marked)) id = marked;
-  else if (marked) warning = `Ignoring model not in ALLOWED_MODELS; using ${id}`;
-
-  if (!id.includes("/")) return { model: id, provider: "anthropic", warning };
-  if (!hasOpenRouterKey) {
-    return {
-      ...claude,
-      warning: [warning, `Model ${id} needs REVIEW_HERO_OPENROUTER_API_KEY, which is not set; using ${claudeModel}`]
-        .filter(Boolean)
-        .join(". "),
-    };
-  }
-  return { model: id, provider: "openrouter", warning };
+export function chooseAgentModel({ body }) {
+  const marked = String(body ?? "").match(MODEL_MARKER)?.[1];
+  if (!marked) return { model: DEFAULT_MODEL, warning: null };
+  if (ALLOWED_MODELS.includes(marked)) return { model: marked, warning: null };
+  return { model: DEFAULT_MODEL, warning: `Ignoring model not in ALLOWED_MODELS; using ${DEFAULT_MODEL}` };
 }
 
 // ── Job log ─────────────────────────────────────────────────────────────────
@@ -304,13 +285,53 @@ export function createCommit(commitMessage) {
   execFileSync("git", ["commit", "-m", commitMessage]);
 }
 
+/**
+ * The environment that gives one git call the App token, since none is
+ * persisted. It goes through the environment, never the arguments: a failed
+ * command's error message quotes its arguments into the job log.
+ */
+export function gitAuthEnv(env = process.env) {
+  const basic = Buffer.from(`x-access-token:${env.GITHUB_TOKEN}`).toString("base64");
+  const server = env.GITHUB_SERVER_URL || "https://github.com";
+  return {
+    ...env,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: `http.${server}/.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
+  };
+}
+
+function authedGit(args) {
+  const env = gitAuthEnv();
+  console.log(`::add-mask::${env.GIT_CONFIG_VALUE_0.split(" ").pop()}`);
+  return execFileSync("git", args, { env });
+}
+
+/**
+ * Call before the fixing agent runs; the function it returns puts the
+ * repository's git config back and removes its hooks. The agent can write
+ * both, and git runs what they name (hooks, filters, fsmonitor, a proxy) in
+ * later commands that carry the App token, so restore before any of those.
+ */
+export function guardGitConfig(gitDir = ".git") {
+  const configPath = join(gitDir, "config");
+  const saved = readFileSync(configPath);
+  return () => {
+    // Whatever the agent left at the path, a directory included, is replaced.
+    rmSync(configPath, { recursive: true, force: true });
+    mkdirSync(gitDir, { recursive: true });
+    writeFileSync(configPath, saved);
+    rmSync(join(gitDir, "hooks"), { recursive: true, force: true });
+  };
+}
+
 function isNonFastForward(errMsg) {
   return /non-fast-forward|fetch first|cannot lock ref/i.test(errMsg);
 }
 
 export function pushChanges() {
   try {
-    execSync("git push");
+    authedGit(["push"]);
   } catch (pushErr) {
     const errMsg = pushErr.stderr?.toString() ?? pushErr.message ?? String(pushErr);
     if (!isNonFastForward(errMsg)) {
@@ -319,7 +340,7 @@ export function pushChanges() {
     console.warn("Push rejected (non-fast-forward) — pulling with rebase and retrying");
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf-8" }).trim();
     try {
-      execFileSync("git", ["pull", "--rebase", "origin", branch]);
+      authedGit(["pull", "--rebase", "origin", branch]);
     } catch (rebaseErr) {
       try {
         execSync("git rebase --abort");
@@ -328,7 +349,7 @@ export function pushChanges() {
       }
       throw rebaseErr;
     }
-    execSync("git push");
+    authedGit(["push"]);
   }
   console.log("Pushed changes");
 }
@@ -349,9 +370,23 @@ export function restoreReviewHero() {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
+const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|CREDENTIALS?|_KEY)$|^GIT_CONFIG_/i;
+
+/**
+ * The environment the fixing agent runs with: everything but secrets, since a
+ * prompt-injected agent with a shell can read and send its environment. A fix
+ * for a CI failure may need the rest to build and test. Only the token the CLI
+ * authenticates with stays.
+ */
+export function fixAgentEnv(env) {
+  return Object.fromEntries(
+    Object.entries(env).filter(([name]) => name === "ANTHROPIC_AUTH_TOKEN" || !SECRET_NAME.test(name)),
+  );
+}
+
 export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
-  if (!/^[a-z0-9.-]+$/.test(model)) {
-    throw new Error(`Invalid model name: ${model}`);
+  if (!/^[a-z0-9][a-z0-9.-]*\/[a-z0-9][a-z0-9.-]*(:[a-z0-9-]+)?$/.test(model)) {
+    throw new Error(`Invalid model name: ${model} (expected an OpenRouter id such as z-ai/glm-5.3:nitro)`);
   }
 
   const tmpPath = `/tmp/review-hero-prompt-${prNumber}-${Date.now()}.md`;
@@ -375,7 +410,7 @@ export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
       encoding: "utf-8",
       timeout: 10 * 60 * 1000,
       maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env },
+      env: fixAgentEnv(process.env),
     },
   );
 

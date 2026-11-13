@@ -74,20 +74,16 @@ Posting runs apart from them, so the GitHub App token never exists on a runner t
 - [ ] `concurrency` is an optional workflow input capping how many agent processes run at once, with no cap by default.
 - [ ] Where the runner's memory cannot be read and `concurrency` is not set, at most eight agent processes run at once, with a warning in the job log.
 - [ ] Outside a provider pause, one agent process always runs while work is waiting, whatever the other limits say.
-- [ ] Work starts in the order it was queued, so every primer starts ahead of any voter and every agent's cache is written early.
+- [ ] Work starts in the order it was queued.
 
-## Prompt cache priming
+## Prompts
 
-- [ ] Every voter of an agent sends a byte-identical prompt, so the voters share one cached prompt prefix.
+- [ ] Every voter of an agent sends a byte-identical prompt.
 - [ ] The PR title appears in a prompt on a single line, whatever line breaks it holds.
-- [ ] With more than one voter on Anthropic, each agent first makes a single-turn primer run that writes the cache, and its voters start once the primer has returned.
-- [ ] A primer that fails still releases its voters, which then run without the shared prefix.
-- [ ] On OpenRouter, voters start without a primer run.
 
 ## Wrap-up, retries and replacements
 
 - [ ] A voter that hits its turn cap, or answers without a findings array, is resumed once and asked for its findings.
-- [ ] A primer run has a much shorter time limit than a voter, since it only needs its first request.
 - [ ] A wrap-up has a short time limit of its own.
 - [ ] A voter whose process exits abnormally is retried once, from scratch.
 - [ ] A voter that still has no usable findings after its wrap-up is replaced once by a fresh voter.
@@ -113,7 +109,6 @@ Where voters disagree, the review takes a second look before posting: fresh chec
 - [ ] A finding below the majority is kept when its voters and the checkers confirming it together reach the majority.
 - [ ] A review takes at most one second look.
 - [ ] Checkers start under the same memory, provider and `concurrency` limits as voters, use the same wrap-up, and have a time limit of their own inside the job's.
-- [ ] With more than one checker per area on Anthropic, each area first makes a primer run, and its checkers start once it has returned, as an agent's voters do.
 - [ ] Each contested area's verdicts are saved as soon as its checkers finish, so areas settled before a second look fails or runs out of time still count, and the rest stand as consensus left them.
 - [ ] A verdict counts only when it names a finding by its number; anything else is a rejection.
 - [ ] The review summary's filtering line says how many findings a second look confirmed, when it confirmed any.

@@ -31,8 +31,7 @@
  *   ACTIONS_ID_TOKEN_REQUEST_URL, ACTIONS_ID_TOKEN_REQUEST_TOKEN — Where GitHub Actions
  *                         issues the identity token the findings post carries; set only when the
  *                         caller granted `id-token: write`
- *   ANTHROPIC_API_KEY   — API key for Haiku-based filtering (optional)
- *   ANTHROPIC_BASE_URL  — Custom base URL for the Anthropic API (optional)
+ *   OPENROUTER_API_KEY  — API key for the filtering model (optional)
  */
 
 import { readFileSync } from "node:fs";
@@ -57,10 +56,11 @@ import {
   buildRoundFindings,
   buildFindingsPayload,
   commentLines,
+  nearestDiffLine,
   matchCommentIds,
   parseHunks,
   stripCompletionBlocks,
-  createAnthropicModelCaller,
+  createOpenRouterModelCaller,
 } from "../src/index.mjs";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -254,7 +254,7 @@ async function uncheckReviewHero(prNumber) {
     const body = pr.body;
     if (!body) return;
 
-    const updated = body.replace(/\[x\](\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review(?:-claude)? -->)/g, "[ ]$1");
+    const updated = body.replace(/\[x\](\s+\*\*Run Review Hero[^*\r\n]*\*\* <!-- #ai-review -->)/g, "[ ]$1");
 
     if (updated === body) return;
 
@@ -283,9 +283,7 @@ async function main() {
   const appSlug = process.env.APP_SLUG || "review-hero";
   const botLogin = `${appSlug}[bot]`;
   const suppressionsPath = process.env.SUPPRESSIONS_PATH || "";
-  const apiKey = process.env.ANTHROPIC_API_KEY || "";
-  const anthropicBaseUrl =
-    process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+  const apiKey = process.env.OPENROUTER_API_KEY || "";
   const repo = getEnvOrThrow("GITHUB_REPOSITORY");
   const completion = createCompletionReporter({ repo, prNumber });
   const reviewedLink = completion.link(reviewedSha);
@@ -327,10 +325,10 @@ async function main() {
     });
 
   // The filtering stages reach the model through a caller-supplied function;
-  // this repo backs it with the Anthropic API. Null when no key is set, which
+  // this repo backs it with OpenRouter. Null when no key is set, which
   // makes grouping and suppression keep every finding.
   const callModel = apiKey
-    ? createAnthropicModelCaller({ apiKey, baseUrl: anthropicBaseUrl })
+    ? createOpenRouterModelCaller({ apiKey })
     : null;
 
   console.log(`Orchestrating AI review for PR #${prNumber}`);
@@ -351,10 +349,7 @@ async function main() {
         console.log(
           `Found ${rejected.length} thumbs-down reaction${rejected.length === 1 ? "" : "s"} on previous review`,
         );
-        learnedSuppressions = await generateSuppressions(rejected, {
-          apiKey,
-          baseUrl: anthropicBaseUrl,
-        });
+        learnedSuppressions = await generateSuppressions(rejected, { apiKey });
         if (learnedSuppressions.length > 0) {
           console.log(
             `Generated ${learnedSuppressions.length} suppression${learnedSuppressions.length === 1 ? "" : "s"} from developer feedback`,
@@ -444,7 +439,7 @@ async function main() {
 
 
   // ── Phase 2: Cross-agent grouping ────────────────────────────────────
-  // Group ALL findings (kept + dropped) across all agents using Sonnet.
+  // Group ALL findings (kept + dropped) across all agents.
   // Groups where any member passed consensus → post inline.
   // Groups where no member passed → show in dropdown.
   const { keptGroups, droppedGroups } = await groupAllFindings(
@@ -482,11 +477,19 @@ async function main() {
 
     if (f.severity === "nitpick") {
       nitpicks.push(f);
+    } else if (hunks && !hunks.has(f.file)) {
+      // GitHub takes no inline comment on a file the diff does not touch, and
+      // refuses the whole review over one, so it goes in the summary's table.
+      nitpicks.push({ ...f, comment: `(${f.severity}, file not in the diff) ${f.comment}` });
     } else {
+      // A finding on a line outside the diff sits on the nearest line in it,
+      // and says where it points.
+      const anchor = nearestDiffLine(f.file, f.line, hunks);
+      const moved = anchor !== undefined && anchor !== f.line;
       inlineComments.push({
         path: f.file,
-        ...commentLines(f, hunks),
-        body: buildInlineComment(f, agentNames),
+        ...(moved ? { line: anchor } : commentLines(f, hunks)),
+        body: (moved ? `_About line ${f.line}, outside the diff._\n\n` : "") + buildInlineComment(f, agentNames),
         groupIndex,
       });
     }

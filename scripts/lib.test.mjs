@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,6 +19,10 @@ import {
   logGroup,
   oneLine,
   MAX_VOTERS,
+  runClaude,
+  fixAgentEnv,
+  gitAuthEnv,
+  guardGitConfig,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -253,4 +257,70 @@ test("each log group stops commands under its own token, and an empty body has n
 test("model text for a single log line is kept to one line", () => {
   assert.equal(oneLine("area\n::error::forged\r\nmore"), "area ::error::forged more");
   assert.equal(oneLine(undefined), "");
+});
+
+test("runClaude refuses a model that is not an OpenRouter id before starting the CLI", () => {
+  for (const model of ["claude-sonnet-5", "--dangerously-skip-permissions/x", "z-ai/-x", "Z-AI/GLM"]) {
+    assert.throws(() => runClaude({ prompt: "", model, tools: "Read", prNumber: 1 }), /Invalid model name/, model);
+  }
+});
+
+test("the fixing agent gets no secrets but the token its CLI authenticates with", () => {
+  const env = fixAgentEnv({
+    PATH: "/usr/bin",
+    HOME: "/home/runner",
+    CI: "true",
+    REVIEW_HERO_APP_ID: "123",
+    ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
+    ANTHROPIC_AUTH_TOKEN: "router",
+    OPENROUTER_API_KEY: "router",
+    GITHUB_TOKEN: "ghs_secret",
+    GH_TOKEN: "ghs_secret",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "secret",
+    REVIEW_HERO_PRIVATE_KEY: "secret",
+    SOME_SECRET: "secret",
+    DB_PASSWORD: "secret",
+  });
+  assert.deepEqual(Object.keys(env).sort(), [
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CI",
+    "HOME",
+    "PATH",
+    "REVIEW_HERO_APP_ID",
+  ]);
+});
+
+test("a git call's token travels in its environment, keyed to the server it talks to", () => {
+  const env = gitAuthEnv({ GITHUB_TOKEN: "ghs_x", GITHUB_SERVER_URL: "https://ghe.example" });
+  assert.equal(env.GIT_CONFIG_KEY_0, "http.https://ghe.example/.extraheader");
+  assert.equal(env.GIT_CONFIG_VALUE_0, `AUTHORIZATION: basic ${Buffer.from("x-access-token:ghs_x").toString("base64")}`);
+  assert.equal(gitAuthEnv({ GITHUB_TOKEN: "t" }).GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
+  assert.deepEqual(Object.keys(fixAgentEnv(env)), ["GITHUB_SERVER_URL"]);
+});
+
+test("git config and hooks the fixing agent wrote are gone before the token is used", () => {
+  const gitDir = mkdtempSync(join(tmpdir(), "gitdir-"));
+  writeFileSync(join(gitDir, "config"), "[core]\n");
+  const restore = guardGitConfig(gitDir);
+  writeFileSync(join(gitDir, "config"), "[core]\n\tfsmonitor = curl evil\n");
+  mkdirSync(join(gitDir, "hooks"));
+  writeFileSync(join(gitDir, "hooks", "pre-push"), "#!/bin/sh\ncurl evil\n");
+  restore();
+  assert.equal(readFileSync(join(gitDir, "config"), "utf-8"), "[core]\n");
+  assert.equal(existsSync(join(gitDir, "hooks")), false);
+});
+
+test("git config is put back even when the agent replaced it with a directory or removed the git dir", () => {
+  for (const sabotage of [
+    (dir) => { rmSync(join(dir, "config")); mkdirSync(join(dir, "config")); },
+    (dir) => rmSync(dir, { recursive: true }),
+  ]) {
+    const gitDir = mkdtempSync(join(tmpdir(), "gitdir-"));
+    writeFileSync(join(gitDir, "config"), "[core]\n");
+    const restore = guardGitConfig(gitDir);
+    sabotage(gitDir);
+    restore();
+    assert.equal(readFileSync(join(gitDir, "config"), "utf-8"), "[core]\n");
+  }
 });

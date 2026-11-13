@@ -8,7 +8,7 @@
  *
  * This entry point is deliberately dependency-light and free of any GitHub
  * Actions runtime — a consumer wires in its own model caller (see
- * `createAnthropicModelCaller` for this repo's API-backed one) and its own
+ * `createOpenRouterModelCaller` for this repo's API-backed one) and its own
  * GitHub/git plumbing.
  */
 
@@ -31,7 +31,7 @@ export {
 export {
   loadSuppressions,
   filterWithSuppressions,
-  callHaikuForBatch,
+  callModelForBatch,
   sanitizeSuppressionField,
 } from "./suppressions.mjs";
 
@@ -76,10 +76,10 @@ export {
   buildReviewResult,
 } from "./completion.mjs";
 
-export { parseHunks, commentLines, diffGitPath, unquoteGitPath } from "./hunks.mjs";
+export { parseHunks, commentLines, nearestDiffLine, diffGitPath, unquoteGitPath } from "./hunks.mjs";
 
 export { FINDINGS_SCHEMA, FINDINGS_SCHEMA_URL, buildRoundFindings, matchCommentIds, buildFindingsPayload } from "./round.mjs";
 
-export { createAnthropicModelCaller } from "./anthropic.mjs";
+export { createOpenRouterModelCaller, FILTER_MODEL, GROUPING_MODEL } from "./openrouter.mjs";
 
 export { sanitizeForPrompt, COMMENT_LIMIT } from "./sanitize.mjs";

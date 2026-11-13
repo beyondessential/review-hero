@@ -82,7 +82,6 @@ test("agent processes get no GitHub tokens", () => {
     REVIEW_HERO_PRIVATE_KEY: "secret",
   });
   assert.deepEqual(Object.keys(env).sort(), [
-    "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "API_TIMEOUT_MS",

@@ -1,6 +1,6 @@
 # Review Hero 🦸
 
-AI-powered pull request review, driven by [Claude](https://www.anthropic.com/claude) and delivered as a reusable GitHub Actions workflow.
+AI-powered pull request review, running GLM models through [OpenRouter](https://openrouter.ai/) and delivered as a reusable GitHub Actions workflow.
 
 Review Hero runs a set of specialised review agents in parallel (bugs, performance, design, security — plus any repo-specific ones you define), deduplicates their findings, and posts a consolidated review on your PR via a GitHub App.
 
@@ -10,9 +10,9 @@ Review Hero runs a set of specialised review agents in parallel (bugs, performan
 PR checkbox checked
         │
         ▼
-   ┌─────────┐   Haiku selects    ┌──────────────────────────────┐
+   ┌─────────┐    GLM selects     ┌──────────────────────────────┐
    │ Triage  │──── agents ───────>│ Review agents (x N x voters) │
-   │ (Haiku) │   filters diff     │ (GLM or Claude, concurrent)  │
+   │  (GLM)  │   filters diff     │      (GLM, concurrent)       │
    └─────────┘                    └──────────────┬────────────────┘
                                                  │ JSON findings
                                                  ▼
@@ -26,8 +26,8 @@ PR checkbox checked
 
 Triage, the agents, consensus and the second look run in one job. The orchestrator posts from a second, short job on `ubuntu-slim`.
 
-1. **Triage** — triggered when a checkbox in the PR body is checked. Calls Claude Haiku to decide which agents are relevant, strips ignored files from the diff, sets the agent turn budget (flat for GLM, scaled by diff size for Claude), and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
-2. **Review agents** — concurrent Claude Code CLI processes, each with a specialised prompt. The CLI installed is the newest release at least a week old, so a broken or compromised release has time to be caught first. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus; on Anthropic, a short primer run first writes the shared prompt to the cache so the voters read it. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
+1. **Triage** — triggered when a checkbox in the PR body is checked. Asks GLM which agents are relevant, strips ignored files from the diff, and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
+2. **Review agents** — concurrent Claude Code CLI processes pointed at OpenRouter, each with a specialised prompt. The CLI installed is the newest release at least a week old, so a broken or compromised release has time to be caught first. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
 3. **Consensus and second look** — applies voter consensus per agent (when enabled). Where findings below the majority cluster in a part of the code, fresh checkers take a second look at them (see [Second look](#second-look)).
 4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table). It can also post the round's findings as JSON to a URL you name (see [Posting findings as data](#posting-findings-as-data)).
 
@@ -58,25 +58,13 @@ Go to the app's **Install App** page and install it on your account or organisat
 
 You need three secrets. These can be set at the **org level** (recommended — all repos inherit them automatically) or **per-repo**:
 
-| Secret                    | Value                                                    |
-|---------------------------|----------------------------------------------------------|
-| `REVIEW_HERO_APP_ID`      | The App ID (found on the app's settings page)            |
-| `REVIEW_HERO_PRIVATE_KEY` | The full contents of the `.pem` private key file         |
-| `ANTHROPIC_API_KEY`       | Your [Anthropic API key](https://console.anthropic.com/) |
+| Secret                           | Value                                                    |
+|----------------------------------|----------------------------------------------------------|
+| `REVIEW_HERO_APP_ID`             | The App ID (found on the app's settings page)            |
+| `REVIEW_HERO_PRIVATE_KEY`        | The full contents of the `.pem` private key file         |
+| `REVIEW_HERO_OPENROUTER_API_KEY` | Your [OpenRouter API key](https://openrouter.ai/keys), for every model call |
 
-> **Tip:** If you set secrets at the org level, you can scope `REVIEW_HERO_PRIVATE_KEY` to only the repos that use Review Hero. `ANTHROPIC_API_KEY` can also be set per-repo if you want separate billing.
-
-#### Namespaced secret variants
-
-If you already use `ANTHROPIC_API_KEY` for other purposes and want a dedicated key for Review Hero, you can set `REVIEW_HERO_ANTHROPIC_API_KEY` instead — it takes priority when both are present.
-
-The same applies to `ANTHROPIC_BASE_URL` / `REVIEW_HERO_ANTHROPIC_BASE_URL`, which let you point Review Hero at a custom API endpoint (e.g. an API proxy or compatible provider). The `REVIEW_HERO_`-prefixed variant takes priority.
-
-| Secret                              | Description                                              |
-|--------------------------------------|----------------------------------------------------------|
-| `REVIEW_HERO_ANTHROPIC_API_KEY`      | Anthropic API key (preferred over `ANTHROPIC_API_KEY`)   |
-| `REVIEW_HERO_ANTHROPIC_BASE_URL`     | Custom API base URL (preferred over `ANTHROPIC_BASE_URL`)|
-| `REVIEW_HERO_OPENROUTER_API_KEY`     | OpenRouter key, only needed for [OpenRouter models](#choosing-the-model-per-pr) |
+> **Tip:** If you set secrets at the org level, you can scope `REVIEW_HERO_PRIVATE_KEY` to only the repos that use Review Hero. `REVIEW_HERO_OPENROUTER_API_KEY` can also be set per-repo if you want separate billing.
 
 ## Setup (per repo)
 
@@ -100,7 +88,7 @@ jobs:
     secrets: inherit
 ```
 
-`secrets: inherit` passes through the app credentials and Anthropic key automatically.
+`secrets: inherit` passes through the app credentials and OpenRouter key automatically.
 
 > **Tip:** If you use `trigger: always` and want reviews to re-run on every push, add `synchronize` to the `types` list. This is not included by default to avoid unnecessary workflow invocations — in `checkbox` mode (the default) `synchronize` events are ignored anyway.
 
@@ -120,7 +108,7 @@ That's it — no other per-repo configuration needed.
 
 ### 3. (Optional) Enable Auto-Fix
 
-Auto-Fix lets Claude automatically fix unresolved review comments and/or CI failures by committing directly to the PR branch. It's opt-in per repo — add a second caller workflow to enable it.
+Auto-Fix automatically fixes unresolved review comments and/or CI failures by committing directly to the PR branch. It's opt-in per repo — add a second caller workflow to enable it.
 
 Create `.github/workflows/ai-auto-fix.yml`:
 
@@ -206,7 +194,7 @@ Read `docs/CONVENTIONS.md` for the rules.
 Ignore: high-level architecture, performance, generic security, generic bugs.
 ```
 
-The triage step will automatically discover it and include it in Haiku's agent selection.
+The triage step will automatically discover it and include it in the agent selection.
 
 > **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, `auto-merge-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the repository's **default branch** (e.g. `main`), not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged to the default branch.
 
@@ -280,17 +268,14 @@ A review takes at most one second look, and none when it runs a single voter. If
 
 ### Choosing the model
 
-Review agents run on GLM 5.3 Flash by default, through [OpenRouter](https://openrouter.ai/) with a flat 20-turn budget. This needs the `REVIEW_HERO_OPENROUTER_API_KEY` secret; without it, reviews run on Claude and log a warning. Triage and filtering always use Anthropic.
+Every model call goes through [OpenRouter](https://openrouter.ai/) with the `REVIEW_HERO_OPENROUTER_API_KEY` secret:
 
-A second checkbox runs the review on Claude, meant as a final pass just before merging a substantive PR:
+- Review agents and checkers: GLM 5.3 Flash (`z-ai/glm-5.3-flash:nitro`), with a flat 20-turn budget
+- Triage and suppression matching: GLM 5.3 Flash
+- Consensus and grouping: GLM 5.3 (`z-ai/glm-5.3:nitro`)
+- Auto-fix: the `model` input, GLM 5.3 by default
 
-```markdown
-- [ ] **Run Review Hero on Claude (before merge)** <!-- #ai-review-claude -->
-```
-
-The Claude review uses the `model` input, upgraded to Opus for PRs with 500+ changed lines. The step timeout is set to 20 minutes to accommodate Opus's longer response times.
-
-A hidden marker in the PR description can pick another model from `ALLOWED_MODELS` in `scripts/lib.mjs`; any other id logs a warning and is ignored. The Claude checkbox wins over the marker.
+A hidden marker in the PR description can pick another agent model from `ALLOWED_MODELS` in `scripts/lib.mjs`; any other id logs a warning and is ignored.
 
 ```markdown
 <!-- review-hero: model=z-ai/glm-5.3-flash:nitro -->
@@ -310,7 +295,7 @@ Create `.github/review-hero/suppressions.yml` to define patterns of findings to 
   reason: "magic numbers in tests are fine"
 ```
 
-Each suppression rule is a natural language description. At review time, Claude Haiku checks each finding against suppressions and filters out matches. The Anthropic API key (already required) covers this — Haiku calls are very cheap.
+Each suppression rule is a natural language description. At review time, GLM checks each finding against suppressions and filters out matches. The OpenRouter key (already required) covers this, and the calls are very cheap.
 
 ### Learning from feedback
 
@@ -450,7 +435,6 @@ jobs:
     uses: beyondessential/review-hero/.github/workflows/review.yml@v1
     with:
       trigger: checkbox        # 'checkbox' (default) or 'always'
-      model: claude-sonnet-5   # Claude model for the Claude checkbox (auto-upgrades to Opus for large PRs)
       runner: ubuntu-latest    # Runner for the review job
       voters: 3                # Voters per agent on a typical diff (1 to disable consensus)
       concurrency: 0           # Most agent processes at once (0 = limited by memory and the provider only)
@@ -463,7 +447,6 @@ jobs:
 | Input     | Default            | Description |
 |-----------|--------------------|-------------|
 | `trigger` | `checkbox`         | `checkbox` = only runs when the PR body checkbox is checked. `always` = runs on every PR event. |
-| `model`   | `claude-sonnet-5`  | Claude model for review agents when the Claude checkbox is ticked or the OpenRouter key is unset. Triage may upgrade to Opus for large PRs (500+ lines). |
 | `runner`  | `ubuntu-latest`    | GitHub Actions runner for the review job, which runs the agents. Posting always runs on `ubuntu-slim`. |
 | `voters`  | `3`                | Independent voters per agent for a diff of 100 or more changed lines; smaller diffs run one. `>=2` enables consensus filtering. Set to `1` to disable. |
 | `concurrency` | `0`            | Most review agent processes running at once. `0` leaves the runner's memory (filled to 80%) and the provider's rate limiting as the only limits; on a runner whose memory cannot be read, it runs at most 8. |
@@ -481,7 +464,7 @@ jobs:
   auto-fix:
     uses: beyondessential/review-hero/.github/workflows/auto-fix.yml@v1
     with:
-      model: claude-sonnet-5
+      model: z-ai/glm-5.3:nitro
       runner: ubuntu-slim       # Runner for trigger check + review fixes
       ci-runner: ubuntu-latest  # Runner when fixing CI failures (may need build tools)
     secrets: inherit
@@ -489,7 +472,7 @@ jobs:
 
 | Input       | Default            | Description |
 |-------------|--------------------|-------------|
-| `model`     | `claude-sonnet-5`  | The Claude model used for auto-fix. |
+| `model`     | `z-ai/glm-5.3:nitro` | The OpenRouter model used for auto-fix. |
 | `runner`    | `ubuntu-slim`      | GitHub Actions runner for the trigger check and review-only fixes. |
 | `ci-runner` | `ubuntu-latest`    | GitHub Actions runner used when fixing CI failures (needs build tools, test runners, etc.). Automatically selected when the CI failures checkbox is checked. |
 
@@ -502,7 +485,7 @@ jobs:
 | **Design & Architecture** | Wrong abstractions, DRY violations, over-engineering, separation of concerns |
 | **Security** | Injection, XSS, auth bypass, data exposure, input validation, path traversal |
 
-The triage step uses Haiku to skip agents that aren't relevant to the changed files. **Bugs** is always included.
+The triage step uses GLM to skip agents that aren't relevant to the changed files. **Bugs** is always included.
 
 ## Cost
 
@@ -512,21 +495,13 @@ Review Hero uses [reusable workflows](https://docs.github.com/en/actions/sharing
 
 ### Review
 
-- **Triage**: one Haiku call per run (~100 tokens out). Very cheap.
-- **Agents**: one GLM (or Claude) session per selected agent, with a capped number of tool-use turns (below). This is where most cost comes from.
+- **Triage**: one GLM call per run (~100 tokens out). Very cheap.
+- **Agents**: one GLM session per selected agent and voter, capped at 20 tool-use turns. This is where most cost comes from.
 - **Diff filtering**: lockfiles and generated files are stripped before agents see them, which avoids wasting tokens on noise.
-
-GLM gets 20 turns. Claude's scale with the filtered diff size:
-
-| Filtered diff lines | Max turns |
-|---------------------|-----------|
-| < 100               | 8         |
-| 100–499             | 15        |
-| 500+                | 20        |
 
 ### Auto-Fix
 
-- One Sonnet session with up to 30 tool-use turns.
+- One GLM session with up to 30 tool-use turns.
 - Has `Read`, `Edit`, `Glob`, and `Grep` tools. If fixing CI failures, `Bash` is also enabled so it can run commands to verify fixes.
 - Cost depends on how many review comments / CI failures need fixing, but is typically comparable to a single review agent run.
 
@@ -556,7 +531,6 @@ Here's a complete block you can drop into `.github/pull_request_template.md`:
 ### 🦸 Review Hero
 
 - [ ] **Run Review Hero** <!-- #ai-review -->
-- [ ] **Run Review Hero on Claude (before merge)** <!-- #ai-review-claude -->
 - [ ] **Auto-fix review suggestions** <!-- #auto-fix -->
 - [ ] **Auto-fix CI failures** <!-- #auto-fix-ci -->
 - [ ] **Save suppressions** <!-- #save-suppressions -->

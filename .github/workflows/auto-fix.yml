@@ -4,9 +4,9 @@ on:
   workflow_call:
     inputs:
       model:
-        description: "Claude model for auto-fix"
+        description: "OpenRouter model for auto-fix"
         type: string
-        default: claude-sonnet-5
+        default: z-ai/glm-5.3:nitro
       runner:
         description: "GitHub Actions runner for all jobs"
         type: string
@@ -20,18 +20,9 @@ on:
         type: string
         default: ubuntu-latest
     secrets:
-      ANTHROPIC_API_KEY:
-        description: "Anthropic API key"
-        required: false
-      REVIEW_HERO_ANTHROPIC_API_KEY:
-        description: "Anthropic API key (preferred over ANTHROPIC_API_KEY if both are set)"
-        required: false
-      ANTHROPIC_BASE_URL:
-        description: "Custom base URL for the Anthropic API (e.g. for proxies)"
-        required: false
-      REVIEW_HERO_ANTHROPIC_BASE_URL:
-        description: "Custom base URL for the Anthropic API (preferred over ANTHROPIC_BASE_URL if both are set)"
-        required: false
+      REVIEW_HERO_OPENROUTER_API_KEY:
+        description: "OpenRouter API key, for every model call auto-fix makes"
+        required: true
       REVIEW_HERO_APP_ID:
         description: "Review Hero GitHub App ID — typically provided as an org-level secret"
         required: true
@@ -90,12 +81,15 @@ jobs:
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      # ── Checkout caller repo (at PR branch, with push access) ────────
+      # ── Checkout caller repo (at PR branch) ──────────────────────────
+      # The token is not persisted: the fixing agent can read any file on the
+      # runner. The fetch below and the push in auto-fix.mjs pass it per call.
       - name: Checkout caller repo
         uses: actions/checkout@v6
         with:
           ref: ${{ github.head_ref }}
           token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       # ── Resolve trusted ref ──────────────────────────────────────────
       # Config, auto-fix rules, and AI rules are read from the repo's
@@ -108,7 +102,13 @@ jobs:
         env:
           BOOTSTRAP_BRANCH: ${{ secrets.REVIEW_HERO_BOOTSTRAP_BRANCH }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          basic=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$basic"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic"
           git fetch origin "$DEFAULT_BRANCH" --depth=1
           DEFAULT_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
 
@@ -138,6 +138,7 @@ jobs:
           repository: beyondessential/review-hero
           ref: ${{ inputs.ref }}
           path: .review-hero
+          persist-credentials: false
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Detect Node.js version
@@ -242,8 +243,12 @@ jobs:
       # ── Run auto-fix ─────────────────────────────────────────────────
       - name: Run auto-fix
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.REVIEW_HERO_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.REVIEW_HERO_ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY }}
+          # The CLI reaches OpenRouter through its Anthropic-compatible endpoint.
+          ANTHROPIC_BASE_URL: https://openrouter.ai/api
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.REVIEW_HERO_OPENROUTER_API_KEY }}
+          API_TIMEOUT_MS: "180000"
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1000000"
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
