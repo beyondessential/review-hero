@@ -55,7 +55,6 @@ const ALLOWED_ENV_NAMES = new Set([
   "API_TIMEOUT_MS",
   // Named one by one, not by prefix, so a variable added to the step later
   // cannot reach an agent unnoticed.
-  "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_AUTH_TOKEN",
   "CLAUDE_CODE_MAX_CONTEXT_TOKENS",

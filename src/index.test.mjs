@@ -117,6 +117,8 @@ test("createOpenRouterModelCaller sends a bearer-authenticated request to OpenRo
     assert.equal(requests[0].url, "https://openrouter.ai/api/v1/messages");
     assert.equal(requests[0].init.headers.authorization, "Bearer k");
     assert.ok(!("x-api-key" in requests[0].init.headers));
+    assert.ok(JSON.parse(requests[0].init.body).max_tokens > 10, "reasoning gets room beyond the answer's budget");
+    assert.ok(requests[0].init.signal, "the request is bounded in time");
   } finally {
     globalThis.fetch = originalFetch;
   }

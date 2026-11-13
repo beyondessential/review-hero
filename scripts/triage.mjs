@@ -32,6 +32,8 @@ import {
 import {
   FILTER_MODEL,
   OPENROUTER_BASE_URL,
+  REASONING_ALLOWANCE,
+  REQUEST_TIMEOUT_MS,
   openRouterHeaders,
 } from "../src/openrouter.mjs";
 
@@ -133,9 +135,10 @@ try {
   const response = await fetch(`${OPENROUTER_BASE_URL}/v1/messages`, {
     method: "POST",
     headers: openRouterHeaders(apiKey),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     body: JSON.stringify({
       model: FILTER_MODEL,
-      max_tokens: 200,
+      max_tokens: 200 + REASONING_ALLOWANCE,
       messages: [{ role: "user", content: triagePrompt }],
       tools: [selectAgentsTool],
       tool_choice: { type: "tool", name: "select_agents" },

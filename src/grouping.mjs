@@ -3,7 +3,7 @@
  *
  * Decides which findings are "the same finding" across voters and across
  * agents. Both stages delegate the semantic judgement to a model, but the call
- * itself is injected: `callModel({ model, maxTokens, messages, thinking }) =>
+ * itself is injected: `callModel({ model, maxTokens, messages }) =>
  * Promise<string>` returns the model's text. This repo passes an
  * OpenRouter-backed implementation; other consumers pass their own. Passing a
  * falsy `callModel` keeps every finding, matching the "no model available"
@@ -103,9 +103,6 @@ export async function applyConsensus(findings, voterCount, callModel) {
     const text = await callModel({
       model: GROUPING_MODEL,
       maxTokens: indexReplyMaxTokens(findings.length, 3000),
-      // Mechanical grouping — no reasoning needed, and thinking would eat
-      // into the token budget the JSON output needs.
-      thinking: { type: "disabled" },
       messages: [
         {
           role: "user",
@@ -317,9 +314,6 @@ export async function groupAllFindings(kept, dropped, callModel) {
     const text = await callModel({
       model: GROUPING_MODEL,
       maxTokens: indexReplyMaxTokens(all.length, 2000),
-      // Mechanical grouping — no reasoning needed, and thinking would eat
-      // into the token budget the JSON output needs.
-      thinking: { type: "disabled" },
       messages: [
         {
           role: "user",

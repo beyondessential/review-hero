@@ -8,7 +8,8 @@
  * contract and never touch this module.
  *
  * Contract:
- *   callModel({ model, maxTokens, messages, thinking? }) => Promise<string>
+ *   callModel({ model, maxTokens, messages }) => Promise<string>
+ *   - `maxTokens` is what the answer needs; reasoning gets its own allowance
  *   - resolves to the assistant's text ("" when the response carries none)
  *   - throws on a transport or non-2xx API error, so each stage's own
  *     try/catch applies its safe fallback
@@ -21,6 +22,16 @@ export const FILTER_MODEL = "z-ai/glm-5.3-flash:nitro";
 
 /** Consensus and grouping, which weigh findings against each other. */
 export const GROUPING_MODEL = "z-ai/glm-5.3:nitro";
+
+/**
+ * Tokens added to every request's `max_tokens` for reasoning, which the GLM
+ * models always do and which counts against the limit. Without it a small
+ * answer budget is spent thinking and the reply carries no answer.
+ */
+export const REASONING_ALLOWANCE = 16000;
+
+/** A request still unanswered after this is abandoned, so the stage falls back. */
+export const REQUEST_TIMEOUT_MS = 3 * 60 * 1000;
 
 /** Headers for a Messages request to OpenRouter. */
 export function openRouterHeaders(apiKey) {
@@ -47,14 +58,12 @@ export function responseText(result) {
  * Build a `callModel` bound to an API key and base URL.
  */
 export function createOpenRouterModelCaller({ apiKey, baseUrl = OPENROUTER_BASE_URL }) {
-  return async function callModel({ model, maxTokens, messages, thinking }) {
-    const body = { model, max_tokens: maxTokens, messages };
-    if (thinking) body.thinking = thinking;
-
+  return async function callModel({ model, maxTokens, messages }) {
     const response = await fetch(`${baseUrl}/v1/messages`, {
       method: "POST",
       headers: openRouterHeaders(apiKey),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ model, max_tokens: maxTokens + REASONING_ALLOWANCE, messages }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {

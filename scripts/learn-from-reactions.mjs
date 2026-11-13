@@ -8,6 +8,7 @@
 import {
   FILTER_MODEL,
   OPENROUTER_BASE_URL,
+  REASONING_ALLOWANCE,
   openRouterHeaders,
   responseText,
 } from "../src/openrouter.mjs";
@@ -115,12 +116,12 @@ function escapeXml(str) {
  * Generate suppression entries from rejected findings.
  *
  * @param {Array} rejectedThreads - Output from findRejectedFindings
- * @param {{ apiKey: string, baseUrl?: string }} options
+ * @param {{ apiKey: string }} options
  * @returns {Array<{ pattern, context, reason }>}
  */
 const SUPPRESSION_BATCH_SIZE = 20;
 
-async function generateSuppressionsForBatch(batch, { apiKey, baseUrl, signal }) {
+async function generateSuppressionsForBatch(batch, { apiKey, signal }) {
   // Wrap untrusted content (PR comments written by humans) in XML tags
   // to clearly delimit it from the prompt instructions, reducing prompt
   // injection risk.
@@ -138,13 +139,13 @@ async function generateSuppressionsForBatch(batch, { apiKey, baseUrl, signal }) 
     })
     .join("\n\n");
 
-  const response = await fetch(`${baseUrl}/v1/messages`, {
+  const response = await fetch(`${OPENROUTER_BASE_URL}/v1/messages`, {
     method: "POST",
     signal,
     headers: openRouterHeaders(apiKey),
     body: JSON.stringify({
       model: FILTER_MODEL,
-      max_tokens: 2000,
+      max_tokens: 2000 + REASONING_ALLOWANCE,
       messages: [
         {
           role: "user",
@@ -208,7 +209,7 @@ const SUPPRESSION_DEADLINE_MS = 90_000;
 
 export async function generateSuppressions(
   rejectedThreads,
-  { apiKey, baseUrl = OPENROUTER_BASE_URL },
+  { apiKey },
 ) {
   if (rejectedThreads.length === 0) return [];
 
@@ -229,7 +230,6 @@ export async function generateSuppressions(
     try {
       const batchResults = await generateSuppressionsForBatch(batch, {
         apiKey,
-        baseUrl,
         signal,
       });
       allSuppressions.push(...batchResults);

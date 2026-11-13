@@ -59,8 +59,6 @@ export interface ModelRequest {
   model: string;
   maxTokens: number;
   messages: ModelMessage[];
-  /** Passed through to the underlying API when supported (e.g. `{ type: "disabled" }`). */
-  thinking?: unknown;
 }
 
 /**
