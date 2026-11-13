@@ -20,6 +20,7 @@ import {
   oneLine,
   MAX_VOTERS,
   runClaude,
+  fixAgentEnv,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -260,4 +261,30 @@ test("runClaude refuses a model that is not an OpenRouter id before starting the
   for (const model of ["claude-sonnet-5", "--dangerously-skip-permissions/x", "z-ai/-x", "Z-AI/GLM"]) {
     assert.throws(() => runClaude({ prompt: "", model, tools: "Read", prNumber: 1 }), /Invalid model name/, model);
   }
+});
+
+test("the fixing agent gets no secrets but the token its CLI authenticates with", () => {
+  const env = fixAgentEnv({
+    PATH: "/usr/bin",
+    HOME: "/home/runner",
+    CI: "true",
+    REVIEW_HERO_APP_ID: "123",
+    ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
+    ANTHROPIC_AUTH_TOKEN: "router",
+    OPENROUTER_API_KEY: "router",
+    GITHUB_TOKEN: "ghs_secret",
+    GH_TOKEN: "ghs_secret",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "secret",
+    REVIEW_HERO_PRIVATE_KEY: "secret",
+    SOME_SECRET: "secret",
+    DB_PASSWORD: "secret",
+  });
+  assert.deepEqual(Object.keys(env).sort(), [
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CI",
+    "HOME",
+    "PATH",
+    "REVIEW_HERO_APP_ID",
+  ]);
 });

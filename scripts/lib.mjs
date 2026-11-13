@@ -285,13 +285,19 @@ export function createCommit(commitMessage) {
   execFileSync("git", ["commit", "-m", commitMessage]);
 }
 
+/** Runs git with the App token for this one call, since none is persisted. */
+function authedGit(args) {
+  const basic = Buffer.from(`x-access-token:${process.env.GITHUB_TOKEN}`).toString("base64");
+  return execFileSync("git", ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`, ...args]);
+}
+
 function isNonFastForward(errMsg) {
   return /non-fast-forward|fetch first|cannot lock ref/i.test(errMsg);
 }
 
 export function pushChanges() {
   try {
-    execSync("git push");
+    authedGit(["push"]);
   } catch (pushErr) {
     const errMsg = pushErr.stderr?.toString() ?? pushErr.message ?? String(pushErr);
     if (!isNonFastForward(errMsg)) {
@@ -300,7 +306,7 @@ export function pushChanges() {
     console.warn("Push rejected (non-fast-forward) — pulling with rebase and retrying");
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf-8" }).trim();
     try {
-      execFileSync("git", ["pull", "--rebase", "origin", branch]);
+      authedGit(["pull", "--rebase", "origin", branch]);
     } catch (rebaseErr) {
       try {
         execSync("git rebase --abort");
@@ -309,7 +315,7 @@ export function pushChanges() {
       }
       throw rebaseErr;
     }
-    execSync("git push");
+    authedGit(["push"]);
   }
   console.log("Pushed changes");
 }
@@ -329,6 +335,20 @@ export function restoreReviewHero() {
 }
 
 // ── Claude execution ─────────────────────────────────────────────────────────
+
+const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|_KEY)$/;
+
+/**
+ * The environment the fixing agent runs with: everything but secrets, since a
+ * prompt-injected agent with a shell can read and send its environment. A fix
+ * for a CI failure may need the rest to build and test. Only the token the CLI
+ * authenticates with stays.
+ */
+export function fixAgentEnv(env) {
+  return Object.fromEntries(
+    Object.entries(env).filter(([name]) => name === "ANTHROPIC_AUTH_TOKEN" || !SECRET_NAME.test(name)),
+  );
+}
 
 export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
   if (!/^[a-z0-9][a-z0-9.-]*\/[a-z0-9][a-z0-9.-]*(:[a-z0-9-]+)?$/.test(model)) {
@@ -356,9 +376,7 @@ export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
       encoding: "utf-8",
       timeout: 10 * 60 * 1000,
       maxBuffer: 10 * 1024 * 1024,
-      // The CLI authenticates with ANTHROPIC_AUTH_TOKEN; the direct-call copy
-      // of the same key stays out of reach of the agent's shell.
-      env: { ...process.env, OPENROUTER_API_KEY: undefined },
+      env: fixAgentEnv(process.env),
     },
   );
 

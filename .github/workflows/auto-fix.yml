@@ -81,12 +81,15 @@ jobs:
           private-key: ${{ secrets.REVIEW_HERO_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      # ── Checkout caller repo (at PR branch, with push access) ────────
+      # ── Checkout caller repo (at PR branch) ──────────────────────────
+      # The token is not persisted: the fixing agent can read any file on the
+      # runner. The fetch below and the push in auto-fix.mjs pass it per call.
       - name: Checkout caller repo
         uses: actions/checkout@v6
         with:
           ref: ${{ github.head_ref }}
           token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       # ── Resolve trusted ref ──────────────────────────────────────────
       # Config, auto-fix rules, and AI rules are read from the repo's
@@ -99,7 +102,10 @@ jobs:
         env:
           BOOTSTRAP_BRANCH: ${{ secrets.REVIEW_HERO_BOOTSTRAP_BRANCH }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git() { command git -c "http.https://github.com/.extraheader=$auth" "$@"; }
           git fetch origin "$DEFAULT_BRANCH" --depth=1
           DEFAULT_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
 
@@ -129,6 +135,7 @@ jobs:
           repository: beyondessential/review-hero
           ref: ${{ inputs.ref }}
           path: .review-hero
+          persist-credentials: false
 
       # ── Setup ────────────────────────────────────────────────────────
       - name: Detect Node.js version
