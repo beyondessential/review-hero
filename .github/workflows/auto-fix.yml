@@ -104,8 +104,11 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
-          git() { command git -c "http.https://github.com/.extraheader=$auth" "$@"; }
+          basic=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$basic"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic"
           git fetch origin "$DEFAULT_BRANCH" --depth=1
           DEFAULT_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
 

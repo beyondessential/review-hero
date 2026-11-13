@@ -285,10 +285,24 @@ export function createCommit(commitMessage) {
   execFileSync("git", ["commit", "-m", commitMessage]);
 }
 
-/** Runs git with the App token for this one call, since none is persisted. */
+/**
+ * The environment that gives one git call the App token, since none is
+ * persisted. It goes through the environment, never the arguments: a failed
+ * command's error message quotes its arguments into the job log.
+ */
+export function gitAuthEnv(env = process.env) {
+  const basic = Buffer.from(`x-access-token:${env.GITHUB_TOKEN}`).toString("base64");
+  const server = env.GITHUB_SERVER_URL || "https://github.com";
+  return {
+    ...env,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: `http.${server}/.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
+  };
+}
+
 function authedGit(args) {
-  const basic = Buffer.from(`x-access-token:${process.env.GITHUB_TOKEN}`).toString("base64");
-  return execFileSync("git", ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`, ...args]);
+  return execFileSync("git", args, { env: gitAuthEnv() });
 }
 
 function isNonFastForward(errMsg) {
@@ -336,7 +350,7 @@ export function restoreReviewHero() {
 
 // ── Claude execution ─────────────────────────────────────────────────────────
 
-const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|_KEY)$/;
+const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|_KEY)$|^GIT_CONFIG_/;
 
 /**
  * The environment the fixing agent runs with: everything but secrets, since a

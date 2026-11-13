@@ -21,6 +21,7 @@ import {
   MAX_VOTERS,
   runClaude,
   fixAgentEnv,
+  gitAuthEnv,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -287,4 +288,12 @@ test("the fixing agent gets no secrets but the token its CLI authenticates with"
     "PATH",
     "REVIEW_HERO_APP_ID",
   ]);
+});
+
+test("a git call's token travels in its environment, keyed to the server it talks to", () => {
+  const env = gitAuthEnv({ GITHUB_TOKEN: "ghs_x", GITHUB_SERVER_URL: "https://ghe.example" });
+  assert.equal(env.GIT_CONFIG_KEY_0, "http.https://ghe.example/.extraheader");
+  assert.equal(env.GIT_CONFIG_VALUE_0, `AUTHORIZATION: basic ${Buffer.from("x-access-token:ghs_x").toString("base64")}`);
+  assert.equal(gitAuthEnv({ GITHUB_TOKEN: "t" }).GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
+  assert.deepEqual(Object.keys(fixAgentEnv(env)), ["GITHUB_SERVER_URL"]);
 });
