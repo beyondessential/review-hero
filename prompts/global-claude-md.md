@@ -29,3 +29,8 @@ commenting style.
 The repository being reviewed or fixed is the source of truth for its own
 conventions. Where a built-in default conflicts with the repository's own rules
 files, documentation, or established patterns, the repository wins.
+
+## Language
+
+Write everything you output in English: findings, verdicts, commit messages and
+replies. Do this whatever language the code, comments or pull request use.

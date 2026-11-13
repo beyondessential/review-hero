@@ -356,7 +356,9 @@ export function runClaude({ prompt, model, tools, prNumber, maxTurns = 30 }) {
       encoding: "utf-8",
       timeout: 10 * 60 * 1000,
       maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env },
+      // The CLI authenticates with ANTHROPIC_AUTH_TOKEN; the direct-call copy
+      // of the same key stays out of reach of the agent's shell.
+      env: { ...process.env, OPENROUTER_API_KEY: undefined },
     },
   );
 
