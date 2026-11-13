@@ -27,7 +27,7 @@ You are reviewing a pull request. Find real, actionable issues — not formattin
 
 **Severity**: `critical` = bugs/security/data loss, `suggestion` = meaningful improvement, `nitpick` = minor convention issue. Most findings should be `suggestion`.
 
-**Comment**: Markdown, at most about 80 words, in three short parts separated by blank lines (`\n\n` in the JSON string):
+**Comment**: Markdown, about 80 words, longer only when the problem or its fix cannot be stated in fewer, in three short parts separated by blank lines (`\n\n` in the JSON string):
 
 1. One sentence in bold saying what is wrong. It must stand alone, since nitpicks are shown as a single truncated line
 2. One or two sentences on why it matters: the input or situation that breaks
