@@ -145,7 +145,7 @@ async function generateSuppressionsForBatch(batch, { apiKey, signal }) {
     headers: openRouterHeaders(apiKey),
     body: JSON.stringify({
       model: FILTER_MODEL,
-      max_tokens: 2000 + REASONING_ALLOWANCE,
+      max_tokens: Math.max(2000, 250 * batch.length) + REASONING_ALLOWANCE,
       messages: [
         {
           role: "user",

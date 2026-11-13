@@ -477,6 +477,10 @@ async function main() {
 
     if (f.severity === "nitpick") {
       nitpicks.push(f);
+    } else if (hunks && !hunks.has(f.file)) {
+      // GitHub takes no inline comment on a file the diff does not touch, and
+      // refuses the whole review over one, so it goes in the summary's table.
+      nitpicks.push({ ...f, comment: `(${f.severity}, file not in the diff) ${f.comment}` });
     } else {
       // A finding on a line outside the diff sits on the nearest line in it,
       // and says where it points.

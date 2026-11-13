@@ -310,3 +310,17 @@ test("git config and hooks the fixing agent wrote are gone before the token is u
   assert.equal(readFileSync(join(gitDir, "config"), "utf-8"), "[core]\n");
   assert.equal(existsSync(join(gitDir, "hooks")), false);
 });
+
+test("git config is put back even when the agent replaced it with a directory or removed the git dir", () => {
+  for (const sabotage of [
+    (dir) => { rmSync(join(dir, "config")); mkdirSync(join(dir, "config")); },
+    (dir) => rmSync(dir, { recursive: true }),
+  ]) {
+    const gitDir = mkdtempSync(join(tmpdir(), "gitdir-"));
+    writeFileSync(join(gitDir, "config"), "[core]\n");
+    const restore = guardGitConfig(gitDir);
+    sabotage(gitDir);
+    restore();
+    assert.equal(readFileSync(join(gitDir, "config"), "utf-8"), "[core]\n");
+  }
+});

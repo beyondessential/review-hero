@@ -4,7 +4,7 @@
  * Common helpers used by auto-fix and other action scripts.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -317,6 +317,9 @@ export function guardGitConfig(gitDir = ".git") {
   const configPath = join(gitDir, "config");
   const saved = readFileSync(configPath);
   return () => {
+    // Whatever the agent left at the path, a directory included, is replaced.
+    rmSync(configPath, { recursive: true, force: true });
+    mkdirSync(gitDir, { recursive: true });
     writeFileSync(configPath, saved);
     rmSync(join(gitDir, "hooks"), { recursive: true, force: true });
   };
