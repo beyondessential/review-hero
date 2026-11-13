@@ -18,6 +18,7 @@ import {
   filterDiff,
   createOpenRouterModelCaller,
   FILTER_MODEL,
+  nearestDiffLine,
   isValidAgentKey,
 } from "./index.mjs";
 
@@ -329,4 +330,14 @@ test("an agent key cannot end in the voter suffix result files use", () => {
   assert.ok(isValidAgentKey("perf-voter"));
   assert.ok(!isValidAgentKey("perf-voter-1"));
   assert.ok(!isValidAgentKey("Perf"));
+});
+
+test("a line outside the diff maps to the nearest line inside it", () => {
+  const hunks = new Map([["a.js", [{ start: 10, end: 20 }, { start: 100, end: 110 }]]]);
+  assert.equal(nearestDiffLine("a.js", 15, hunks), 15);
+  assert.equal(nearestDiffLine("a.js", 5, hunks), 10);
+  assert.equal(nearestDiffLine("a.js", 70, hunks), 100);
+  assert.equal(nearestDiffLine("a.js", 500, hunks), 110);
+  assert.equal(nearestDiffLine("b.js", 5, hunks), undefined);
+  assert.equal(nearestDiffLine("a.js", 5, undefined), undefined);
 });

@@ -76,7 +76,7 @@ export {
   buildReviewResult,
 } from "./completion.mjs";
 
-export { parseHunks, commentLines, diffGitPath, unquoteGitPath } from "./hunks.mjs";
+export { parseHunks, commentLines, nearestDiffLine, diffGitPath, unquoteGitPath } from "./hunks.mjs";
 
 export { FINDINGS_SCHEMA, FINDINGS_SCHEMA_URL, buildRoundFindings, matchCommentIds, buildFindingsPayload } from "./round.mjs";
 

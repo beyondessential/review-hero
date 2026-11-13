@@ -42,6 +42,7 @@ import {
   pushChanges,
   excludeReviewHero,
   restoreReviewHero,
+  guardGitConfig,
   runClaude,
   parseClaudeResult,
   buildBasePromptSections,
@@ -555,6 +556,7 @@ async function main() {
   const prompt = buildPrompt(comments, ciFailures, { commitHelperPath });
   console.log("Running Claude to apply fixes...");
   let raw;
+  const restoreGitConfig = guardGitConfig();
   try {
     // CI fixes need full Bash to run builds/tests/linters. Review-only fixes
     // get Bash scoped to the git-commit-fix helper so Claude can commit per-fix
@@ -566,6 +568,7 @@ async function main() {
     raw = runClaude({ prompt, model, tools, prNumber });
   } catch (err) {
     console.error(`Claude failed: ${err.message}`);
+    restoreGitConfig();
     restoreReviewHero();
 
     // Even though Claude failed/timed out, it may have already committed some
@@ -624,6 +627,7 @@ async function main() {
   // This is a defence-in-depth measure — the commit helper is already copied
   // to /tmp, but we also don't want any worktree edits to .review-hero/
   // leaking into the leftover sweep commit.
+  restoreGitConfig();
   restoreReviewHero();
 
   const results = parseClaudeResult(raw);

@@ -206,7 +206,7 @@ Only output the JSON array.`,
  * run reports what it managed in the time, rather than the developer getting no
  * report at all.
  */
-const SUPPRESSION_DEADLINE_MS = 90_000;
+const SUPPRESSION_DEADLINE_MS = 180_000;
 
 export async function generateSuppressions(
   rejectedThreads,

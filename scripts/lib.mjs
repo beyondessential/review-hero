@@ -4,7 +4,7 @@
  * Common helpers used by auto-fix and other action scripts.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, chmodSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -302,7 +302,24 @@ export function gitAuthEnv(env = process.env) {
 }
 
 function authedGit(args) {
-  return execFileSync("git", args, { env: gitAuthEnv() });
+  const env = gitAuthEnv();
+  console.log(`::add-mask::${env.GIT_CONFIG_VALUE_0.split(" ").pop()}`);
+  return execFileSync("git", args, { env });
+}
+
+/**
+ * Call before the fixing agent runs; the function it returns puts the
+ * repository's git config back and removes its hooks. The agent can write
+ * both, and git runs what they name (hooks, filters, fsmonitor, a proxy) in
+ * later commands that carry the App token, so restore before any of those.
+ */
+export function guardGitConfig(gitDir = ".git") {
+  const configPath = join(gitDir, "config");
+  const saved = readFileSync(configPath);
+  return () => {
+    writeFileSync(configPath, saved);
+    rmSync(join(gitDir, "hooks"), { recursive: true, force: true });
+  };
 }
 
 function isNonFastForward(errMsg) {

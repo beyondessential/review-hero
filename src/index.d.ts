@@ -475,6 +475,9 @@ export interface Hunk {
 /** The new-side hunks of each file in a unified diff. */
 export function parseHunks(diff: string): Map<string, Hunk[]>;
 
+/** The line of `file`'s diff nearest to `line`, or undefined when the diff does not touch the file. */
+export function nearestDiffLine(file: string, line: number, hunks?: Map<string, Hunk[]>): number | undefined;
+
 /** The new path a `diff --git` header names, decoding a git-quoted path; null for any other line. */
 export function diffGitPath(line: string): string | null;
 

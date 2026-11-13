@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, symlinkSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,6 +22,7 @@ import {
   runClaude,
   fixAgentEnv,
   gitAuthEnv,
+  guardGitConfig,
 } from "./lib.mjs";
 import { parseCompletionBlock } from "../src/completion.mjs";
 
@@ -296,4 +297,16 @@ test("a git call's token travels in its environment, keyed to the server it talk
   assert.equal(env.GIT_CONFIG_VALUE_0, `AUTHORIZATION: basic ${Buffer.from("x-access-token:ghs_x").toString("base64")}`);
   assert.equal(gitAuthEnv({ GITHUB_TOKEN: "t" }).GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
   assert.deepEqual(Object.keys(fixAgentEnv(env)), ["GITHUB_SERVER_URL"]);
+});
+
+test("git config and hooks the fixing agent wrote are gone before the token is used", () => {
+  const gitDir = mkdtempSync(join(tmpdir(), "gitdir-"));
+  writeFileSync(join(gitDir, "config"), "[core]\n");
+  const restore = guardGitConfig(gitDir);
+  writeFileSync(join(gitDir, "config"), "[core]\n\tfsmonitor = curl evil\n");
+  mkdirSync(join(gitDir, "hooks"));
+  writeFileSync(join(gitDir, "hooks", "pre-push"), "#!/bin/sh\ncurl evil\n");
+  restore();
+  assert.equal(readFileSync(join(gitDir, "config"), "utf-8"), "[core]\n");
+  assert.equal(existsSync(join(gitDir, "hooks")), false);
 });

@@ -56,6 +56,7 @@ import {
   buildRoundFindings,
   buildFindingsPayload,
   commentLines,
+  nearestDiffLine,
   matchCommentIds,
   parseHunks,
   stripCompletionBlocks,
@@ -477,10 +478,14 @@ async function main() {
     if (f.severity === "nitpick") {
       nitpicks.push(f);
     } else {
+      // A finding on a line outside the diff sits on the nearest line in it,
+      // and says where it points.
+      const anchor = nearestDiffLine(f.file, f.line, hunks);
+      const moved = anchor !== undefined && anchor !== f.line;
       inlineComments.push({
         path: f.file,
-        ...commentLines(f, hunks),
-        body: buildInlineComment(f, agentNames),
+        ...(moved ? { line: anchor } : commentLines(f, hunks)),
+        body: (moved ? `_About line ${f.line}, outside the diff._\n\n` : "") + buildInlineComment(f, agentNames),
         groupIndex,
       });
     }

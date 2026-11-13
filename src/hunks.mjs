@@ -106,6 +106,20 @@ export function parseHunks(diff) {
 }
 
 /**
+ * The line of `file`'s diff nearest to `line`: `line` itself when a hunk holds
+ * it, and undefined when the diff does not touch the file or was not read.
+ * GitHub refuses a whole review over one comment on a line outside the diff.
+ */
+export function nearestDiffLine(file, line, hunks) {
+  let nearest;
+  for (const h of hunks?.get(file) ?? []) {
+    const candidate = Math.min(Math.max(line, h.start), h.end);
+    if (nearest === undefined || Math.abs(candidate - line) < Math.abs(nearest - line)) nearest = candidate;
+  }
+  return nearest;
+}
+
+/**
  * Where an inline comment for `finding` goes: the finding's lines when it has
  * an end line and both ends lie in one hunk of its file, and its start line
  * alone otherwise. `{ line, startLine }` follows GitHub's names, `line` being
