@@ -28,6 +28,7 @@ import {
   loadCallerConfig,
   discoverBaseAgents,
   discoverCustomAgents,
+  mergeAgents,
 } from "../src/index.mjs";
 import {
   FILTER_MODEL,
@@ -97,7 +98,7 @@ if (modelWarning) console.log(`::warning::${modelWarning}`);
 // Discover all agents
 const baseAgents = discoverBaseAgents(reviewHeroDir);
 const customAgents = discoverCustomAgents(callerDir, config);
-const allAgents = [...baseAgents, ...customAgents];
+const allAgents = mergeAgents(baseAgents, customAgents);
 
 // Ask the filter model which agents are relevant
 const agentKeys = allAgents.map((a) => a.key);

@@ -193,6 +193,9 @@ export const VALID_AGENT_KEY: RegExp;
 export function isValidAgentKey(key: string): boolean;
 export function loadCallerConfig(callerDir: string): Record<string, unknown>;
 export function discoverBaseAgents(reviewHeroDir: string): Agent[];
+/** Base and custom agents together; a custom agent with a base agent's key replaces it. */
+export function mergeAgents<T extends { key: string }>(baseAgents: T[], customAgents: T[]): T[];
+
 export function discoverCustomAgents(
   callerDir: string,
   config: Record<string, unknown>,

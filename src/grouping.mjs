@@ -278,6 +278,33 @@ export function parseConsensusReply(text) {
 }
 
 /**
+ * The first JSON object in `text`, found by bracket-pair scanning, not a greedy
+ * regex, which breaks when the model adds explanatory text with braces. Null
+ * when there is none.
+ */
+function extractJsonObject(text) {
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const start = text.indexOf("{", searchFrom);
+    if (start === -1) break;
+    let searchEnd = text.length;
+    while (searchEnd > start) {
+      const end = text.lastIndexOf("}", searchEnd - 1);
+      if (end <= start) break;
+      try {
+        const candidate = JSON.parse(text.slice(start, end + 1));
+        if (typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
+      } catch {
+        // Not valid JSON for this pair — try a shorter span
+      }
+      searchEnd = end;
+    }
+    searchFrom = start + 1;
+  }
+  return null;
+}
+
+/**
  * Group ALL findings (kept + dropped) across all agents. Picks the best-worded
  * comment per group. Returns grouped findings split into kept groups (any
  * member passed consensus) and dropped groups (none did).
@@ -311,7 +338,7 @@ export async function groupAllFindings(kept, dropped, callModel) {
     .join("\n");
 
   try {
-    const text = await callModel({
+    const request = {
       model: GROUPING_MODEL,
       maxTokens: indexReplyMaxTokens(all.length, 2000),
       messages: [
@@ -339,33 +366,12 @@ Output a JSON object mapping representative index to array of group member indic
 Example: {"0": [0, 3, 7], "2": [2], "5": [5, 8]}`,
         },
       ],
-    });
+    };
 
-    // Extract JSON object using bracket-pair scanning (not greedy regex,
-    // which would break if the LLM adds explanatory text with braces).
-    let parsed = null;
-    let searchFrom = 0;
-    while (searchFrom < text.length) {
-      const start = text.indexOf("{", searchFrom);
-      if (start === -1) break;
-      let searchEnd = text.length;
-      while (searchEnd > start) {
-        const end = text.lastIndexOf("}", searchEnd - 1);
-        if (end <= start) break;
-        try {
-          const candidate = JSON.parse(text.slice(start, end + 1));
-          if (typeof candidate === "object" && !Array.isArray(candidate)) {
-            parsed = candidate;
-            break;
-          }
-        } catch {
-          // Not valid JSON for this pair — try a shorter span
-        }
-        searchEnd = end;
-      }
-      if (parsed) break;
-      searchFrom = start + 1;
-    }
+    // A reply with no JSON object in it is asked for once more, since without
+    // groups the same issue is posted once per agent that found it.
+    let parsed = extractJsonObject(await callModel(request));
+    if (!parsed) parsed = extractJsonObject(await callModel(request));
     if (!parsed) {
       throw new Error("No parseable JSON object in response");
     }

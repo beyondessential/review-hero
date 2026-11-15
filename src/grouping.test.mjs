@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { applyConsensus, groupAllFindings, parseConsensusReply, MAX_CONTESTED_AREAS } from "./index.mjs";
+import { applyConsensus, groupAllFindings, mergeAgents, parseConsensusReply, MAX_CONTESTED_AREAS } from "./index.mjs";
 import { indexReplyMaxTokens } from "./grouping.mjs";
 
 const finding = (voter, line, comment = `finding at ${line}`) => ({
@@ -238,4 +238,29 @@ test("the reply parser reads the members of each kept group", () => {
     members: { 0: [0, 1], 3: [3] },
     contested: [],
   });
+});
+
+test("grouping asks once more when the first reply holds no JSON object", async () => {
+  const finding = (file, agent) => ({ file, line: 1, severity: "suggestion", comment: "x", agent });
+  const kept = [finding("a.js", "bugs"), finding("a.js", "design")];
+  const replies = ["I grouped them as requested.", '{"0": [0, 1]}'];
+  let calls = 0;
+  const { keptGroups } = await groupAllFindings(kept, [], async () => replies[calls++]);
+  assert.equal(calls, 2);
+  assert.equal(keptGroups.length, 1);
+
+  calls = 0;
+  const fallback = await groupAllFindings(kept, [], async () => (calls++, "still no JSON"));
+  assert.equal(calls, 2);
+  assert.equal(fallback.keptGroups.length, 2);
+});
+
+test("a custom agent with a base agent's key replaces it", () => {
+  const base = [{ key: "bugs", source: "base" }, { key: "performance", source: "base" }];
+  const custom = [{ key: "performance", source: "custom" }, { key: "conventions", source: "custom" }];
+  assert.deepEqual(mergeAgents(base, custom), [
+    { key: "bugs", source: "base" },
+    { key: "performance", source: "custom" },
+    { key: "conventions", source: "custom" },
+  ]);
 });
