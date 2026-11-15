@@ -369,9 +369,10 @@ Example: {"0": [0, 3, 7], "2": [2], "5": [5, 8]}`,
     };
 
     // A reply with no JSON object in it is asked for once more, since without
-    // groups the same issue is posted once per agent that found it.
+    // groups the same issue is posted once per agent that found it. The second
+    // ask gets twice the room, in case the first was cut off mid-object.
     let parsed = extractJsonObject(await callModel(request));
-    if (!parsed) parsed = extractJsonObject(await callModel(request));
+    if (!parsed) parsed = extractJsonObject(await callModel({ ...request, maxTokens: request.maxTokens * 2 }));
     if (!parsed) {
       throw new Error("No parseable JSON object in response");
     }

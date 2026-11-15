@@ -245,8 +245,13 @@ test("grouping asks once more when the first reply holds no JSON object", async 
   const kept = [finding("a.js", "bugs"), finding("a.js", "design")];
   const replies = ["I grouped them as requested.", '{"0": [0, 1]}'];
   let calls = 0;
-  const { keptGroups } = await groupAllFindings(kept, [], async () => replies[calls++]);
+  const budgets = [];
+  const { keptGroups } = await groupAllFindings(kept, [], async ({ maxTokens }) => {
+    budgets.push(maxTokens);
+    return replies[calls++];
+  });
   assert.equal(calls, 2);
+  assert.equal(budgets[1], budgets[0] * 2);
   assert.equal(keptGroups.length, 1);
 
   calls = 0;
