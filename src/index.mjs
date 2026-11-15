@@ -42,7 +42,6 @@ export {
   loadCallerConfig,
   discoverBaseAgents,
   discoverCustomAgents,
-  mergeAgents,
 } from "./agents.mjs";
 
 export {

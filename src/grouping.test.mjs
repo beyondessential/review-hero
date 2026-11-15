@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { applyConsensus, groupAllFindings, mergeAgents, parseConsensusReply, MAX_CONTESTED_AREAS } from "./index.mjs";
+import { applyConsensus, groupAllFindings, parseConsensusReply, MAX_CONTESTED_AREAS } from "./index.mjs";
 import { indexReplyMaxTokens } from "./grouping.mjs";
 
 const finding = (voter, line, comment = `finding at ${line}`) => ({
@@ -253,14 +253,4 @@ test("grouping asks once more when the first reply holds no JSON object", async 
   const fallback = await groupAllFindings(kept, [], async () => (calls++, "still no JSON"));
   assert.equal(calls, 2);
   assert.equal(fallback.keptGroups.length, 2);
-});
-
-test("a custom agent with a base agent's key replaces it", () => {
-  const base = [{ key: "bugs", source: "base" }, { key: "performance", source: "base" }];
-  const custom = [{ key: "performance", source: "custom" }, { key: "conventions", source: "custom" }];
-  assert.deepEqual(mergeAgents(base, custom), [
-    { key: "bugs", source: "base" },
-    { key: "performance", source: "custom" },
-    { key: "conventions", source: "custom" },
-  ]);
 });

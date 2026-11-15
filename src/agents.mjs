@@ -96,16 +96,6 @@ export function discoverBaseAgents(reviewHeroDir) {
  * Discover custom agents from the caller repo's .github/review-hero/prompts/
  * directory, taking names and descriptions from `config` where provided.
  */
-/**
- * Every agent a review can run. A custom agent with a base agent's key takes
- * its place: both would write the same result files, and a repository that
- * names its prompt after a base agent means to replace it.
- */
-export function mergeAgents(baseAgents, customAgents) {
-  const custom = new Set(customAgents.map((a) => a.key));
-  return [...baseAgents.filter((a) => !custom.has(a.key)), ...customAgents];
-}
-
 export function discoverCustomAgents(callerDir, config) {
   const promptsDir = join(callerDir, ".github", "review-hero", "prompts");
   if (!existsSync(promptsDir)) return [];

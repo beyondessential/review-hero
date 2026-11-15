@@ -194,7 +194,7 @@ Read `docs/CONVENTIONS.md` for the rules.
 Ignore: high-level architecture, performance, generic security, generic bugs.
 ```
 
-The triage step will automatically discover it and include it in the agent selection. A custom agent named after a base agent (for example `performance.md`) replaces that base agent.
+The triage step will automatically discover it and include it in the agent selection.
 
 > **Security note:** Custom agent prompts, `config.yml`, `auto-fix-rules.md`, `auto-merge-rules.md`, and AI rules files (`.cursorrules`, etc.) are always read from the repository's **default branch** (e.g. `main`), not the PR branch. This prevents a pull request from injecting malicious prompt content by adding or modifying these files. Changes to custom agents or config take effect only after they're merged to the default branch.
 
