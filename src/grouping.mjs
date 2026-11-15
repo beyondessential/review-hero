@@ -375,10 +375,11 @@ Example: {"0": [0, 3, 7], "2": [2], "5": [5, 8]}`,
     let parsed = extractJsonObject(first);
     if (!parsed) {
       console.warn(`Cross-agent grouping reply held no JSON object (${first.length} characters${first.includes("{") ? ", cut off or malformed" : ", no object started"}); asking once more`);
-      parsed = extractJsonObject(await callModel({ ...request, maxTokens: request.maxTokens * 2 }));
-    }
-    if (!parsed) {
-      throw new Error("No parseable JSON object in response");
+      const second = await callModel({ ...request, maxTokens: request.maxTokens * 2 });
+      parsed = extractJsonObject(second);
+      if (!parsed) {
+        throw new Error(`No parseable JSON object in either reply (second: ${second.length} characters${second.includes("{") ? ", cut off or malformed" : ", no object started"})`);
+      }
     }
     const validIndex = (n) => Number.isInteger(n) && n >= 0 && n < all.length;
     const keptGroups = [];
