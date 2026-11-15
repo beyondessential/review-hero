@@ -239,3 +239,23 @@ test("the reply parser reads the members of each kept group", () => {
     contested: [],
   });
 });
+
+test("grouping asks once more when the first reply holds no JSON object", async () => {
+  const finding = (file, agent) => ({ file, line: 1, severity: "suggestion", comment: "x", agent });
+  const kept = [finding("a.js", "bugs"), finding("a.js", "design")];
+  const replies = ["I grouped them as requested.", '{"0": [0, 1]}'];
+  let calls = 0;
+  const budgets = [];
+  const { keptGroups } = await groupAllFindings(kept, [], async ({ maxTokens }) => {
+    budgets.push(maxTokens);
+    return replies[calls++];
+  });
+  assert.equal(calls, 2);
+  assert.equal(budgets[1], budgets[0] * 2);
+  assert.equal(keptGroups.length, 1);
+
+  calls = 0;
+  const fallback = await groupAllFindings(kept, [], async () => (calls++, "still no JSON"));
+  assert.equal(calls, 2);
+  assert.equal(fallback.keptGroups.length, 2);
+});
