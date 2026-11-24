@@ -15,6 +15,6 @@ Spec: Earlier rejections (`.workhorse/specs/review/earlier-rejections.md`), plus
 - [x] Shared library: `src/rejections.mjs` (parse, filter), exports and types
 - [x] Read: `readRejections` in `scripts/findings-post.mjs`, with the attempt and retry generalised
 - [ ] Orchestrator: read, filter kept and below-consensus findings, log, summary stat, result counts and `rejectionsRead`
-- [ ] Completion result and payload schema: `counts.rejected`
+- [x] Completion result and payload schema: `counts.rejected`
 - [ ] Tests for parse, filter, read and the result
 - [ ] Docs: README (overview, findings section, completion table) and the receiver guide
