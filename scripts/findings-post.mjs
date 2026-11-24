@@ -1,14 +1,17 @@
 /**
- * Review Hero — Posting findings
+ * Review Hero — Posting findings and reading earlier rejections
  *
- * Sends a round's findings, as JSON, to the URL the caller named, authenticated
- * by a GitHub Actions identity token whose audience is that URL's origin. The
+ * Sends a round's findings, as JSON, to the URL the caller named, and reads the
+ * pull request's earlier rejections back from it, each authenticated by a
+ * GitHub Actions identity token whose audience is that URL's origin. The
  * receiver checks the token with GitHub, so it shares no secret with the
- * caller. A post that does not land never fails the review: this module
- * reports how it went and the orchestrator carries on.
+ * caller. Neither a post that does not land nor a read that does not answer
+ * fails the review: this module reports how it went and the orchestrator
+ * carries on.
  */
 
 import { oneLine } from "./lib.mjs";
+import { parseRejections } from "../src/index.mjs";
 
 /** Delivery, the token request and the post with their retries, is over by this time. */
 export const FINDINGS_POST_TOTAL_MS = 60_000;
@@ -22,6 +25,12 @@ export const FINDINGS_POST_MIN_RETRY_MS = 5_000;
 export const FINDINGS_POST_MAX_REDIRECTS = 3;
 /** Time the request for an identity token has. */
 export const IDENTITY_TOKEN_TIMEOUT_MS = 15_000;
+/** Reading earlier rejections, the token request and the read with their retries, is over by this time. */
+export const REJECTIONS_READ_TOTAL_MS = 30_000;
+/** Earlier rejections a read asks for, the most a receiver gives. */
+export const REJECTIONS_READ_LIMIT = 200;
+/** The most of a rejections answer read before it counts as malformed. */
+const REJECTIONS_READ_MAX_BYTES = 4 * 1024 * 1024;
 
 /** The reply's first characters kept for the job log. */
 const REPLY_EXCERPT = 200;
@@ -181,33 +190,37 @@ export async function requestIdentityToken({
   return result.value;
 }
 
+/** A 2xx to a post: the findings were accepted. */
+async function accepted(response) {
+  await response.body?.cancel().catch(() => {});
+  return { status: "accepted", retry: false, detail: `status ${response.status}` };
+}
+
 /**
- * One attempt at the post, following same-origin 307 and 308 redirects. Any
- * other redirect is not followed, so the token only ever goes to the origin it
- * is addressed to, and counts as refused.
+ * One request to the findings URL's origin, following same-origin 307 and 308
+ * redirects. Any other redirect is not followed, so the token only ever goes to
+ * the origin it is addressed to, and counts as refused. `url` is the findings
+ * URL, whose origin bounds the redirects and whose secret parts are kept out of
+ * the log; `start` is where the request goes first, `url` unless given.
  *
- * Resolves with `{ status, retry, detail }`: `accepted` on a 2xx, `refused`
- * when the receiver answered with anything else, `unreachable` when no answer
- * came. A refusal is worth a retry only when it is a server error.
+ * Resolves with `{ status, retry, detail }`: what `onOk` makes of a 2xx (by
+ * default `accepted`), `refused` when the receiver answered with anything else,
+ * `unreachable` when no answer came. A refusal is worth a retry only when it is
+ * a server error. The time limit covers `onOk` reading the reply.
  */
-async function attempt({ url, token, body, fetchImpl, timeoutMs }) {
+async function attempt({ url, start = url, token, method = "POST", body, fetchImpl, timeoutMs, onOk = accepted }) {
   const origin = url.origin;
   const signal = AbortSignal.timeout(timeoutMs);
-  let target = url;
+  let target = start;
+  const headers =
+    method === "POST"
+      ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+      : { Authorization: `Bearer ${token}`, Accept: "application/json" };
   try {
     for (let hops = 0; ; hops++) {
-      const response = await fetchImpl(target, {
-        method: "POST",
-        redirect: "manual",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body,
-        signal,
-      });
+      const response = await fetchImpl(target, { method, redirect: "manual", headers, body, signal });
       const { status } = response;
-      if (status >= 200 && status < 300) {
-        await response.body?.cancel().catch(() => {});
-        return { status: "accepted", retry: false, detail: `status ${status}` };
-      }
+      if (status >= 200 && status < 300) return await onOk(response);
       if (status === 307 || status === 308) {
         const location = response.headers.get("location");
         await response.body?.cancel().catch(() => {});
@@ -262,18 +275,35 @@ export async function postFindings({
   deadline = now() + FINDINGS_POST_TOTAL_MS,
   log = console.log,
 }) {
-  // However long the token took, the post gets at least the time a retry would.
+  return withRetry({
+    label: "Posting findings",
+    once: (timeoutMs) => attempt({ url, token, body, fetchImpl, timeoutMs }),
+    now,
+    sleep,
+    attemptMs,
+    deadline,
+    log,
+  });
+}
+
+/**
+ * Run `once(timeoutMs)`, an attempt, and run it once more when its result asks
+ * for a retry and one fits before `deadline`. However long the token took, the
+ * first attempt gets at least the time a retry would. The result is the last
+ * attempt's.
+ */
+async function withRetry({ label, once, now, sleep, attemptMs, deadline, log }) {
   const firstMs = Math.min(attemptMs, Math.max(FINDINGS_POST_MIN_RETRY_MS, deadline - now()));
-  let result = await attempt({ url, token, body, fetchImpl, timeoutMs: firstMs });
+  let result = await once(firstMs);
   if (result.retry) {
     // Decided before the pause, so a retry that cannot fit costs no wait.
     const left = deadline - now() - FINDINGS_POST_RETRY_DELAY_MS;
     if (left >= FINDINGS_POST_MIN_RETRY_MS) {
-      log(`::warning::Posting findings: ${result.detail}; trying once more`);
+      log(`::warning::${label}: ${result.detail}; trying once more`);
       await sleep(FINDINGS_POST_RETRY_DELAY_MS);
-      result = await attempt({ url, token, body, fetchImpl, timeoutMs: Math.min(attemptMs, deadline - now()) });
+      result = await once(Math.min(attemptMs, deadline - now()));
     } else {
-      log(`::warning::Posting findings: ${result.detail}; too little time left to try again`);
+      log(`::warning::${label}: ${result.detail}; too little time left to try again`);
     }
   }
   return result;
@@ -347,5 +377,125 @@ export async function deliverFindings({
     // The review's comments do not wait on this.
     log(`::error::Posting findings failed before an answer could come: ${logMessage(err, url)}`);
     return "error";
+  }
+}
+
+/**
+ * Read a reply's body as text, refusing one over `maxBytes`: the receiver is
+ * whatever the caller named, and could send a body of any size.
+ */
+async function boundedText(response, maxBytes) {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) return null;
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+/**
+ * A 2xx to a read: `answered` with the rejections when it is a 200 whose body
+ * is a rejections answer, `malformed` when it is a 200 with anything else, and
+ * `refused` for any other 2xx.
+ */
+async function rejectionsAnswer(response) {
+  const { status } = response;
+  if (status !== 200) {
+    await response.body?.cancel().catch(() => {});
+    return { status: "refused", retry: false, detail: `status ${status}` };
+  }
+  const text = await boundedText(response, REJECTIONS_READ_MAX_BYTES);
+  if (text === null) return { status: "malformed", retry: false, detail: "the answer is too large" };
+  let parsed = null;
+  try {
+    parsed = parseRejections(JSON.parse(text));
+  } catch {
+    // Not JSON: malformed below.
+  }
+  if (!parsed) return { status: "malformed", retry: false, detail: "the answer is not a version 1 list of rejections" };
+  return { status: "answered", retry: false, detail: `status ${status}`, ...parsed };
+}
+
+/**
+ * Read the pull request's earlier rejections from `findingsUrl`, with a `GET`
+ * naming the pull request, and say how it went: `{ status, rejections }`, where
+ * `status` is one of the completion block's `rejectionsRead` values and
+ * `rejections` is empty unless it is `answered`. Undefined when there is no
+ * findings URL and so nothing to read. Never throws: a read that does not
+ * answer leaves the review to carry on without earlier rejections.
+ */
+// spec: REJ#reading-them
+export async function readRejections({
+  findingsUrl,
+  prNumber,
+  env = process.env,
+  fetchImpl = fetch,
+  now = Date.now,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  attemptMs = FINDINGS_POST_ATTEMPT_MS,
+  log = console.log,
+}) {
+  const url = findingsTarget(findingsUrl);
+  if (url === undefined) return undefined;
+  const none = (status) => ({ status, rejections: [] });
+  const deadline = now() + REJECTIONS_READ_TOTAL_MS;
+  try {
+    if (!url) {
+      log("::warning::findings-url is not an https URL; not reading earlier rejections");
+      return none("invalid-url");
+    }
+    const pr = Number(prNumber);
+    if (!Number.isInteger(pr) || pr <= 0) {
+      log("::error::Not reading earlier rejections: the pull request number is not a positive integer");
+      return none("error");
+    }
+    const token = await requestIdentityToken({ audience: url.origin, env, fetchImpl, now, deadline, sleep, log });
+    if (!token) {
+      log(
+        "::warning::No identity token, so earlier rejections are not read. The caller workflow needs `permissions: id-token: write`, and a pull request from a fork never gets one",
+      );
+      return none("no-token");
+    }
+    const start = new URL(url);
+    start.searchParams.set("pr", String(pr));
+    start.searchParams.set("limit", String(REJECTIONS_READ_LIMIT));
+    const result = await withRetry({
+      label: "Reading earlier rejections",
+      once: (timeoutMs) =>
+        attempt({ url, start, token, method: "GET", fetchImpl, timeoutMs, onOk: rejectionsAnswer }),
+      now,
+      sleep,
+      attemptMs,
+      deadline,
+      log,
+    });
+    // The origin alone: a caller may put a secret in the path.
+    const where = url.origin;
+    if (result.status !== "answered") {
+      log(`::warning::Reading earlier rejections from ${where} ${result.status}: ${result.detail}; reviewing without them`);
+      return none(result.status);
+    }
+    const { rejections, skipped, matched, truncated } = result;
+    const count = `${rejections.length} earlier rejection${rejections.length === 1 ? "" : "s"}`;
+    const notes = [
+      ...(truncated ? [`${matched} in all`] : []),
+      ...(skipped > 0 ? [`${skipped} of the wrong shape left out`] : []),
+    ];
+    log(`Read ${count} from ${where}${notes.length > 0 ? ` (${notes.join(", ")})` : ""}`);
+    return { status: "answered", rejections };
+  } catch (err) {
+    // The review does not wait on this.
+    log(`::error::Reading earlier rejections failed before an answer could come: ${logMessage(err, url)}`);
+    return none("error");
   }
 }
