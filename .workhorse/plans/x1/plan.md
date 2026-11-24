@@ -17,4 +17,4 @@ Spec: Earlier rejections (`.workhorse/specs/review/earlier-rejections.md`), plus
 - [x] Orchestrator: read, filter kept and below-consensus findings, log, summary stat, result counts and `rejectionsRead`
 - [x] Completion result and payload schema: `counts.rejected`
 - [x] Tests for parse, filter, read and the result
-- [ ] Docs: README (overview, findings section, completion table) and the receiver guide
+- [x] Docs: README (overview, findings section, completion table) and the receiver guide
