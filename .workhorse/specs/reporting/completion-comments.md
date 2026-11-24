@@ -69,7 +69,10 @@ A completion comment quotes text from the pull request, and anyone who can comme
 - [ ] `model` is the model the review agents ran on.
 - [ ] `findingsPost` says how posting the round's findings went (see `reporting/posting-findings.md`): `accepted` when the receiver answered with a 2xx status, `refused` when it answered with any other status, `unreachable` when no answer came, `no-token` when the run could not get an identity token, `invalid-url` when the findings URL is not an `https` URL, and `error` when the run failed on its own side before the receiver could answer, such as failing to build the payload.
 - [ ] `findingsPost` is left out when the review has no findings URL.
-- [ ] `counts` holds `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, and `secondLook`, matching the figures in the visible summary.
+- [ ] `rejectionsRead` says how reading the pull request's earlier rejections went (see `review/earlier-rejections.md`): `answered` when the receiver answered with a list of rejections, `refused` when it answered with any other status or a redirect that is not followed, `unreachable` when no answer came, `no-token` when the run could not get an identity token, `invalid-url` when the findings URL is not an `https` URL, and `malformed` when the receiver answered 200 with something other than a list of rejections.
+- [ ] `rejectionsRead` is left out when the review read no rejections: when it has no findings URL, when every agent failed, or when it had no findings to filter.
+- [ ] `counts` holds `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, `rejected`, and `secondLook`, matching the figures in the visible summary.
+- [ ] `rejected` is the number of findings earlier rejections dropped, and 0 when the review read none.
 - [ ] `secondLook` is the number of findings below the majority that a second look confirmed, and 0 when the review took none (see `review/agent-runs.md`).
 - [ ] The shared library builds a review's result (`kind`, `outcome`, `reviewedSha`, and `counts`) from the review pipeline's outputs, so a consumer that runs the review itself gets the same figures as data.
 - [ ] The hosted review's block is that same result with the run metadata added.

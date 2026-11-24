@@ -9,6 +9,8 @@ A review drops any finding one of them matches, so a round does not raise again 
 
 ## Reading them
 
+- [ ] The posting job reads the earlier rejections, since it is the only job that can request an identity token (see `review/agent-runs.md`), and the review agents never see them.
+- [ ] A review reads them after consensus and before filtering against suppressions, and only when it has at least one finding, above or below consensus.
 - [ ] A review reads its earlier rejections with a `GET` to its findings URL (see `reporting/posting-findings.md`), so a caller sets up nothing beyond the findings URL.
 - [ ] A review with no findings URL, or one that is not an `https` URL, reads no rejections and requests no identity token for them.
 - [ ] The read names the pull request in a `pr` query parameter, and asks for 200 rejections in a `limit` query parameter.
@@ -32,6 +34,15 @@ A review drops any finding one of them matches, so a round does not raise again 
 - [ ] The judgement of whether a finding raises the same concern is made by the model that judges suppressions, and a judgement that fails keeps every finding it was judging.
 - [ ] The rejected finding's text and the rejection's reason were written by reviewers and people, and reach the model as untrusted data, sanitised as finding text is, never as instructions.
 - [ ] The shared library exposes the match, so a consumer that runs the review itself can apply a list of rejections it read on its own.
+
+## Dropping a finding
+
+- [ ] Earlier rejections filter findings that passed consensus and findings below it alike, so a matched finding appears neither inline nor in the summary's list of findings below the threshold.
+- [ ] A finding is checked against earlier rejections before it is grouped across agents, alongside the suppression rules.
+- [ ] A dropped finding is not posted to the findings URL and is not counted in the round's severities or below-threshold count.
+- [ ] The job log names each dropped finding by its file and line, as it does a suppressed one.
+- [ ] The review summary's filtering line says how many findings earlier rejections dropped, as "N rejected earlier", when they dropped any.
+- [ ] The completion block's `counts.rejected` is the number of findings earlier rejections dropped, and `rejectionsRead` says how the read went (see `reporting/completion-comments.md`).
 
 ## Documentation
 
