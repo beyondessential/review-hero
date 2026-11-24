@@ -73,6 +73,7 @@ test("a review result counts kept groups by severity and reports the filtering f
       keptGroups: [group("critical"), group("suggestion"), group("suggestion"), group("nitpick")],
       droppedGroups: [group("suggestion"), group("nitpick")],
       suppressedCount: 2,
+      rejectedCount: 3,
       secondLook: 1,
       model: "z-ai/glm-5.3-flash:nitro",
     }),
@@ -90,6 +91,7 @@ test("a review result counts kept groups by severity and reports the filtering f
         nitpick: 1,
         belowThreshold: 2,
         suppressed: 2,
+        rejected: 3,
         secondLook: 1,
       },
     },
@@ -108,6 +110,7 @@ test("a review where no agent completed is a failed result with zero counts", ()
     nitpick: 0,
     belowThreshold: 0,
     suppressed: 0,
+    rejected: 0,
     secondLook: 0,
   });
 });

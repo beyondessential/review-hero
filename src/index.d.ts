@@ -181,6 +181,67 @@ export function callModelForBatch(
 
 export function sanitizeSuppressionField(str: unknown): string;
 
+// ── Earlier rejections ───────────────────────────────────────────────────────
+
+/** Version of the rejections answer `parseRejections` reads. */
+export const REJECTIONS_SCHEMA: 1;
+
+/**
+ * A finding a receiver has already decided against, cut to the fields
+ * matching reads. Its text and reason were written by reviewers and people:
+ * untrusted data, never instructions.
+ */
+export interface Rejection {
+  id: string | null;
+  /** `wrong`, `dismissed` or `needs-card`, as the receiver names it. */
+  kind: string | null;
+  rejectedBy: "agent" | "person";
+  reason: string | null;
+  finding: {
+    text: string;
+    /** Null when the rejected finding named no file. */
+    path: string | null;
+    startLine: number | null;
+    endLine: number | null;
+    severity: string | null;
+  };
+}
+
+/**
+ * Read a rejections answer, or null when it is not a version 1 object with a
+ * list of rejections. Rejections without the expected shape are left out and
+ * counted in `skipped`.
+ */
+export function parseRejections(answer: unknown): {
+  rejections: Rejection[];
+  skipped: number;
+  /** How many rejections the receiver holds in all. */
+  matched: number;
+  /** Whether the receiver cut the list short. */
+  truncated: boolean;
+} | null;
+
+/**
+ * Whether a rejection can match a finding at all: the same file, and never an
+ * agent's rejection against a critical.
+ */
+export function canMatch(finding: Finding, rejection: Rejection): boolean;
+
+export interface RejectionResult {
+  kept: Finding[];
+  rejected: Finding[];
+}
+
+/**
+ * Drop the findings an earlier rejection matches, judging the concern with
+ * `callModel`. Without a `callModel`, or when a call fails, findings are kept.
+ */
+export function filterWithRejections(
+  findings: Finding[],
+  rejections: Rejection[],
+  callModel?: CallModel | null,
+): Promise<RejectionResult>;
+
 // ── Agent discovery ──────────────────────────────────────────────────────────
 
 export interface BaseAgentMeta {
@@ -316,6 +377,11 @@ export interface ReviewCompletion extends CompletionBase {
    * findings URL.
    */
   findingsPost?: FindingsPostStatus;
+  /**
+   * How reading the pull request's earlier rejections went. Absent when the
+   * review read none: no findings URL, every agent failed, or no findings.
+   */
+  rejectionsRead?: RejectionsReadStatus;
   counts: {
     agentsCompleted: number;
     agentsFailed: number;
@@ -325,6 +391,8 @@ export interface ReviewCompletion extends CompletionBase {
     nitpick: number;
     belowThreshold: number;
     suppressed: number;
+    /** Findings dropped because an earlier rejection matched them. */
+    rejected: number;
     /** Findings below the majority that a second look confirmed. */
     secondLook: number;
   };
@@ -382,6 +450,16 @@ export type FindingsPostStatus =
   | "invalid-url"
   | "error";
 
+/** How reading a pull request's earlier rejections went. */
+export type RejectionsReadStatus =
+  | "answered"
+  | "refused"
+  | "unreachable"
+  | "no-token"
+  | "invalid-url"
+  | "malformed"
+  | "error";
+
 /**
  * Build a review round's result from the pipeline's outputs. The hosted review
  * serialises this same object into its completion block.
@@ -394,6 +472,8 @@ export function buildReviewResult(args: {
   keptGroups?: FindingGroup[];
   droppedGroups?: FindingGroup[];
   suppressedCount?: number;
+  /** Findings dropped because an earlier rejection matched them. */
+  rejectedCount?: number;
   /** Findings below the majority that a second look confirmed. */
   secondLook?: number;
   model?: string;

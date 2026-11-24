@@ -54,4 +54,33 @@ Each entry in `findings` carries:
 | `commentId` | The id of the GitHub review comment it was posted as, or null when it was not posted inline (a nitpick, or a finding in a review whose inline comments GitHub would not take). |
 | `comment` | The comment as the agent wrote it, unshortened and without the formatting the inline comment adds. |
 
-The findings are the round's kept findings, one per group, so their severities add up to `counts`. Findings below the consensus threshold and suppressed findings are not included.
+The findings are the round's kept findings, one per group, so their severities add up to `counts`. Findings below the consensus threshold, suppressed findings and findings an earlier rejection matched are not included.
+
+## Earlier rejections
+
+Before it filters a round, a review that has findings reads the pull request's earlier rejections from the same URL, so it can drop findings you have already decided against. Answering this read is optional: a receiver that does not costs the review nothing but repeated findings, and a review never fails over it.
+
+The read is an HTTPS `GET` to the findings URL with two query parameters added to any it already has: `pr`, the pull request number, and `limit`, the most rejections the review wants (200). It carries `Authorization: Bearer <token>` and `Accept: application/json`, with the same identity token a post carries, so check it [the same way](#checking-a-post) and take the repository from the token. Refuse a `pr` the run cannot speak for, such as a pull request other than the one a pull request run was started by.
+
+Answer `200` with a JSON object:
+
+| Field | Meaning |
+|-------|---------|
+| `schemaVersion` | `1`. Anything else, or a body that is not this object, is read as malformed and the review carries on without the list. |
+| `rejections` | The rejections, newest first. |
+| `matched` | How many you hold in all, which the review logs when the list is cut short. |
+| `truncated` | `true` when the list was cut by the limit or a size budget. |
+
+Each rejection carries:
+
+| Field | Meaning |
+|-------|---------|
+| `id`, `kind` | Your identifier, and what kind of rejection it is (`wrong`, `dismissed` or `needs-card`). |
+| `rejectedBy` | `agent` or `person`. An agent's rejection never drops a critical; a person's can. A rejection with any other value is left out. |
+| `rejectedAt` | When it was rejected, as an ISO time. |
+| `finding` | The rejected finding: `text` (required), `path` (null when it named no file), `startLine`, `endLine` and `severity`. Other fields are ignored. |
+| `reason` | Why it was rejected, or null. |
+
+A finding is dropped only when it raises the same concern as a rejected finding in the same file, so a rejection with a null `path` never matches a Review Hero finding. The reason informs the judgement but never matches a finding on its own. The rejected text and the reason reach the review's filtering model as untrusted data, cut to a few hundred characters each.
+
+Any other status, or no answer, leaves the review without the list: a `5xx` or no answer is tried once more, and a 307 or 308 within your origin is followed as it is for a post. Keep the answer under a few megabytes; a larger one is read as malformed. The completion block's `rejectionsRead` says how the read went.

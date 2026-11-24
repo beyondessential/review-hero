@@ -7,6 +7,8 @@ import {
   FINDINGS_POST_TOTAL_MS,
   findingsTarget,
   postFindings,
+  readRejections,
+  REJECTIONS_READ_LIMIT,
   requestIdentityToken,
 } from "./findings-post.mjs";
 
@@ -489,4 +491,128 @@ test("a URL running over the excerpt's end is redacted whole, not cut first", as
   await deliver(fakeFetch([reply(400, { body })]), { log: (l) => lines.push(l) });
   const all = lines.join("\n");
   assert.ok(!all.includes("pa55") && !all.includes("user"), all);
+});
+
+// ── Earlier rejections ──────────────────────────────────────────────────────
+
+const REJECTION = {
+  id: "r1",
+  kind: "wrong",
+  rejectedBy: "person",
+  rejectedAt: "2026-11-01T00:00:00Z",
+  finding: { text: "Possible null deref.", textCut: false, source: "review-hero", check: null, path: "a.ts", startLine: 3, endLine: null, severity: "suggestion" },
+  prNumber: 7,
+  cardCode: null,
+  reason: null,
+};
+const answer = (body, status = 200) => Response.json(body, { status });
+const read = (fake, over = {}) =>
+  readRejections({ findingsUrl: URL_OK, prNumber: "7", env: ENV, fetchImpl: fake.fetchImpl, sleep: noSleep, log: quiet, ...over });
+
+// spec: REJ#reading-them
+test("no findings URL reads nothing, and a non-https one reads nothing and mints no token", async () => {
+  const fake = fakeFetch([]);
+  assert.equal(await read(fake, { findingsUrl: "" }), undefined);
+  assert.deepEqual(await read(fake, { findingsUrl: "http://workhorse.example/x" }), { status: "invalid-url", rejections: [] });
+  assert.equal(fake.calls.length, 0);
+});
+
+// spec: REJ#reading-them
+test("a read is a GET naming the pull request and the limit, with the identity token as bearer", async () => {
+  const fake = fakeFetch([answer({ schemaVersion: 1, rejections: [REJECTION], matched: 1, truncated: false })]);
+  const result = await read(fake, { findingsUrl: "https://workhorse.example/api/rounds?key=abc" });
+  assert.equal(result.status, "answered");
+  assert.equal(result.rejections.length, 1);
+  assert.equal(result.rejections[0].finding.path, "a.ts");
+  const [token, get] = fake.calls;
+  assert.equal(token.url.searchParams.get("audience"), "https://workhorse.example");
+  assert.equal(get.init.method, "GET");
+  assert.equal(get.init.body, undefined);
+  assert.equal(get.init.headers.Authorization, "Bearer jwt-token");
+  assert.equal(get.url.pathname, "/api/rounds");
+  assert.equal(get.url.searchParams.get("key"), "abc");
+  assert.equal(get.url.searchParams.get("pr"), "7");
+  assert.equal(get.url.searchParams.get("limit"), String(REJECTIONS_READ_LIMIT));
+});
+
+// spec: REJ#reading-them
+test("a read with no identity token is no-token and sends nothing", async () => {
+  const fake = fakeFetch([]);
+  assert.deepEqual(await read(fake, { env: {} }), { status: "no-token", rejections: [] });
+  assert.equal(fake.calls.length, 0);
+});
+
+// spec: REJ#reading-them
+test("a read is tried once more after no answer or a server error, and not after a refusal", async () => {
+  const twice = fakeFetch([new TypeError("fetch failed"), answer({ schemaVersion: 1, rejections: [] })]);
+  assert.equal((await read(twice)).status, "answered");
+  assert.equal(twice.posts().length, 2);
+
+  const server = fakeFetch([reply(502), reply(503)]);
+  assert.equal((await read(server)).status, "refused");
+  assert.equal(server.posts().length, 2);
+
+  for (const status of [401, 404, 409]) {
+    const refused = fakeFetch([reply(status)]);
+    assert.deepEqual(await read(refused), { status: "refused", rejections: [] });
+    assert.equal(refused.posts().length, 1);
+  }
+});
+
+// spec: REJ#reading-them
+test("a read follows a same-origin 307 or 308 and refuses any other redirect", async () => {
+  const same = fakeFetch([
+    reply(308, { headers: { location: "/api/v2/rounds?pr=7&limit=200" } }),
+    answer({ schemaVersion: 1, rejections: [] }),
+  ]);
+  assert.equal((await read(same)).status, "answered");
+  assert.equal(same.posts()[1].url.pathname, "/api/v2/rounds");
+  assert.equal(same.posts()[1].init.method, "GET");
+
+  const other = fakeFetch([reply(307, { headers: { location: "https://elsewhere.example/x" } })]);
+  assert.equal((await read(other)).status, "refused");
+  assert.equal(other.posts().length, 1);
+});
+
+// spec: CMPL#review
+test("a 200 that is not a version 1 list of rejections is malformed, and not retried", async () => {
+  for (const body of [reply(200, { body: "not json" }), answer({ schemaVersion: 2, rejections: [] }), answer({ rejections: [] }), answer([])]) {
+    const fake = fakeFetch([body]);
+    assert.deepEqual(await read(fake), { status: "malformed", rejections: [] });
+    assert.equal(fake.posts().length, 1);
+  }
+  const other2xx = fakeFetch([reply(204)]);
+  assert.equal((await read(other2xx)).status, "refused");
+});
+
+// spec: REJ#reading-them
+test("rejections of the wrong shape are left out and the rest are read", async () => {
+  const lines = [];
+  const fake = fakeFetch([answer({ schemaVersion: 1, rejections: [REJECTION, { id: "bad" }], matched: 90, truncated: true })]);
+  const result = await read(fake, { log: (l) => lines.push(l) });
+  assert.equal(result.rejections.length, 1);
+  assert.match(lines.at(-1), /^Read 1 earlier rejection from https:\/\/workhorse\.example \(90 in all, 1 of the wrong shape left out\)$/);
+});
+
+// spec: REJ#reading-them
+test("the read's log names the receiver by its origin alone", async () => {
+  const lines = [];
+  const fake = fakeFetch([reply(403, { body: "denied for https://workhorse.example/api/rounds/s3cret?pr=7" })]);
+  await read(fake, { findingsUrl: "https://workhorse.example/api/rounds/s3cret", log: (l) => lines.push(l) });
+  const log = lines.join("\n");
+  assert.match(log, /Reading earlier rejections from https:\/\/workhorse\.example refused: status 403/);
+  assert.doesNotMatch(log, /s3cret/);
+});
+
+// spec: REJ#reading-them
+test("the read, token request included, keeps to its own time limit", async () => {
+  let clock = 0;
+  const fake = fakeFetch([new TypeError("fetch failed")]);
+  const slowToken = async (url, init) => {
+    if (new URL(url).origin === "https://actions.example") clock += 28_000;
+    return fake.fetchImpl(url, init);
+  };
+  const result = await read(fake, { fetchImpl: slowToken, now: () => clock });
+  assert.equal(result.status, "unreachable");
+  assert.equal(fake.posts().length, 1);
 });

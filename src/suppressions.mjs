@@ -47,6 +47,23 @@ export function sanitizeSuppressionField(str) {
 }
 
 /**
+ * Read a filtering model's reply: the last JSON array in `text`, as the set of
+ * valid indices into a batch of `length` findings. Null when the reply has no
+ * array; throws when the array is not valid JSON.
+ */
+export function parseIndexReply(text, length) {
+  const lastOpen = text.lastIndexOf("[");
+  const lastClose = text.lastIndexOf("]");
+  if (lastOpen === -1 || lastClose <= lastOpen) return null;
+  const rawIndices = JSON.parse(text.slice(lastOpen, lastClose + 1));
+  return new Set(
+    Array.isArray(rawIndices)
+      ? rawIndices.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < length)
+      : [],
+  );
+}
+
+/**
  * Filter a single batch of findings against the suppression list.
  * Returns { kept: Finding[], suppressed: Finding[] }.
  */
@@ -78,19 +95,11 @@ Output ONLY a JSON array of finding indices (0-based) to SUPPRESS. Output \`[]\`
       ],
     });
 
-    const lastOpen = text.lastIndexOf("[");
-    const lastClose = text.lastIndexOf("]");
-    if (lastOpen === -1 || lastClose <= lastOpen) {
+    const suppressedIndices = parseIndexReply(text, batch.length);
+    if (!suppressedIndices) {
       // No parseable response — keep all findings in this batch
       return { kept: batch, suppressed: [] };
     }
-
-    const rawIndices = JSON.parse(text.slice(lastOpen, lastClose + 1));
-    const suppressedIndices = new Set(
-      Array.isArray(rawIndices)
-        ? rawIndices.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < batch.length)
-        : [],
-    );
 
     const kept = [];
     const suppressed = [];

@@ -2,8 +2,9 @@
  * Review Hero — Orchestrator
  *
  * Reads the consensus outcome (the findings voter consensus and any second
- * look kept and dropped), filters against suppression rules, deduplicates,
- * and posts a consolidated PR review via the GitHub API.
+ * look kept and dropped), filters against the pull request's earlier
+ * rejections and suppression rules, deduplicates, and posts a consolidated PR
+ * review via the GitHub API.
  *
  * Environment variables:
  *   GITHUB_TOKEN        — GitHub App token for posting reviews
@@ -23,19 +24,20 @@
  *   GLOBAL_SUPPRESSIONS_PATH — Path to global suppressions YAML file (optional)
  *   DIFF_PATH           — The diff the agents reviewed, for the hunks an inline comment may
  *                         span (optional; without it comments sit on a finding's first line)
- *   FINDINGS_URL        — URL to post the round's findings to as JSON (optional; empty posts nothing)
+ *   FINDINGS_URL        — URL to post the round's findings to as JSON, and to read the pull request's
+ *                         earlier rejections from (optional; empty posts and reads nothing)
  *   PER_ISSUE_COMMENTS, SUMMARY_COMMENT — Whether to post the inline review and the summary
  *                         comment: always (default), standalone (unless FINDINGS_URL's receiver
  *                         accepted the findings) or never
  *   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT — The Actions run, named in completion blocks and posted findings
  *   ACTIONS_ID_TOKEN_REQUEST_URL, ACTIONS_ID_TOKEN_REQUEST_TOKEN — Where GitHub Actions
- *                         issues the identity token the findings post carries; set only when the
+ *                         issues the identity token the findings post and rejections read carry; set only when the
  *                         caller granted `id-token: write`
  *   OPENROUTER_API_KEY  — API key for the filtering model (optional)
  */
 
 import { readFileSync } from "node:fs";
-import { deliverFindings, findingsTarget } from "./findings-post.mjs";
+import { deliverFindings, findingsTarget, readRejections } from "./findings-post.mjs";
 import { buildLocalFixPrompt } from "./local-fix-prompt.mjs";
 import {
   findRejectedFindings,
@@ -49,6 +51,7 @@ import {
   groupAllFindings,
   loadSuppressions,
   filterWithSuppressions,
+  filterWithRejections,
   SUMMARY_HEADER,
   buildSummaryHeader,
   buildSummaryTable,
@@ -405,7 +408,37 @@ async function main() {
   }
 
   let findings = consensus.kept;
-  const allDroppedFindings = consensus.dropped;
+  let allDroppedFindings = consensus.dropped;
+
+  // ── Drop what earlier rejections match ────────────────────────────────
+  // Read from the findings URL only when there is something to filter, and
+  // applied above and below consensus alike, so a rejected finding is posted
+  // neither inline nor in the below-threshold list.
+  // spec: REJ
+  let rejectionsRead;
+  let rejectedCount = 0;
+  if (findings.length + allDroppedFindings.length > 0) {
+    const read = await readRejections({ findingsUrl, prNumber });
+    rejectionsRead = read?.status;
+    if (read?.rejections.length > 0 && callModel) {
+      const [above, below] = await Promise.all([
+        filterWithRejections(findings, read.rejections, callModel),
+        filterWithRejections(allDroppedFindings, read.rejections, callModel),
+      ]);
+      findings = above.kept;
+      allDroppedFindings = below.kept;
+      const rejected = [...above.rejected, ...below.rejected];
+      rejectedCount = rejected.length;
+      if (rejectedCount > 0) {
+        console.log(`Dropped ${rejectedCount} finding(s) an earlier rejection matched`);
+        for (const f of rejected) {
+          console.log(`  rejected earlier: ${f.file}:${f.line} — ${f.comment.slice(0, 80)}`);
+        }
+      }
+    } else if (read?.rejections.length > 0) {
+      console.log("::warning::No filtering model key, so earlier rejections are not applied");
+    }
+  }
 
   // ── Apply suppression filter ──────────────────────────────────────────
   const globalSuppressionsPath = process.env.GLOBAL_SUPPRESSIONS_PATH || "";
@@ -457,6 +490,7 @@ async function main() {
     keptGroups,
     droppedGroups,
     suppressedCount,
+    rejectedCount,
     secondLook,
   });
 
@@ -580,22 +614,14 @@ async function main() {
   ];
 
   // Show filtering stats when non-trivial filtering occurred
-  const filterStats = [];
-  const consensusLine = consensusStat(consensus);
-  if (consensusLine) filterStats.push(consensusLine);
-  if (droppedGroups.length > 0) {
-    filterStats.push(`${droppedGroups.length} below threshold`);
-  }
-  // spec: RUN#second-look
-  if (secondLook > 0) {
-    filterStats.push(`${secondLook} confirmed on a second look`);
-  }
-  if (suppressedCount > 0) {
-    filterStats.push(`${suppressedCount} suppressed`);
-  }
-  if (filterStats.length > 0) {
-    summaryParts.push(` | Filtering: ${filterStats.join(", ")}`);
-  }
+  const filtering = filteringLine({
+    consensus,
+    belowThreshold: droppedGroups.length,
+    secondLook,
+    suppressedCount,
+    rejectedCount,
+  });
+  if (filtering) summaryParts.push(` | Filtering: ${filtering}`);
 
   if (keptGroups.length === 0) {
     summaryParts.push("\n\nNo issues found. Looks good!");
@@ -650,7 +676,7 @@ async function main() {
   // hole by forgetting to sanitise its own cells.
   // spec: CMPL#telling-review-heros-own-block-apart
   const body = stripCompletionBlocks(summaryParts.join("")) +
-    `\n\n${completion.block({ ...result, findingsPost })}`;
+    `\n\n${completion.block({ ...result, findingsPost, rejectionsRead })}`;
 
   if (postSummary) {
     await postComment(prNumber, body);
@@ -717,4 +743,21 @@ function consensusStat({ voters, unfiltered = [], kept, dropped }) {
   return `consensus ${voters} voters, not applied for ${unfiltered.length} agent${unfiltered.length === 1 ? "" : "s"}`;
 }
 
-export { parseAgentResult, extractJsonArray, buildSummaryHeader, consensusStat, commentPolicy, shouldPost };
+/**
+ * The summary's filtering figures, joined, or null when no filtering is worth
+ * reporting.
+ */
+function filteringLine({ consensus, belowThreshold, secondLook, suppressedCount, rejectedCount }) {
+  const stats = [];
+  const consensusLine = consensusStat(consensus);
+  if (consensusLine) stats.push(consensusLine);
+  if (belowThreshold > 0) stats.push(`${belowThreshold} below threshold`);
+  // spec: RUN#second-look
+  if (secondLook > 0) stats.push(`${secondLook} confirmed on a second look`);
+  if (suppressedCount > 0) stats.push(`${suppressedCount} suppressed`);
+  // spec: REJ#dropping-a-finding
+  if (rejectedCount > 0) stats.push(`${rejectedCount} rejected earlier`);
+  return stats.length > 0 ? stats.join(", ") : null;
+}
+
+export { parseAgentResult, extractJsonArray, buildSummaryHeader, consensusStat, filteringLine, commentPolicy, shouldPost };

@@ -29,7 +29,7 @@ Triage, the agents, consensus and the second look run in one job. The orchestrat
 1. **Triage** — triggered when a checkbox in the PR body is checked. Asks GLM which agents are relevant, strips ignored files from the diff, and sets the number of voters each agent runs (see [Voter consensus](#voter-consensus)).
 2. **Review agents** — concurrent Claude Code CLI processes pointed at OpenRouter, each with a specialised prompt. The CLI installed is the newest release at least a week old, so a broken or compromised release has time to be caught first. They start while the runner stays under 80% memory use (measured from the processes themselves) and the provider is not rate limiting, up to `concurrency` when set. When there is more than one voter, each agent runs that many times independently for consensus. A voter that crashes is retried once, and one that returns no usable findings is replaced once. Agents have read-only access to the repo so they can explore surrounding code for context, and run with no GitHub token in their environment.
 3. **Consensus and second look** — applies voter consensus per agent (when enabled). Where findings below the majority cluster in a part of the code, fresh checkers take a second look at them (see [Second look](#second-look)).
-4. **Orchestrator** — filters against suppression rules and learned feedback, deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table). It can also post the round's findings as JSON to a URL you name (see [Posting findings as data](#posting-findings-as-data)).
+4. **Orchestrator** — filters against suppression rules, learned feedback and [earlier rejections](#earlier-rejections), deduplicates findings by file and line proximity, resolves stale review threads, then posts inline review comments (critical/suggestion) and a summary comment (with a nitpicks table). It can also post the round's findings as JSON to a URL you name (see [Posting findings as data](#posting-findings-as-data)).
 
 ## Prerequisites (once per owner — user or org)
 
@@ -335,6 +335,12 @@ Only the posting job requests a token, just before the post, with the URL's orig
 
 The post happens after the inline review and before the summary comment (unless you [leave the comments off](#leaving-the-comments-off)), so each finding carries the id of its GitHub review comment, and the completion block's `findingsPost` says how it went. A post that gets no answer or a server error is tried once more, and the token request and the post, with their retries, are bounded to about a minute together. A post that fails never fails the review: it is logged, `findingsPost` says it was not accepted, and the GitHub comments go out as usual. A 307 or 308 redirect within the URL's own origin is followed, and any other redirect is not, so the token only goes to the origin it is addressed to.
 
+### Earlier rejections
+
+A review with a findings URL also reads the pull request's earlier rejections from it: findings the receiver has already decided are wrong, dismissed, or belong to work of their own. Any finding one of them matches is dropped, above or below the consensus threshold, so a round does not raise again what has already been decided. Nothing more needs setting up: the read is a `GET` to the same URL, made by the posting job with an identity token on the same terms as the post, and bounded to about half a minute.
+
+A finding matches a rejection only when it raises the same concern in the same file, judged by the filtering model. A rejection's reason helps that judgement but never matches a finding on its own, and a rejection an agent made never drops a critical. A dropped finding is not posted anywhere or counted in the round's severities; the summary's filtering line says how many were "rejected earlier", and the completion block carries the count as `counts.rejected` and how the read went as `rejectionsRead`. A receiver that does not answer the read costs the review nothing but repeated findings, and the library's `parseRejections(…)` and `filterWithRejections(…)` apply a list of rejections from anywhere. [Receiving findings](docs/receiving-findings.md#earlier-rejections) describes the read for a receiver.
+
 ### Leaving the comments off
 
 If the receiver shows the findings to people itself, the comments Review Hero posts to the pull request can be left off. Two inputs set this, `per-issue-comments` for the inline review and `summary-comment` for the summary comment (which carries the [completion block](#completion-comments), and holds the nitpicks), each with the same values:
@@ -402,7 +408,8 @@ Posted at the end of a review round, or when a review could not complete.
 | `reviewedSha` | The commit that was reviewed |
 | `model` | The model the review agents ran on |
 | `findingsPost` | How [posting the round's findings](#posting-findings-as-data) went: `accepted` (the receiver answered with a 2xx), `refused` (any other answer), `unreachable` (no answer), `no-token` (the run could not get an identity token), `invalid-url` (`findings-url` is not an `https` URL) or `error` (the run failed on its own side before the receiver could answer, such as building the payload). Left out when `findings-url` is empty |
-| `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, `secondLook` (findings below the majority a second look confirmed) |
+| `rejectionsRead` | How [reading earlier rejections](#earlier-rejections) went: `answered` (the receiver answered with a list of rejections), `refused` (any other status, or a redirect that is not followed), `unreachable` (no answer), `no-token`, `invalid-url`, `malformed` (a 200 that is not a list of rejections) or `error` (the run failed on its own side). Left out when the review read none: no `findings-url`, every agent failed, or no findings to filter |
+| `counts` | `agentsCompleted`, `agentsFailed`, `voters`, `critical`, `suggestion`, `nitpick`, `belowThreshold`, `suppressed`, `rejected` (findings an earlier rejection dropped), `secondLook` (findings below the majority a second look confirmed) |
 
 ### `auto-fix`
 
