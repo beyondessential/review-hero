@@ -2,9 +2,9 @@
  * Review Hero — Shared review logic
  *
  * The importable entry point for review-hero's review logic: finding parsing,
- * consensus and cross-agent grouping, suppression filtering, agent discovery,
- * scope filtering, prompt assembly, and summary and completion-comment
- * formatting.
+ * consensus and cross-agent grouping, suppression and earlier-rejection
+ * filtering, agent discovery, scope filtering, prompt assembly, and summary and
+ * completion-comment formatting.
  *
  * This entry point is deliberately dependency-light and free of any GitHub
  * Actions runtime — a consumer wires in its own model caller (see
@@ -34,6 +34,13 @@ export {
   callModelForBatch,
   sanitizeSuppressionField,
 } from "./suppressions.mjs";
+
+export {
+  REJECTIONS_SCHEMA,
+  parseRejections,
+  canMatch,
+  filterWithRejections,
+} from "./rejections.mjs";
 
 export {
   BASE_AGENTS,
