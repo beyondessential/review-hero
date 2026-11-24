@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseAgentResult, buildSummaryHeader, consensusStat, commentPolicy, shouldPost } from "./orchestrate.mjs";
+import { parseAgentResult, buildSummaryHeader, consensusStat, filteringLine, commentPolicy, shouldPost } from "./orchestrate.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "review-hero-parse-"));
 
@@ -229,4 +229,16 @@ test("a standalone comment is posted unless the receiver accepted the findings",
   } finally {
     console.log = log;
   }
+});
+
+// spec: REJ#dropping-a-finding
+test("the filtering line says how many findings earlier rejections dropped, when any", () => {
+  const consensus = { voters: 1, kept: [], dropped: [], unfiltered: [] };
+  const base = { consensus, belowThreshold: 0, secondLook: 0, suppressedCount: 0, rejectedCount: 0 };
+  assert.equal(filteringLine(base), null);
+  assert.equal(filteringLine({ ...base, rejectedCount: 2 }), "2 rejected earlier");
+  assert.equal(
+    filteringLine({ ...base, belowThreshold: 1, suppressedCount: 3, rejectedCount: 1 }),
+    "1 below threshold, 3 suppressed, 1 rejected earlier",
+  );
 });

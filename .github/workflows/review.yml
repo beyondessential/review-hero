@@ -560,8 +560,9 @@ jobs:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           # The diff the agents reviewed, for the hunks an inline comment may span.
           DIFF_PATH: ${{ runner.temp }}/review/pr-filtered.diff
-          # Posted to after the inline review (before it for `per-issue-comments: standalone`), with an identity token this job
-          # requests only when the URL is set and the caller granted `id-token: write`.
+          # Read the pull request's earlier rejections from, and posted to after the inline review (before it for
+          # `per-issue-comments: standalone`), each with an identity token this job requests only when the URL is set
+          # and the caller granted `id-token: write`.
           FINDINGS_URL: ${{ inputs.findings-url }}
           # Which comments to post, given how the findings post went.
           PER_ISSUE_COMMENTS: ${{ inputs.per-issue-comments }}
